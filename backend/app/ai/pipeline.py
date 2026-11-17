@@ -42,7 +42,8 @@ from app.core.tracing import get_trace_id
 from app.retrieval.hybrid import RetrievedClause, retrieve
 from app.retrieval.vector import Embedder, build_embedder
 
-PROMPT_VERSION = "propose_v1"
+# v1: case JSON + clauses. v2 adds a trusted <facts> block (local times with dates); see evals.
+DEFAULT_PROMPT_VERSION = "propose_v2"
 
 
 # ---------------------------------------------------------------------------- prompt
@@ -53,10 +54,52 @@ def _escape_untrusted(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def case_facts(case: CaseContext, policy: PolicySnapshot | None) -> str:
+    """Trusted, deterministic plain-language facts (prompt v2).
+
+    The v1 eval showed the model mishandling dates across midnight (a 22:00-06:00 shift got a
+    same-day 23:37 clock-out). Stating local times with dates removes that arithmetic.
+    """
+
+    def local(ts) -> str:
+        return ts.strftime("%a %Y-%m-%d %H:%M (UTC%z)")
+
+    lines = [f"Work date: {case.work_date.isoformat()} ({case.work_date:%A})"]
+    if case.schedule:
+        lines.append(f"Scheduled shift: {local(case.schedule.start)} to {local(case.schedule.end)}")
+    else:
+        lines.append("Scheduled shift: none")
+    for p in case.punches:
+        lines.append(f"Recorded punch {p.punch_id}: {p.type.value} at {local(p.ts)}")
+    if case.code.value == "MISSING_PUNCH":
+        ins = sum(p.type.value == "in" for p in case.punches)
+        outs = sum(p.type.value == "out" for p in case.punches)
+        if ins > outs:
+            lines.append("Missing punch type: out (clock-out)")
+            if case.schedule:
+                lines.append(f"Scheduled clock-out to infer from: {local(case.schedule.end)}")
+        elif outs > ins:
+            lines.append("Missing punch type: in (clock-in)")
+            if case.schedule:
+                lines.append(f"Scheduled clock-in to infer from: {local(case.schedule.start)}")
+        else:
+            lines.append("Missing punch type: unclear (punches already pair up)")
+    if policy is not None:
+        lines.append(
+            f"Inference window: within {policy.rules.missing_punch_window_min} minutes of the "
+            "scheduled time"
+        )
+    return "\n".join(lines)
+
+
 def build_messages(
-    case: CaseContext, retrieved: list[RetrievedClause], prompts_dir: Path
+    case: CaseContext,
+    retrieved: list[RetrievedClause],
+    prompts_dir: Path,
+    prompt_version: str = DEFAULT_PROMPT_VERSION,
+    policy: PolicySnapshot | None = None,
 ) -> tuple[ChatMessage, ...]:
-    template = (prompts_dir / f"{PROMPT_VERSION}.md").read_text(encoding="utf-8")
+    template = (prompts_dir / f"{prompt_version}.md").read_text(encoding="utf-8")
     allowed = ", ".join(sorted(a.value for a in ALLOWED_ACTIONS[case.code]))
     system = template.format(allowed_actions=allowed)
 
@@ -75,8 +118,11 @@ def build_messages(
         "</untrusted_note>"
         for n in case.notes
     )
+    facts = (
+        f"<facts>\n{case_facts(case, policy)}\n</facts>\n" if prompt_version != "propose_v1" else ""
+    )
     user = (
-        f"<case_json>{json.dumps(case_data, sort_keys=True)}</case_json>\n"
+        facts + f"<case_json>{json.dumps(case_data, sort_keys=True)}</case_json>\n"
         f"<retrieved_clauses_json>{json.dumps(clauses)}</retrieved_clauses_json>\n"
         f"{notes or '<untrusted_note>(no employee note)</untrusted_note>'}\n"
         "Draft the correction or escalate. Reply with the JSON object only."
@@ -144,6 +190,7 @@ class _Run:
         self.prompt_hash: str | None = None
         self.model_id: str | None = None
         self.attempts = 0
+        self.prompt_version = DEFAULT_PROMPT_VERSION
         self.error: str | None = None
 
     def check(self, name: str, passed: bool, detail: str = "") -> bool:
@@ -171,7 +218,7 @@ class _Run:
                 trace_id=get_trace_id(),
                 provider=getattr(self.provider, "name", "unknown"),
                 model_id=self.model_id,
-                prompt_version=PROMPT_VERSION,
+                prompt_version=self.prompt_version,
                 prompt_hash=self.prompt_hash,
                 retrieved_chunk_ids=self.retrieved_ids,
                 raw_outputs=self.raw_outputs,
@@ -194,6 +241,7 @@ def generate_proposal(
 ) -> ProposalResult:
     """Contract function generate_proposal(case_context, policy_snapshot) -> ProposalResult."""
     run = _Run(case, policy, provider)
+    run.prompt_version = settings.prompt_version
 
     # Gate 0: kill-switch. Detection and manual fixes keep working without AI.
     if not run.check("ai_enabled", settings.ai_enabled, "AI kill-switch"):
@@ -216,7 +264,7 @@ def generate_proposal(
         )
 
     # Gate 2: deterministic evidence sufficiency. If a fix cannot be justified, never ask the model.
-    gaps = missing_evidence(case)
+    gaps = missing_evidence(case, policy)
     if not run.check("evidence_sufficient", not gaps, "; ".join(gaps)):
         return run.finish(GateStatus.ESCALATED, gaps)
 
@@ -232,7 +280,9 @@ def generate_proposal(
     clauses_by_id = {r.clause.chunk_id: r.clause for r in retrieved}
 
     # Generation with one repair retry on malformed output.
-    messages = build_messages(case, retrieved, settings.prompts_dir)
+    messages = build_messages(
+        case, retrieved, settings.prompts_dir, settings.prompt_version, policy
+    )
     run.prompt_hash = prompt_hash(messages)
     proposal: LLMProposal | None = None
     # One budget for the whole generation, repair retry included (design target: p95 under 8 s).
@@ -288,6 +338,17 @@ def generate_proposal(
         blocked.append("Proposal refers to a different exception.")
 
     if proposal.decision == "escalate":
+        # An escalation must never show fabricated citations (found in the live eval: an
+        # injected note made the model cite a non-existent clause while escalating).
+        verified = [
+            c
+            for c in proposal.citations
+            if c.chunk_id in clauses_by_id
+            and _quote_is_verbatim(c.quote, clauses_by_id[c.chunk_id].text)
+        ]
+        removed = [c.chunk_id for c in proposal.citations if c not in verified]
+        if not run.check("escalation_citations", not removed, ", ".join(removed)):
+            proposal = proposal.model_copy(update={"citations": verified})
         if blocked:
             return run.finish(GateStatus.BLOCKED, blocked, proposal)
         reasons = proposal.missing_information or ["The AI declined to propose a correction."]

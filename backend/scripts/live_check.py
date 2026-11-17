@@ -3,9 +3,9 @@
 Usage (from backend/):  python scripts/live_check.py --provider ollama [--embeddings ollama]
                         python scripts/live_check.py --provider groq      (GROQ_API_KEY in .env)
 
-This is a smoke check with six synthetic cases, not the evaluation suite (B-05). The validator
-here is a clearly labelled stand-in until Track A's validate_correction (A-02) exists: it only
-checks that an added punch lies inside the policy's missing-punch window around the schedule.
+This is a quick six-case smoke check; the evaluation suite is `python -m evals.run` (B-05).
+The validator is the stand-in from evals/stub_validator.py until Track A's validate_correction
+(A-02) exists.
 """
 
 from __future__ import annotations
@@ -22,44 +22,20 @@ from app.ai.pipeline import generate_proposal  # noqa: E402
 from app.ai.providers import build_provider  # noqa: E402
 from app.core.config import Settings  # noqa: E402
 from app.core.contracts import (  # noqa: E402
-    ActionType,
     CaseContext,
     EmployeeContext,
     EmployeeNote,
     ExceptionCode,
     PunchRecord,
     PunchType,
-    RuleCheck,
     ScheduledShift,
     Severity,
-    ValidationResult,
 )
 from app.policies.registry import PolicyRegistry, resolve_policy  # noqa: E402
+from evals.stub_validator import window_validator as window_stub_validator  # noqa: E402
 
 IST = timezone(timedelta(hours=5, minutes=30))
 CST = timezone(timedelta(hours=-6))
-
-
-def window_stub_validator(case, actions, policy) -> ValidationResult:
-    """STAND-IN for Track A's validator: added punches must fall inside the inference window."""
-    window = timedelta(minutes=policy.rules.missing_punch_window_min)
-    checks = []
-    for action in actions:
-        if action.type == ActionType.ADD_PUNCH and case.schedule and action.new_ts:
-            anchor = (
-                case.schedule.end if action.punch_type == PunchType.OUT else case.schedule.start
-            )
-            ok = abs(action.new_ts - anchor) <= window
-            checks.append(
-                RuleCheck(
-                    code=case.code,
-                    passed=ok,
-                    reason=f"{action.new_ts.isoformat()} vs scheduled {anchor.isoformat()}",
-                )
-            )
-    return ValidationResult(
-        passed=all(c.passed for c in checks), checks=checks, rule_version="stub-window"
-    )
 
 
 def build_case(

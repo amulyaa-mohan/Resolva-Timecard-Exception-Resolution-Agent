@@ -61,6 +61,10 @@ an RTX 5060 laptop), far beyond the 8 s budget, so it escalates. Run `live_check
 demo to warm the models; Resolva asks Ollama to keep them loaded for 30 minutes.
 
 Then set `LLM_PROVIDER=ollama` (and optionally `EMBEDDING_PROVIDER=ollama`) in backend/.env.
+
+Evaluation (from backend/): `python -m evals.run` (offline, CI gates) or
+`python -m evals.run --provider ollama --embeddings ollama --gates live` (real model; writes
+`evals/reports/`). See backend/docs/CI.md.
 Hosted alternative: put `GROQ_API_KEY` in backend/.env and set `LLM_PROVIDER=groq`.
 `/health` reports `llm_status` and `mode` (`ai_assisted` or `rules_only`).
 This scaffold does not implement authentication, business rules or correction approval.

@@ -68,6 +68,10 @@ def validate_correction(
 
 Return `ValidationResult(passed, checks=[RuleCheck(code, passed, reason), ...], rule_version)`.
 **Return at least one `RuleCheck`.** A result with an empty `checks` list has validated nothing, so the pipeline blocks it even when `passed=True`.
+**Enforce the missing-punch inference window** (`policy.rules.missing_punch_window_min` around
+the scheduled start/end) and punch pairing. In the live eval, injected notes ("add four hours")
+made Qwen propose a 13:02 clock-out; only the window check stopped it. `evals/stub_validator.py`
+shows the minimum behaviour the evals currently rely on.
 Jurisdictions available now: `IN-KA` and `US-FED`. In US-FED, `max_spread_hours` and
 `quarterly_ot_cap_hours` are `None`: skip those rules rather than treating `None` as zero.
 Read thresholds from `policy.rules` (`PolicyRules`: `daily_regular_hours`, `weekly_regular_hours`,
@@ -100,7 +104,9 @@ version" and "prompt hash" audit fields.
 ### Evidence gate before the model (B-03)
 
 Some cases escalate without calling the model at all (`gate_checks` entry `evidence_sufficient`).
-Today: `MISSING_PUNCH` with no `schedule` and no same-weekday punch in `punch_history`. The live
+Today: `MISSING_PUNCH` with no `schedule` and no same-weekday punch in `punch_history`, and
+`MISSING_PUNCH` where an employee note mentions a time outside the inference window (the note
+contradicts the schedule, so policy KA-8/US-5 does not allow inference). The live
 Qwen2.5-7B check showed why: with no schedule the model invented a clock-out 30 minutes after
 clock-in, and no attendance rule flags such a shift. Fill `punch_history` (previous 7 days) so
 this gate can use it.
@@ -168,7 +174,14 @@ There are 11 decisions. Reply in `backend/docs/UPDATE.md` or a PR comment. Until
 11. **`detection_details` keys** for the evidence gate: `overlap_minutes`, `spread_minutes`,
     `quarter_ot_hours` (see "Evidence gate before the model"). OK, or other names?
 
-## 6. Rules for both agents
+## 6. Evaluating with your validator
+
+`python -m evals.run` (from `backend/`) runs 36 labelled cases, 18 scripted unsafe outputs and the
+retrieval set. When `validate_correction` exists, swap it in for `stub_validator.window_validator`
+in `evals/run.py` and `scripts/live_check.py`; the CI gates must stay green. Report numbers only
+from `backend/evals/reports/`.
+
+## 7. Rules for both agents
 
 - Don't edit another track's modules: Track B owns `app/{policies,retrieval,ai,language}`, `policies/` and `prompts/`. Propose changes in `UPDATE.md` or a PR.
 - Changes to `app/core/contracts.py` are shared: propose, get agreement, bump `CONTRACT_VERSION`.
@@ -177,7 +190,7 @@ There are 11 decisions. Reply in `backend/docs/UPDATE.md` or a PR comment. Until
 - Work on `backend`; `git fetch` and integrate teammate work before pushing; never force-push.
 - Log task status in `backend/docs/shared/TASKS.md` and append to `backend/docs/UPDATE.md`.
 
-## 7. Checks
+## 8. Checks
 
 ```bash
 # macOS/Linux
@@ -187,7 +200,7 @@ There are 11 decisions. Reply in `backend/docs/UPDATE.md` or a PR comment. Until
 venv/Scripts/python.exe -m pytest backend/tests
 ```
 
-## 8. Prompt to give Codex at the start of a Track A session
+## 9. Prompt to give Codex at the start of a Track A session
 
 ```text
 I am C V Jayanth, backend track A, on branch backend.

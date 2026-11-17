@@ -15,3 +15,20 @@ Backend OpenAPI will be the HTTP contract once reviewed endpoints exist.
 Frontend types should be generated from that contract; database revisions must match agreed backend models.
 Interface proposals in TEAM_RULES.md remain proposals until owners explicitly agree.
 Review does not happen automatically because an agent wrote a document.
+
+## Frontend alignment notes (2026-11-17, Track B)
+
+Read-only comparison of `origin/frontend:frontend/src/types/contracts.ts` (FE-01/FE-02) with the
+backend draft `backend/app/core/contracts.py`. The frontend types are UI view models for an HTTP
+API that does not exist yet, so these are items to settle when Track A defines the routes and the
+OpenAPI-generated types replace hand-written ones:
+
+- `ProposedAction` has no `punch_type`; the backend requires it for `add_punch` (clock-in vs clock-out).
+- `evidence_version` is a `number` in the frontend and an opaque `string` hash in the backend.
+- The frontend has `validator_passed: boolean`; the pipeline returns `status`
+  (`eligible`/`blocked`/`escalated`), `reasons`, and per-gate `gate_checks`, which is what the
+  validator checklist and escalation views need.
+- `RuleOutcome {rule, passed, detail}` vs backend `RuleCheck {code, passed, reason}`.
+- `PolicyPack` is flat; the backend `PolicySnapshot` nests `rules` and adds `status`, effective dates,
+  `missing_punch_window_min` and `content_hash`.
+- `Punch.source` lacks `import`; ids are `id` in the frontend vs `punch_id` / `shift_id` in the backend.

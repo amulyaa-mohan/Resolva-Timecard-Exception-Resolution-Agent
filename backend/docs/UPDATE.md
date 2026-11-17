@@ -143,3 +143,18 @@ Never include credentials, private employee data, or invented test results.
 - Dependencies/blockers: unchanged (A-02 validator; SHARED-01 decisions).
 - Next step: B-05 evaluation suite and CI.
 - Publication: committed and pushed to `backend` with this entry.
+
+### 2026-11-17 — Amulya Mohan — B-05 — Evaluation harness, CI, and pipeline fixes found by evaluation
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed:
+  - Evaluation (`backend/evals/`): case format and builders (`schema.py`); 36 labelled MISSING_PUNCH cases (12 clear incl. overnight shifts, 8 ambiguous, 8 adversarial incl. Hindi/Kannada injections, 8 jurisdiction-flip); 12 retrieval cases; 18 scripted unsafe model outputs (`safety_cases.py`) each mapped to the gate that must stop it; `run.py` producing Markdown + JSON reports with git commit, model, prompt and validator, and `ci`/`live` gate profiles; stand-in window validator (`stub_validator.py`, replaced when A-02 lands).
+  - CI: `.github/workflows/ci.yml` (backend lint, format, pytest, offline eval gates with summary + artifact; frontend typecheck + build). `backend/docs/CI.md` documents it.
+  - Pipeline fixes found by evaluation: pre-model gate now also escalates when an employee note mentions a time outside the inference window (policy forbids inference when evidence contradicts the schedule; parses 24 h, dotted and am/pm times, ignores dates/decimals); escalations now strip citations that are not verbatim retrieved clauses (live Qwen escalated while citing an invented KA-99); prompt `propose_v2` adds a trusted `<facts>` block with local dates (live Qwen v1 put overnight clock-outs on the wrong day); `PROMPT_VERSION` setting (default v2).
+  - Docs: CONTRACTS.md frontend alignment notes (read-only comparison with `origin/frontend` types); TRACK_B_INTEGRATION.md (validator must enforce the inference window; evaluating with the real validator); LOCAL_DEVELOPMENT, eval READMEs, `.env.example`, CLAUDE.md.
+- Contracts: none changed. New Track A expectation: `validate_correction` enforces the missing-punch inference window and punch pairing.
+- Validation (actually run): clean venv from `requirements-dev.lock`; ruff check and format clean; `pytest`: 119 passed; `python -m evals.run --gates ci` (mock): all six gates pass, 18/18 safety cases stopped by their expected gate. Preview live runs on Qwen2.5-7B before the last two fixes: v1 proposal accuracy 83%, v2 100%, all live gates passing; final reports are regenerated from the committed code in the next commit. Frontend: `tsc --noEmit` passes locally; the Vite build could not run on this Windows machine (Application Control blocked Rollup's native binary), so the CI frontend job is its first full build.
+- Dependencies/blockers: real validator (A-02); `detection_details` keys (SHARED-01 decision 11).
+- Next step: commit live reports; B-04.
+- Publication: committed and pushed to `backend`; CI result checked on GitHub.

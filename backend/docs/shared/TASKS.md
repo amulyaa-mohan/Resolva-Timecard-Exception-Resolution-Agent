@@ -23,7 +23,7 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 | A-05 | CSV/JSON import preview and deduplication | Jayanth | TODO | A-04 | Equivalent inputs produce equivalent records and rule outcomes |
 | B-04 | Multilingual intents and AI fallback | Amulya | TODO | B-03 | English/Kannada/Hindi intent parity; rules-only path verified |
 | A-06 | Bulk decisions and attendance event updates | Jayanth | TODO | A-05 | Per-item eligibility, permission, and duplicate-decision checks |
-| B-05 | CI and reproducible AI evaluation | Amulya | TODO | B-04 | CI runs shared tests and reports measured safety/retrieval outcomes |
+| B-05 | CI and reproducible AI evaluation | Amulya | REVIEW | B-04 (done first; eval needs no language work) | CI runs lint, tests, offline eval gates and frontend build; live Qwen reports in backend/evals/reports (prompt v1 vs v2) |
 | SHARED-03 | Final integration, startup verification, README | Both | TODO | A-06, B-05 | Fresh setup and full workflow verified; real results documented |
 
 ## Decisions pending
@@ -35,4 +35,4 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 
 ## Current next step
 
-Jayanth reviews the SHARED-01 draft (TRACK_B_INTEGRATION.md section 5, 11 decisions) and builds A-01/A-02 against it; Amulya starts B-04/B-05.
+Jayanth reviews the SHARED-01 draft (TRACK_B_INTEGRATION.md section 5, 11 decisions) and builds A-01/A-02 against it; Amulya starts B-04. When A-02 lands, swap the stand-in validator in evals.

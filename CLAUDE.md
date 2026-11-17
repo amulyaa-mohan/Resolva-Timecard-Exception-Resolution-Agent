@@ -44,29 +44,29 @@ cd backend && docker compose up --build                                    # nee
 The local virtualenv is `venv/` (Jayanth's docs use `.venv/`; both are git-ignored).
 Settings are unprefixed env vars or `backend/.env` (`AI_ENABLED`, `LLM_PROVIDER`, `CONFIDENCE_THRESHOLD`, ...).
 
-## Current state (2026-11-17, after B-03)
+## Current state (2026-11-17, after B-05)
 
-- Branch `backend` (on top of `main` 68ede72). B-01/B-02 in 3874367; B-03 in the following commit.
+- Branch `backend` (on top of `main` 68ede72). B-01/B-02 in 3874367, B-03 in ef619b6, B-05 after that.
 - SHARED-01: draft contracts `0.1.0-draft`, awaiting Jayanth's review (11 decisions in
-  TRACK_B_INTEGRATION.md section 5). Track A's validator must return at least one `RuleCheck`.
-- B-01, B-02, B-03 in REVIEW. Pipeline order: kill-switch -> policy applicable -> pre-model evidence gate
-  (`app/ai/evidence.py`) -> hybrid retrieval -> model (hard 8 s budget, 1 repair retry) -> schema ->
-  exception id -> allowed actions -> citations retrieved + verbatim (>= 5 words) -> validator (non-empty)
-  -> missing info -> confidence.
-- Providers: mock (default), Ollama `qwen2.5:7b-instruct`, Groq `llama-3.1-8b-instant` (Groq tested only
-  with mocked HTTP). Retrieval: BM25 + embeddings with RRF (ADR-006); hashing embedder by default,
-  `nomic-embed-text` via Ollama optional. Packs: IN-KA@2025.1, IN-KA@2025.2-proposed (never resolved), US-FED@2025.1.
-- Tests: 91 passing. Live Ollama smoke check (`backend/scripts/live_check.py`): 6/6 after the evidence-gate
-  fix, warm latency 2-5 s; cold model load 30-60 s, so warm up before demos.
-- Local Ollama runs in Docker: `cd backend && docker compose -f docker-compose.yml -f docker-compose.gpu.yml
-  --profile ollama up -d ollama` (models persist in the `ollama-models` volume).
+  TRACK_B_INTEGRATION.md section 5). His validator must return at least one `RuleCheck` and enforce the
+  missing-punch inference window. Frontend type mismatches are listed in backend/docs/shared/CONTRACTS.md.
+- B-01, B-02, B-03, B-05 in REVIEW; B-04 (multilingual intents) is next.
+- Pipeline order: kill-switch -> policy applicable -> pre-model evidence gate (`app/ai/evidence.py`: no
+  schedule/history, or a note time conflicting with the schedule) -> hybrid retrieval -> model (8 s budget,
+  1 repair retry) -> schema -> exception id -> escalation citations stripped if unverified -> allowed
+  actions -> citations retrieved + verbatim -> validator (non-empty) -> missing info -> confidence.
+- Prompts: `propose_v2` (default; adds a trusted `<facts>` block with local dates) and `propose_v1`.
+- Evals: `cd backend && python -m evals.run` (36 labelled cases, 18 scripted unsafe outputs, 12 retrieval
+  cases). CI (`.github/workflows/ci.yml`) runs lint, format, pytest, eval gates, frontend build.
+  Live reports in `backend/evals/reports/` (Qwen2.5-7B, v1 vs v2). Validator in evals is a stand-in.
+- Tests: 119 passing. Local Ollama in Docker: `cd backend && docker compose -f docker-compose.yml
+  -f docker-compose.gpu.yml --profile ollama up -d ollama` (models persist in the `ollama-models` volume).
 
 ## Next up
 
-1. B-05: labelled eval cases in `backend/evals/` (clear / ambiguous / adversarial / jurisdiction-flip),
-   `evals/run.py` reporting real numbers, GitHub Actions CI with an eval gate.
-2. B-04: English/Kannada/Hindi intents with parity tests.
-3. When Track A lands A-02: replace stub validators in live_check/evals with `validate_correction`.
+1. B-04: English/Kannada/Hindi intents with parity tests (add parity cases to the eval).
+2. When Track A lands A-02: swap `validate_correction` into evals and live_check; re-run live evals.
+3. SHARED-02 with Jayanth: first end-to-end missing-punch flow through his routes.
 
 ## Working agreements for Claude
 
