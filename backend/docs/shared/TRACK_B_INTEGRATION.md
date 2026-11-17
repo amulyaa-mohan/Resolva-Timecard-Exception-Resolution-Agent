@@ -27,6 +27,8 @@ All paths are relative to the repository root. Everything listed was run and tes
 | `backend/tests/factories.py` | `make_case()`, `passing_validator`, `failing_validator` test builders | Shared |
 | `backend/Dockerfile`, `backend/docker-compose*.yml` | Backend container; optional `ollama` profile and GPU override | B |
 | `backend/scripts/live_check.py` | Six-case smoke check against a real model | B |
+| `backend/app/language/` | `POST /assistant/query`: en/hi/kn request -> `Intent` + `ExceptionQuery` filters (read-only) | B |
+| `backend/evals/` | `python -m evals.run`: proposal, safety, retrieval and language evaluations | B |
 
 Running API today: `GET /health` (now also reports `ai_enabled`, `llm_status`, `mode`) and `/docs`.
 No exception, proposal, decision or audit endpoints exist yet; those depend on Track A.
@@ -114,6 +116,15 @@ this gate can use it.
 The design doc's other "always escalate" cases need agreed `detection_details` keys. Proposed:
 `overlap_minutes` (OVERLAPPING_SHIFT; escalate above 120), `spread_minutes` (SPREAD_OVER_BREACH),
 `quarter_ot_hours` (OVERTIME_RISK). Confirm or rename them as part of SHARED-01 decision 11.
+
+### Multilingual requests (B-04)
+
+`POST /assistant/query {"text": "ಇಂದಿನ ತಪ್ಪಿದ ಪಂಚ್‌ಗಳನ್ನು ತೋರಿಸಿ"}` returns `language`, `intent`,
+`query` (an `ExceptionQuery`: `exception_type`, `severity`, `status`, `date_range`, `employee_id`,
+`exception_id`) and a localized `message`. Your exception list endpoint should accept those
+filters; `app.language.assistant.resolve_dates()` turns `date_range` into dates (pay periods are a
+half-month placeholder until you define the real calendar). `render(result, count=n)` gives the
+localized count reply once you return results. The route never approves or edits anything.
 
 ## 3. Wiring example (for your resolution module)
 

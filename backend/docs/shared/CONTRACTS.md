@@ -32,3 +32,10 @@ OpenAPI-generated types replace hand-written ones:
 - `PolicyPack` is flat; the backend `PolicySnapshot` nests `rules` and adds `status`, effective dates,
   `missing_punch_window_min` and `content_hash`.
 - `Punch.source` lacks `import`; ids are `id` in the frontend vs `punch_id` / `shift_id` in the backend.
+
+## Assistant endpoint (B-04, Track B)
+
+`POST /assistant/query` with `{"text": string (1-500 chars)}` returns `{language: "en"|"hi"|"kn",
+method: "rules"|"llm"|"none", intent: Intent, query: ExceptionQuery | null, message: string,
+model_id: string | null}`. See `backend/app/language/`. The frontend can call it now; results come
+from Track A's exception list once it accepts the `ExceptionQuery` filters.

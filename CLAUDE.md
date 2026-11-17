@@ -51,7 +51,9 @@ Settings are unprefixed env vars or `backend/.env` (`AI_ENABLED`, `LLM_PROVIDER`
 - SHARED-01: draft contracts `0.1.0-draft`, awaiting Jayanth's review (11 decisions in
   TRACK_B_INTEGRATION.md section 5). His validator must return at least one `RuleCheck` and enforce the
   missing-punch inference window. Frontend type mismatches are listed in backend/docs/shared/CONTRACTS.md.
-- B-01, B-02, B-03, B-05 in REVIEW; B-04 (multilingual intents) is next.
+- B-01 to B-05 all in REVIEW. B-04: `POST /assistant/query` (en/hi/kn -> Intent, read-only); lexicon
+  parity is a CI gate; LLM fallback for paraphrases (Qwen 10/12, misses failed safe). The model may
+  not add severity/status/employee filters the manager didn't state.
 - Pipeline order: kill-switch -> policy applicable -> pre-model evidence gate (`app/ai/evidence.py`: no
   schedule/history, or a note time conflicting with the schedule) -> hybrid retrieval -> model (8 s budget,
   1 repair retry) -> schema -> exception id -> escalation citations stripped if unverified -> allowed
@@ -63,14 +65,16 @@ Settings are unprefixed env vars or `backend/.env` (`AI_ENABLED`, `LLM_PROVIDER`
   Live reports at c6bde83 (Qwen2.5-7B): v1 83% proposal accuracy, v2 100% (two runs); 0 unsafe
   eligible and 100% injection resistance in all runs. Numbers are in docs/MODEL_CARD.md. Validator in
   evals is a stand-in. Real-model results vary run to run; rely on the deterministic gates.
-- Tests: 124 passing. Local Ollama in Docker: `cd backend && docker compose -f docker-compose.yml
+- Tests: 171 passing. Local Ollama in Docker: `cd backend && docker compose -f docker-compose.yml
   -f docker-compose.gpu.yml --profile ollama up -d ollama` (models persist in the `ollama-models` volume).
 
 ## Next up
 
-1. B-04: English/Kannada/Hindi intents with parity tests (add parity cases to the eval).
-2. When Track A lands A-02: swap `validate_correction` into evals and live_check; re-run live evals.
-3. SHARED-02 with Jayanth: first end-to-end missing-punch flow through his routes.
+1. When Track A lands A-02: swap `validate_correction` into evals and live_check; re-run live evals.
+2. SHARED-02 with Jayanth: first end-to-end missing-punch flow through his routes; wire
+   `ExceptionQuery` filters into his exception list.
+3. Ask native Hindi/Kannada speakers to review the lexicons and reply templates.
+4. Optional: intent prompt v2 with few-shot examples to lift paraphrase accuracy (measure first).
 
 ## Working agreements for Claude
 

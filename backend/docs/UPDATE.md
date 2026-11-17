@@ -180,3 +180,33 @@ Never include credentials, private employee data, or invented test results.
 - Validation: the three runs above; CI for c6bde83 passed on GitHub (backend and frontend jobs, actions v7, no Node 20 deprecation warnings).
 - Next step: B-04.
 - Publication: committed and pushed to `backend`.
+
+### 2026-11-17 — Amulya Mohan — B-04 — Multilingual intents and AI fallback
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed:
+  - `backend/app/language/`: `Intent` schema (LIST/COUNT/SHOW/EXPLAIN or UNSUPPORTED with a reason), script-based language detection, en/hi/kn lexicon parser with a confidence flag, LLM fallback (`prompts/intent_v1.md`; JSON mode; schema-validated; ids must appear verbatim in the request; timeouts and bad output fall back), fixed localized reply templates that keep ids/codes canonical, `ExceptionQuery` filters for Track A, `resolve_dates()`; `POST /assistant/query` (CORS now allows POST).
+  - Read-only by design: approve/reject/edit/delete/add requests are refused in every language.
+  - Evals: `evals/language_cases.json` (13 commands x 3 languages), `evals/language_paraphrases.json` (4 x 3, LLM-only), `evals/language_eval.py`; new CI and live gates `language_parity` and `language_write_refusal`; Markdown report section.
+  - Fix during development: a parse built only from a date ("anyone who didn't punch out today?" -> "today") is no longer treated as confident, so it no longer hides the request's meaning from the LLM.
+- Contracts: new HTTP endpoint documented in CONTRACTS.md; shared `contracts.py` unchanged.
+- Validation (actually run): ruff clean; `pytest`: 159 passed; `python -m evals.run` (mock) passes all 8 CI gates, lexicon parity 100% and write refusal 100% with AI off. Live Qwen2.5-7B paraphrase check: 10/12 correct (en 4/4, hi 3/4, kn 3/4); both misses were invalid model outputs (an EXPLAIN without an id; a COUNT with a stray reason) rejected by the schema, falling back to a partial parse or "not understood".
+- Dependencies/blockers: Track A's exception list must accept `ExceptionQuery` filters to return results; native-speaker review of Hindi/Kannada lexicons and templates.
+- Next step: live eval report including the language section; SHARED-02 once A-02/A-03 land.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-17 — Amulya Mohan — B-04 — Verification pass
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed (defects found and fixed):
+  - Hindi "कल" (yesterday) matched inside "निकल" (left) and "सकल" (total); Indic phrases now start on a word boundary, and words of three characters or fewer must also end on one (suffixes like पंचों and ಪಂಚ್‌ಗಳನ್ನು still match).
+  - Ids embedded in other tokens were picked up ("TIME-OFF" became employee E-OFF; "TAX-2026" opened exception X-2026); ids must now not follow a letter, digit or dash.
+  - "last week" was silently dropped; LAST_WEEK is now supported in all three languages, the intent prompt and `resolve_dates`.
+  - Live Qwen added filters nobody asked for ("Who skipped lunch?" -> severity=problem, status=open); severity, status and employee_id now come only from the deterministic parse, and dropped extras are recorded in `IntentResult.dropped_filters`.
+  - One test passed for the wrong reason (the lexicon answered, so the model path was never exercised); rewritten to assert the real behaviour.
+- Validation (actually run): clean venv from `requirements-dev.lock`; ruff check and format clean; `pytest`: 171 passed; `python -m evals.run` (mock) passes all 8 CI gates; 15/15 adversarial probes (word boundaries, embedded ids, write refusal with ZWNJ noise, mixed scripts, romanised Hindi, NFD input, injection via the request, tag breakout, 5000-char and blank input). Live HTTP: rules-only server 42/42 lexicon requests correct with 14/14 parity; Qwen-backed server 42/42 lexicon (no model calls) and 10/12 paraphrases in two consecutive runs (same two misses, both invalid model outputs rejected by the schema, failing safe); paraphrase latency p50 3.6-4.1 s, max 7.2 s. In-process parse 0.2 ms; HTTP with keep-alive 2.5 ms. On Windows, `localhost` adds about 2 s per request (IPv6 fallback); documented to use 127.0.0.1.
+- Dependencies/blockers: unchanged.
+- Next step: commit and push when authorised; then a live eval report including the language section.
+- Publication: committed and pushed to `backend` (authorised by the owner).

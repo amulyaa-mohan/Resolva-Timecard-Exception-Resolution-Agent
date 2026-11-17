@@ -10,6 +10,7 @@ from app.core.config import Settings
 from app.core.contracts import CONTRACT_VERSION
 from app.core.errors import install_error_handlers
 from app.core.tracing import TRACE_HEADER, new_trace_id, set_trace_id
+from app.language.router import router as assistant_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -23,11 +24,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[origin.strip() for origin in settings.cors_origins.split(",")],
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST"],
         allow_headers=["*"],
         expose_headers=[TRACE_HEADER],
     )
     install_error_handlers(app)
+    app.include_router(assistant_router)
 
     @app.middleware("http")
     async def trace_middleware(request: Request, call_next) -> Response:

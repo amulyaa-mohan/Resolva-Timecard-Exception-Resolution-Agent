@@ -60,6 +60,9 @@ The first request after Ollama starts loads the model into memory and takes 30-6
 an RTX 5060 laptop), far beyond the 8 s budget, so it escalates. Run `live_check.py` once before a
 demo to warm the models; Resolva asks Ollama to keep them loaded for 30 minutes.
 
+On Windows, call the API at `http://127.0.0.1:8000` rather than `localhost`: resolving `localhost`
+tries IPv6 first and adds about 2 s to every request from Python/HTTP clients.
+
 Then set `LLM_PROVIDER=ollama` (and optionally `EMBEDDING_PROVIDER=ollama`) in backend/.env.
 
 Evaluation (from backend/): `python -m evals.run` (offline, CI gates) or
