@@ -19,7 +19,7 @@ backend/
   .env.example     Backend configuration template
 ```
 
-Root contains README.md, the AGENTS.md discovery pointer, and .gitignore.
+Root contains README.md, the AGENTS.md discovery pointer, CLAUDE.md (Claude Code context; imports AGENTS.md), and .gitignore.
 GitHub Actions workflows, when implemented, must use GitHub's required root `.github/workflows/` location.
 The former placeholder is now backend/docs/CI.md; there is no active CI workflow yet.
-Business modules remain scaffolds. See LOCAL_DEVELOPMENT.md for working startup instructions.
+Track B policy/retrieval/AI modules are implemented (see TRACK_B_INTEGRATION.md); Track A modules remain scaffolds. See LOCAL_DEVELOPMENT.md for working startup instructions.

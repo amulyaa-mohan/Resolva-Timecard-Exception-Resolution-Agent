@@ -33,6 +33,7 @@ An update log is coordination, not a lock or a real-time notification service. A
 ## Backend implementation boundaries
 
 - Read backend/docs/TASKS.md for track A/B ownership. Use `backend` for backend implementation.
+- Before building against policy, retrieval, provider or proposal code, or `backend/app/core/contracts.py`, read backend/docs/shared/TRACK_B_INTEGRATION.md. It lists what Track B already provides and what Track A must supply.
 - Preserve FastAPI/Pydantic contracts and module boundaries; agree SHARED-01 before adding domain APIs.
 - Track A owns attendance, rules, resolution and audit; track B owns policy, retrieval, providers and language.
 - Coordinate schema/migration changes with backend/database/docs/AGENTS.md. The database team owns migration ordering; track A is the backend liaison.

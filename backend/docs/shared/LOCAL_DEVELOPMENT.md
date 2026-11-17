@@ -32,6 +32,16 @@ Vite proxies `/api` to the local backend. Stop both processes with Ctrl+C.
 npm --prefix frontend run build
 ```
 
-Only the health endpoint and connection page are implemented. No database or AI provider is required yet.
-Database migrations, domain contracts, providers, Docker and CI remain assigned work.
+Only the health endpoint and connection page are exposed over HTTP. No database or model is required:
+the default `LLM_PROVIDER=mock` runs offline. Set `AI_ENABLED=false` in backend/.env for rules-only mode.
+Database migrations, domain routes, real model providers (B-03) and CI (B-05) remain assigned work.
+
+Windows (Git Bash): use `python -m venv venv` and `venv/Scripts/python.exe` in place of `.venv/bin/python`.
+
+Backend container (needs Docker Desktop running):
+
+```bash
+cd backend
+docker compose up --build
+```
 This scaffold does not implement authentication, business rules or correction approval.

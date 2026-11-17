@@ -1,6 +1,7 @@
 # Cross-team contract coordination
 
-Status: proposed interfaces only; SHARED-01 is not yet agreed.
+Status: SHARED-01 draft `0.1.0-draft` exists in `backend/app/core/contracts.py` (proposed by Track B; not yet agreed).
+Open decisions and how Track A plugs in: `backend/docs/shared/TRACK_B_INTEGRATION.md`.
 Actual running API: GET /health. Do not infer other routes from planning documents.
 
 Before implementing a shared boundary, record:

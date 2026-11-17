@@ -2,4 +2,4 @@
 
 Track B: clause ingestion, metadata filtering and keyword/vector retrieval.
 
-Scaffold only. Agree contracts in SHARED-01 before implementing business behavior.
+Implemented (B-02): keyword retrieval restricted to the applicable pack and version. Hybrid vector search arrives in B-03.

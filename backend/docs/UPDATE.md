@@ -98,3 +98,20 @@ Never include credentials, private employee data, or invented test results.
 - History: earlier update entries retain their original paths as historical records.
 - Next step: teammates bring the main reorganization into their working branches before new work.
 - Publication: user authorized direct commit and push to main; team branches are not changed by this operation.
+
+### 2026-11-17 — Amulya Mohan — SHARED-01 / B-01 / B-02 — Contracts draft, AI pipeline, verification, integration docs
+
+- Branch: `backend`, rebased onto `main` 68ede72 (two-folder layout) before committing.
+- Status: REVIEW.
+- Changed:
+  - Draft SHARED-01 contracts `0.1.0-draft` in `backend/app/core/contracts.py`; RFC 7807 errors (`core/errors.py`) and `X-Trace-Id` propagation (`core/tracing.py`), proposed as shared infrastructure.
+  - B-01: AI settings and kill-switch merged into the scaffold `Settings` (unprefixed env vars, `backend/.env`); `/health` keeps the scaffold fields and adds `contract_version`, `ai_enabled`, `llm_provider`, `llm_status`, `mode`; provider interface and offline `MockProvider`; `backend/Dockerfile` and `backend/docker-compose.yml`.
+  - B-02: IN-KA@2025.1 policy pack (YAML rules + 10-clause handbook), registry and `resolve_policy`, version-filtered keyword retrieval, `prompts/propose_v1.md`, and `generate_proposal` gates: schema with 1 repair retry, exception match, allowed actions, citation membership, verbatim quote of at least 5 words, validator (a crash blocks), missing information, confidence.
+  - Verification fixes: trivial or empty citation quotes no longer pass; trace raw output is capped at 20,000 chars; one Markdown code fence around JSON is accepted.
+  - Touched scaffold files: `main.py`, `config.py`, `pyproject.toml`, `.env.example` merged (CORS and env location kept); `tests/test_health.py` now asserts the three scaffold fields instead of exact equality; `requirements-dev.lock` marks `uvloop` as non-Windows (it failed to install on Windows); root `.gitignore` adds `venv/`; ruff config added (E501 not selected; the formatter owns line length).
+  - Docs: `CLAUDE.md` at the root (imports AGENTS.md); `backend/docs/shared/TRACK_B_INTEGRATION.md` (Codex-ready guide for Track A); pointer added in `backend/docs/AGENTS.md`; STRUCTURE, CONTRACTS, LOCAL_DEVELOPMENT, module READMEs and task trackers updated.
+- Contracts: draft only. Differences from the design doc: escalations need no citations; `ProposedAction.punch_type`; `CaseContext.evidence_version` owned by Track A; `ProposalResult.status` is eligible/blocked/escalated. Ten open decisions are listed in TRACK_B_INTEGRATION.md section 5.
+- Validation (actually run, Windows): clean venv install from `requirements-dev.lock` + `-e backend[dev]` succeeded after the uvloop marker; `pytest backend/tests`: 43 passed; `ruff check backend` and `ruff format --check backend` passed; 20 adversarial pipeline probes passed; live uvicorn `/health`, `/docs`, `/openapi.json` OK, 404/405 return problem+json, unsafe trace headers are replaced; `AI_ENABLED=false` gives `rules_only`; `docker compose up --build` gives a healthy container that loads IN-KA@2025.1 and the prompt. Frontend build not run (no frontend changes). Mock results do not measure model quality.
+- Dependencies/blockers: real `validate_correction` (A-02) and `build_case_context` (A-01/A-02); SHARED-01 agreement.
+- Next step: Jayanth reviews the contracts; Amulya starts B-03 (Ollama/Groq, hybrid retrieval, US-FED and IN-KA@2025.2-proposed packs).
+- Publication: committed locally on `backend`; not pushed.
