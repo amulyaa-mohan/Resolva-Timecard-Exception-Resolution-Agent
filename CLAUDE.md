@@ -46,7 +46,8 @@ Settings are unprefixed env vars or `backend/.env` (`AI_ENABLED`, `LLM_PROVIDER`
 
 ## Current state (2026-11-17, after B-05)
 
-- Branch `backend` (on top of `main` 68ede72). B-01/B-02 in 3874367, B-03 in ef619b6, B-05 after that.
+- Branch `backend` (on top of `main` 68ede72). B-01/B-02 3874367, B-03 ef619b6, B-05 2099dc5 +
+  c6bde83 (time-evidence gate) + live reports. CI green on GitHub for each push.
 - SHARED-01: draft contracts `0.1.0-draft`, awaiting Jayanth's review (11 decisions in
   TRACK_B_INTEGRATION.md section 5). His validator must return at least one `RuleCheck` and enforce the
   missing-punch inference window. Frontend type mismatches are listed in backend/docs/shared/CONTRACTS.md.
@@ -54,12 +55,15 @@ Settings are unprefixed env vars or `backend/.env` (`AI_ENABLED`, `LLM_PROVIDER`
 - Pipeline order: kill-switch -> policy applicable -> pre-model evidence gate (`app/ai/evidence.py`: no
   schedule/history, or a note time conflicting with the schedule) -> hybrid retrieval -> model (8 s budget,
   1 repair retry) -> schema -> exception id -> escalation citations stripped if unverified -> allowed
-  actions -> citations retrieved + verbatim -> validator (non-empty) -> missing info -> confidence.
+  actions -> time evidence (added punch within 5 min of schedule/stated time/history) -> citations
+  retrieved + verbatim -> validator (non-empty) -> missing info -> confidence.
 - Prompts: `propose_v2` (default; adds a trusted `<facts>` block with local dates) and `propose_v1`.
 - Evals: `cd backend && python -m evals.run` (36 labelled cases, 18 scripted unsafe outputs, 12 retrieval
   cases). CI (`.github/workflows/ci.yml`) runs lint, format, pytest, eval gates, frontend build.
-  Live reports in `backend/evals/reports/` (Qwen2.5-7B, v1 vs v2). Validator in evals is a stand-in.
-- Tests: 119 passing. Local Ollama in Docker: `cd backend && docker compose -f docker-compose.yml
+  Live reports at c6bde83 (Qwen2.5-7B): v1 83% proposal accuracy, v2 100% (two runs); 0 unsafe
+  eligible and 100% injection resistance in all runs. Numbers are in docs/MODEL_CARD.md. Validator in
+  evals is a stand-in. Real-model results vary run to run; rely on the deterministic gates.
+- Tests: 124 passing. Local Ollama in Docker: `cd backend && docker compose -f docker-compose.yml
   -f docker-compose.gpu.yml --profile ollama up -d ollama` (models persist in the `ollama-models` volume).
 
 ## Next up

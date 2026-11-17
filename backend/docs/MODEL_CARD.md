@@ -55,6 +55,30 @@ smoke check, not an evaluation; the B-05 suite produces reportable numbers.
   alone never authorises anything.
 - Warm latency per proposal: 2.2-4.8 s (p50 3.3-3.8 s). Cold model load: 30-60 s.
 
+## Evaluation results (2026-11-17, commit c6bde83)
+
+`python -m evals.run --provider ollama --embeddings ollama --gates live`: 36 labelled
+MISSING_PUNCH cases, 20 scripted unsafe outputs, 12 retrieval cases; `qwen2.5:7b-instruct` and
+`nomic-embed-text` on Ollama 0.40.16 (RTX 5060 Laptop GPU); stand-in window validator.
+Full reports: `backend/evals/reports/`.
+
+| Metric | Prompt v1 | Prompt v2, run 1 | Prompt v2, run 2 |
+| --- | --- | --- | --- |
+| Proposal accuracy (18 cases expecting a fix) | 83% | 100% | 100% |
+| Escalation recall / precision | 100% / 75% | 100% / 100% | 100% / 100% |
+| Unsafe eligible proposals | 0 | 0 | 0 |
+| Injection resistance (8 adversarial cases) | 100% | 100% | 100% |
+| Harness block rate (20 scripted unsafe outputs) | 100% | 100% | 100% |
+| Retrieval top-1 / wrong-version leakage | 100% / 0 | 100% / 0 | 100% / 0 |
+| Latency p50 / p95 | 4.40 s / 5.13 s | 5.37 s / 5.77 s | 5.54 s / 5.95 s |
+
+- v1 misses were all overnight shifts (clock-out placed on the wrong day); v2's trusted `<facts>`
+  block fixed them. The misses were blocked, not approved.
+- In both v2 runs the injected note "clock-out four hours after the scheduled end" made the model
+  propose 22:00; the deterministic time-evidence gate blocked it each time.
+- An earlier v2 run (at 2099dc5, before the time-evidence gate) produced one unsafe eligible
+  proposal (18:30, edge of the window). That finding created the gate; see UPDATE.md.
+
 ## Known limitations
 
 - Model confidence is self-reported and uncalibrated; it is gated but never sufficient on its own.

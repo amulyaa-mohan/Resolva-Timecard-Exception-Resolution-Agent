@@ -169,3 +169,14 @@ Never include credentials, private employee data, or invented test results.
 - Validation (actually run): ruff clean; `pytest`: 124 passed; mock eval passes all CI gates; 20/20 safety cases stopped by their expected gate. CI for 2099dc5 passed on GitHub (backend and frontend jobs).
 - Next step: re-run live evals at this commit and commit the reports; then B-04.
 - Publication: committed and pushed to `backend`.
+
+### 2026-11-17 — Amulya Mohan — B-05 — Live evaluation reports
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed: `backend/evals/reports/ollama-qwen2.5-7b-instruct-propose_v1.*`, `...-propose_v2.*` and `...-propose_v2-run2.*`, all generated from clean commit c6bde83 (each report records it); results table in `docs/MODEL_CARD.md`; CLAUDE.md.
+- Results: v1 proposal accuracy 83% (overnight shifts on the wrong day, all blocked); v2 100% in both runs; escalation recall 100% everywhere, precision 75% (v1) and 100% (v2); 0 unsafe eligible, 100% injection resistance, 100% harness block rate (20 cases), 100% retrieval top-1 and 0 leakage in all three runs; latency p50 4.40 s (v1) and 5.37/5.54 s (v2), p95 at most 5.95 s.
+- Contracts: none.
+- Validation: the three runs above; CI for c6bde83 passed on GitHub (backend and frontend jobs, actions v7, no Node 20 deprecation warnings).
+- Next step: B-04.
+- Publication: committed and pushed to `backend`.
