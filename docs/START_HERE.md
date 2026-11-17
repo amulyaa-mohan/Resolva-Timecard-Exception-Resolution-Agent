@@ -24,17 +24,20 @@ These files instruct agents to maintain updates; they are not a background synch
 For a new local clone:
 
 ```bash
-git clone --branch cv-jayanth https://github.com/amulyaa-mohan/Resolva-Timecard-Exception-Resolution-Agent.git
+git clone --branch main https://github.com/amulyaa-mohan/Resolva-Timecard-Exception-Resolution-Agent.git
 cd Resolva-Timecard-Exception-Resolution-Agent
 ```
 
-The teammate should then create their own branch from this shared starting point:
+Select your team's branch after cloning:
 
 ```bash
-git switch -c YOUR-NAME-backend
+git switch backend
+# Frontend contributors: git switch frontend
+# Database contributors: git switch database
 ```
 
-Replace YOUR-NAME before running. Configure your own author name and verified GitHub email locally:
+Each shared branch tracks its corresponding remote branch. Fetch before work and reconcile teammates' changes before pushing.
+Configure your own author name and verified GitHub email locally:
 
 ```bash
 git config --local user.name "YOUR NAME"
@@ -51,13 +54,13 @@ git status --short --branch
 git branch -r
 ```
 
-To inspect Jayanth's published updates without merging:
+To inspect a team's published updates without merging:
 
 ```bash
-git show origin/cv-jayanth:UPDATE.md
-git show origin/cv-jayanth:docs/TASKS.md
+git show origin/backend:UPDATE.md
+git show origin/backend:docs/TASKS.md
 ```
 
-Use the equivalent remote branch for the teammate after it is published.
+Use `origin/frontend`, `origin/database`, or `origin/main` to inspect the other branches.
 Merge reviewed coordination and implementation changes through the agreed integration branch.
 A local UPDATE.md edit is not visible on another machine until published and fetched.

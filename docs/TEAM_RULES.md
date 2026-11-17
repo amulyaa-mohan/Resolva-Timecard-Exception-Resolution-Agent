@@ -46,10 +46,17 @@ An escalation must be representable without fabricated citations or actions.
 ## Branches and reviews
 
 Use the existing repository; do not create a second repository for coordination.
-Jayanth works on `cv-jayanth`. The teammate creates a separate named branch using their own Git identity.
-Choose the shared integration branch together before the first implementation merge; do not assume `main` exists.
-Publish work to personal branches and review small PRs into the agreed integration branch.
-Fetch before starting a session and inspect teammate updates. Fetching does not merge their changes.
+`main` is the shared integration branch. Merge reviewed changes into it.
+`backend` is shared by the two backend developers; `frontend` is shared by frontend developers.
+`database` is for database schemas, migrations, and database-related changes, coordinated by track A.
+Database contributors agree schema contracts with backend developers before implementation.
+Use your own Git author identity on every branch; branch names do not determine attribution.
+Before pushing to a shared branch, fetch and integrate teammates' published work without overwriting it.
+If a push is rejected, reconcile changes and rerun relevant checks; never force-push to bypass it.
+Use task ownership to avoid simultaneous edits. Optional personal feature branches may target the relevant team branch.
+Open reviewed PRs from team branches into `main`; do not automatically merge.
+GitHub default-branch migration is pending repository-owner action because the current account lacks admin access.
+`cv-jayanth` remains temporarily as the existing default branch until the owner changes it to `main`.
 Never force-push shared history or overwrite a teammate's changes.
 For conflicts in UPDATE.md, preserve both entries. Reconcile conflicting task statuses explicitly.
 Documentation updates become shared only after commit/push and integration or direct branch inspection.

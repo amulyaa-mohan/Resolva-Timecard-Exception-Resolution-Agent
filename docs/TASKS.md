@@ -6,7 +6,7 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 
 | ID | Task | Owner | Status | Depends on | Acceptance / next step |
 | --- | --- | --- | --- | --- | --- |
-| COORD-01 | Shared instructions and tracker | Jayanth | REVIEW | — | Teammate reads rules, records name, and agrees integration branch |
+| COORD-01 | Shared instructions and tracker | Jayanth | REVIEW | — | Teammates read rules and record task ownership |
 | SHARED-01 | Freeze initial API/data contracts | Both | TODO | COORD-01 | Agree typed inputs, outputs, errors, and evidence versions |
 | A-01 | DB foundation, synthetic seed, role dependencies | Jayanth | TODO | SHARED-01 | Reproducible employee/shift/punch fixture and server-side permission checks |
 | B-01 | App configuration, mock provider, development packaging | Teammate | TODO | SHARED-01 | Backend starts; mock provider runs offline; startup documented |
@@ -24,8 +24,8 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 
 ## Decisions pending
 
-- Teammate's name and personal branch.
-- Shared integration branch and review process.
+- Teammate names and task ownership within the shared team branches.
+- Repository owner sets `main` as GitHub default; then retire `cv-jayanth`.
 - Final schemas, policy fixtures, and action-specific validation semantics.
 - Model provider for the first live demonstration.
 

@@ -92,7 +92,7 @@ Corrections are appended as new records rather than overwriting original punches
 ```bash
 git clone https://github.com/amulyaa-mohan/Resolva-Timecard-Exception-Resolution-Agent.git
 cd Resolva-Timecard-Exception-Resolution-Agent
-git switch cv-jayanth
+git switch main
 ```
 
 ### 2. Configure the Application
