@@ -1,7 +1,7 @@
 # Database tasks
 
 Claim an owner before starting. Statuses: TODO, IN PROGRESS, BLOCKED, REVIEW, DONE.
-Shared dependencies refer to docs/TASKS.md; do not duplicate their status here.
+Shared dependencies refer to backend/docs/shared/TASKS.md; do not duplicate their status here.
 
 | ID | Task | Owner | Status | Depends on | Acceptance |
 | --- | --- | --- | --- | --- | --- |

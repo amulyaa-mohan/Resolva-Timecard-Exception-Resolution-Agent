@@ -6,7 +6,7 @@ Run from the repository root. Backend uses port 8000 and frontend uses 5173.
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -r backend/requirements-dev.lock -e './backend[dev]'
-cp .env.example .env
+cp backend/.env.example backend/.env
 npm --prefix frontend ci --cache ./work/npm-cache
 ```
 

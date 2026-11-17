@@ -4,8 +4,8 @@ Give your coding agent this prompt at the beginning of a session:
 
 ```text
 We are building Resolva with frontend, backend and database teams.
-Read root AGENTS.md and route to my area's docs/AGENTS.md, TASKS.md and UPDATE.md.
-Read docs/TEAM_RULES.md, docs/TASKS.md and docs/CONTRACTS.md.
+Read root AGENTS.md and route to my area's AGENTS.md, TASKS.md and UPDATE.md using the routing table.
+Read backend/docs/shared/TEAM_RULES.md, backend/docs/shared/TASKS.md and backend/docs/shared/CONTRACTS.md.
 I am [NAME], working in [frontend/backend/database], on [BRANCH].
 For backend I own track [A/B]. Verify my Git identity and existing local changes.
 Fetch published team updates if available. Claim an available task with ready dependencies.
@@ -58,7 +58,7 @@ To inspect a team's published updates without merging:
 
 ```bash
 git show origin/backend:backend/docs/UPDATE.md
-git show origin/backend:docs/TASKS.md
+git show origin/backend:backend/docs/shared/TASKS.md
 ```
 
 Use `origin/frontend`, `origin/database`, or `origin/main` to inspect the other branches.

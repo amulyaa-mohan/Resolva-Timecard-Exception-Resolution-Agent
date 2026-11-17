@@ -1,12 +1,12 @@
 # Database implementation rules
 
-Own `database/schema`, `database/migrations`, and `database/seeds`; use the database team branch.
-Coordinate with backend track A on persistence and with track B on policies/proposals.
+Own `backend/database/schema`, `backend/database/migrations`, and `backend/database/seeds`; use the database team branch.
+Coordinate with backend track A on persistence and with track B on backend/policies/proposals.
 
 ## Session protocol
 
 All paths are relative to the repository root.
-Read `docs/TEAM_RULES.md`, `docs/TASKS.md`, this area's TASKS.md and latest UPDATE.md entries before work.
+Read `backend/docs/shared/TEAM_RULES.md`, `backend/docs/shared/TASKS.md`, this area's TASKS.md and latest UPDATE.md entries before work.
 Check branch, Git identity and existing changes; preserve other developers' work.
 Fetch published progress when available. Claim an unowned task before implementation; record owner and status.
 If identity or ownership is unknown, ask instead of assuming another contributor's identity.
@@ -45,5 +45,5 @@ Logs do not synchronize automatically: another developer must fetch published ch
 
 Verify fresh migration, upgrade from the previous schema, foreign-key enforcement, seed rerun and duplicate constraints where applicable.
 Test correction/audit atomicity and raw-punch preservation when those models exist.
-Record commands, schema revision, compatibility changes, and rollback limitations in database/docs/UPDATE.md.
+Record commands, schema revision, compatibility changes, and rollback limitations in backend/database/docs/UPDATE.md.
 No migration runner exists in the current scaffold; agree tooling first and document actual commands after implementation.

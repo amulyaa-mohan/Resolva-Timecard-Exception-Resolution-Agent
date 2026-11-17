@@ -10,7 +10,7 @@ The repository now includes a runnable health/API and frontend scaffold; busines
 
 | Track | Developer | Owns |
 | --- | --- | --- |
-| A — Attendance and resolution | C V Jayanth | Attendance models, imports, six rules, validator, decisions, corrections, audit, database/migrations, authorization dependencies |
+| A — Attendance and resolution | C V Jayanth | Attendance models, imports, six rules, validator, decisions, corrections, audit, backend/database/migrations, authorization dependencies |
 | B — Policy and AI | Teammate; name to be recorded | Policy registry, retrieval, providers, proposal pipeline, evidence gates, language intents, application configuration, Docker, CI |
 | Shared | Both developers | API contracts, core interfaces, integration tests, architectural decisions |
 
@@ -48,7 +48,7 @@ An escalation must be representable without fabricated citations or actions.
 Use the existing repository; do not create a second repository for coordination.
 `main` is the shared integration branch. Merge reviewed changes into it.
 `backend` is shared by the two backend developers; `frontend` is shared by frontend developers.
-`database` is for database schemas, migrations, and database-related changes, coordinated by track A.
+`backend/database` is for database schemas, migrations, and database-related changes, coordinated by track A.
 Database contributors agree schema contracts with backend developers before implementation.
 Use your own Git author identity on every branch; branch names do not determine attribution.
 Before pushing to a shared branch, fetch and integrate teammates' published work without overwriting it.
@@ -72,8 +72,8 @@ Documentation updates become shared only after commit/push and integration or di
 
 - Frontend: frontend/docs/AGENTS.md, BUILD_PLAN.md, TASKS.md and UPDATE.md.
 - Backend: backend/docs/AGENTS.md, TASKS.md and UPDATE.md.
-- Database: database/docs/AGENTS.md, TASKS.md and UPDATE.md.
-- Shared contracts: docs/CONTRACTS.md; shared milestones: docs/TASKS.md.
+- Database: backend/database/docs/AGENTS.md, TASKS.md and UPDATE.md.
+- Shared contracts: backend/docs/shared/CONTRACTS.md; shared milestones: backend/docs/shared/TASKS.md.
 
 Frontend owns UI and client integration; database owns schema/migrations/seeds in coordination with backend.
 No team should implement another team's missing functionality by silently crossing ownership boundaries.

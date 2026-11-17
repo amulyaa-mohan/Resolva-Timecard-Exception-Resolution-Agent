@@ -81,15 +81,15 @@ Corrections are appended as new records rather than overwriting original punches
 The runnable scaffold includes a FastAPI health endpoint and a React connection page.
 Business workflows, database migrations, and model providers are still to be implemented.
 
-See [Local development](docs/LOCAL_DEVELOPMENT.md) for setup, startup, URLs, and checks.
-See [Repository structure](docs/STRUCTURE.md) for module boundaries and team ownership.
+See [Local development](backend/docs/shared/LOCAL_DEVELOPMENT.md) for setup, startup, URLs, and checks.
+See [Repository structure](backend/docs/shared/STRUCTURE.md) for module boundaries and team ownership.
 
 Quick setup (Python 3.11+, Node.js 22+):
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -r backend/requirements-dev.lock -e './backend[dev]'
-cp .env.example .env
+cp backend/.env.example backend/.env
 npm --prefix frontend ci --cache ./work/npm-cache
 ```
 
