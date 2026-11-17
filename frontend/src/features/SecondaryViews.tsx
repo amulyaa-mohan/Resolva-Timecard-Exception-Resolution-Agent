@@ -250,7 +250,7 @@ EMP-AUS-09,Hannah Brooks,11/17/2026,08:00,17:00,Austin (AUS-01)`;
 export function ImportPreviewView({ onImportValid }: { onImportValid: (items: ExceptionItem[]) => void }) {
   const [csvInput, setCsvInput] = useState(SAMPLE_CSV);
   const [rows, setRows] = useState<import('../types/contracts').ImportRow[]>(() =>
-    import('../lib/api').then ? [] : []
+    []
   );
 
   // Lazy parse on render/button click

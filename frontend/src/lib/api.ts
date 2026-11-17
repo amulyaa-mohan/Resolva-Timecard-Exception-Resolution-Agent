@@ -1,5 +1,5 @@
 ﻿import { AuditEvent, ExceptionItem, ImportRow, PolicyPack, Role, RuleOutcome } from '../types/contracts';
-import { INITIAL_AUDIT_EVENTS, INITIAL_EXCEPTIONS, POLICY_PACKS } from './fixtures';
+import { INITIAL_AUDIT_EVENTS, INITIAL_EXCEPTIONS, INITIAL_POLICY_PACKS } from './fixtures';
 
 export interface BackendHealth {
   connected: boolean;
@@ -33,7 +33,7 @@ export function loadInitialData(): {
   return {
     exceptions: INITIAL_EXCEPTIONS,
     auditEvents: INITIAL_AUDIT_EVENTS,
-    policies: POLICY_PACKS,
+    policies: INITIAL_POLICY_PACKS,
   };
 }
 

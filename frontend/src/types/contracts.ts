@@ -9,7 +9,7 @@ export interface PunchEvent {
   employee_id: string;
   ts: string;
   type: 'in' | 'out' | 'break_start' | 'break_end';
-  source: 'kiosk' | 'mobile' | 'badge';
+  source: 'kiosk' | 'mobile' | 'badge' | 'web';
   device_id: string;
 }
 
@@ -30,7 +30,7 @@ export interface HoursSummary {
 }
 
 export interface ProposedAction {
-  type: 'add_punch' | 'edit_punch' | 'waive_warning' | 'escalate';
+  type: 'add_punch' | 'edit_punch' | 'waive_warning' | 'escalate' | 'flag_premium' | 'suggest_schedule_swap';
   target_punch_id?: string;
   new_ts?: string;
   note: string;
@@ -115,10 +115,11 @@ export interface PolicyPack {
   daily_regular_hours: number;
   weekly_regular_hours: number;
   overtime_rate: number;
-  quarterly_ot_cap?: number;
+  quarterly_ot_cap?: number | null;
   rest_minutes: number;
   rest_after_hours: number;
-  max_spread_hours?: number;
+  max_spread_hours?: number | null;
+  late_tolerance_min?: number;
 }
 
 export interface ImportRow {
