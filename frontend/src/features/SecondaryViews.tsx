@@ -240,3 +240,131 @@ export function PolicySettingsView({
     </div>
   );
 }
+
+const SAMPLE_CSV = `employee_id,employee_name,work_date,in_time,out_time,location
+EMP-BLR-11,Nandini Rao,2026-11-17,09:00,,Bengaluru (BLR-01)
+EMP-BLR-12,Karthik Hegde,2026-11-17,09:15,18:10,Bengaluru (BLR-02)
+,Unknown Worker,2026-11-17,09:00,18:00,Bengaluru (BLR-01)
+EMP-AUS-09,Hannah Brooks,11/17/2026,08:00,17:00,Austin (AUS-01)`;
+
+export function ImportPreviewView({ onImportValid }: { onImportValid: (items: ExceptionItem[]) => void }) {
+  const [csvInput, setCsvInput] = useState(SAMPLE_CSV);
+  const [rows, setRows] = useState<import('../types/contracts').ImportRow[]>(() =>
+    import('../lib/api').then ? [] : []
+  );
+
+  // Lazy parse on render/button click
+  const parsedRows = rows.length > 0 ? rows : (() => {
+    const lines = csvInput.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length <= 1) return [];
+    return lines.slice(1).map((line, idx) => {
+      const [employee_id = '', employee_name = '', work_date = '', in_time = '', out_time = '', location = ''] = line.split(',').map((c) => c.trim());
+      const row_num = idx + 2;
+      if (!employee_id || !employee_name) return { row_num, employee_id, employee_name, work_date, in_time, out_time, location, valid: false, error: 'Missing employee_id or employee_name.' };
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(work_date)) return { row_num, employee_id, employee_name, work_date, in_time, out_time, location, valid: false, error: 'Invalid work_date (expected YYYY-MM-DD).' };
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(in_time)) return { row_num, employee_id, employee_name, work_date, in_time, out_time, location, valid: false, error: 'Invalid in_time (expected HH:MM).' };
+      return { row_num, employee_id, employee_name, work_date, in_time, out_time, location: location || 'Bengaluru (BLR-01)', valid: true };
+    });
+  })();
+
+  const validMissingPunches = parsedRows.filter((r) => r.valid && !r.out_time);
+
+  const handleImport = () => {
+    const created: ExceptionItem[] = validMissingPunches.map((r, i) => ({
+      id: `EXC-${210 + i}`,
+      code: 'MISSING_PUNCH',
+      severity: 'problem',
+      employee_id: r.employee_id,
+      employee_name: r.employee_name,
+      job: 'Associate',
+      location: r.location,
+      timezone: r.location.includes('Austin') ? 'CST (UTC-06:00)' : 'IST (UTC+05:30)',
+      policy_pack_id: r.location.includes('Austin') ? 'US-FED+CA@2025.1' : 'IN-KA@2025.1',
+      work_date: r.work_date,
+      status: 'proposed',
+      evidence_version: 1,
+      summary: `Imported shift ${r.in_time} missing out-punch.`,
+      punches: [
+        { id: `PNC-IMP-${i}`, employee_id: r.employee_id, ts: `${r.work_date}T${r.in_time}:00+05:30`, type: 'in', source: 'badge', device_id: 'CSV-IMPORT' },
+      ],
+      before_hours: { regular_hours: '0.00 h', overtime_hours: '0.00 h', pay_status: 'Blocked (missing out-punch)' },
+      after_hours: { regular_hours: '8.00 h', overtime_hours: '0.00 h', pay_status: 'Payable (Regular)' },
+      proposal: {
+        id: `PRP-IMP-${i}`,
+        exception_id: `EXC-${210 + i}`,
+        decision: 'propose',
+        actions: [{ type: 'add_punch', new_ts: `${r.work_date}T18:00:00+05:30`, note: 'Inferred scheduled end 18:00.' }],
+        rationale: 'Imported CSV shift had unpaired clock-in; proposed scheduled end timestamp.',
+        citations: [{ chunk_id: 'IN-KA@2025.1#sec-4.2', quote: 'Missing out-punches may be inferred within ±30 minutes of scheduled shift end.' }],
+        confidence: 0.89,
+        missing_information: [],
+        model_id: 'qwen2.5-7b-instruct',
+        prompt_hash: 'sha256:9f82c1a4',
+        evidence_version: 1,
+        validator_passed: true,
+        rule_outcomes: [{ rule: 'MISSING_PUNCH', passed: true, detail: 'Paired with 18:00 out-punch.' }],
+      },
+    }));
+    onImportValid(created);
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="panel-card" style={{ padding: 18 }}>
+        <h2 style={{ marginTop: 0 }}>Schedule & Punch Import Preview (FE-04)</h2>
+        <p className="muted small">
+          Validates CSV/JSON rows before ingestion. Invalid rows are flagged and blocked; valid unpaired rows route to the Exception Inbox.
+        </p>
+        <textarea
+          className="input-field mono"
+          rows={6}
+          style={{ width: '100%' }}
+          value={csvInput}
+          onChange={(e) => {
+            setCsvInput(e.target.value);
+            setRows([]);
+          }}
+        />
+        <div className="button-row" style={{ marginTop: 12 }}>
+          <button type="button" className="btn-primary" disabled={validMissingPunches.length === 0} onClick={handleImport}>
+            Import Valid Exception Rows to Inbox ({validMissingPunches.length})
+          </button>
+        </div>
+      </div>
+
+      <div className="panel-card">
+        <div className="toolbar">
+          <strong>Row-Level Validation Preview ({parsedRows.filter((r) => r.valid).length} Valid / {parsedRows.filter((r) => !r.valid).length} Invalid)</strong>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Row</th>
+                <th>Status</th>
+                <th>Employee</th>
+                <th>Work Date & Punches</th>
+                <th>Validation Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {parsedRows.map((r) => (
+                <tr key={r.row_num}>
+                  <td className="mono small">#{r.row_num}</td>
+                  <td>
+                    <span className={r.valid ? 'badge-pass' : 'badge-escalated'}>
+                      {r.valid ? 'VALID' : 'INVALID ROW'}
+                    </span>
+                  </td>
+                  <td className="small"><strong>{r.employee_name || '—'}</strong> ({r.employee_id || 'missing'})</td>
+                  <td className="mono small">{r.work_date} | {r.in_time} → {r.out_time || 'MISSING'}</td>
+                  <td className="small">{r.valid ? 'Ready for ingestion' : <span style={{ color: '#dc2626' }}>{r.error}</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -8,6 +8,8 @@ interface ResolutionPanelProps {
   role: Role;
   aiEnabled: boolean;
   onClose: () => void;
+  onSimulateStale: (itemId: string) => void;
+  onRepropose: (itemId: string) => void;
   onDecide: (
     item: ExceptionItem,
     decision: 'approved' | 'edited' | 'rejected',
@@ -20,6 +22,8 @@ export function ResolutionPanel({
   role,
   aiEnabled,
   onClose,
+  onSimulateStale,
+  onRepropose,
   onDecide,
 }: ResolutionPanelProps) {
   const [mode, setMode] = useState<'review' | 'edit' | 'reject'>('review');
@@ -36,6 +40,25 @@ export function ResolutionPanel({
     setEditedTime(proposedTs ? proposedTs.slice(11, 16) : '18:00');
   }, [item?.id]);
 
+  // Keyboard shortcuts inside panel: E (Edit), R (Reject), Esc (Cancel/Close)
+  useEffect(() => {
+    if (!item) return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (e.key === 'Escape') {
+        if (mode !== 'review') setMode('review');
+        else onClose();
+        return;
+      }
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      const canEdit = (role === 'manager' || role === 'admin') && item.status !== 'resolved' && mode === 'review';
+      if (e.key.toLowerCase() === 'e' && canEdit) setMode('edit');
+      if (e.key.toLowerCase() === 'r' && canEdit) setMode('reject');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [item, role, mode, onClose]);
+
   if (!item) {
     return (
       <aside className="resolution-panel empty-panel" aria-label="Exception detail">
@@ -49,12 +72,8 @@ export function ResolutionPanel({
 
   const canDecide = role === 'manager' || role === 'admin';
   const proposal = aiEnabled ? item.proposal : undefined;
-  const editCheck =
-    mode === 'edit' ? previewManualEditValidation(item, editedTime) : null;
-  const activeRuleOutcomes =
-    mode === 'edit' && editCheck
-      ? editCheck.outcomes
-      : proposal?.rule_outcomes ?? [];
+  const editCheck = mode === 'edit' ? previewManualEditValidation(item, editedTime) : null;
+  const activeRuleOutcomes = mode === 'edit' && editCheck ? editCheck.outcomes : proposal?.rule_outcomes ?? [];
 
   const handleSubmit = (
     decision: 'approved' | 'edited' | 'rejected',
@@ -68,7 +87,6 @@ export function ResolutionPanel({
 
   return (
     <aside className="resolution-panel" aria-label={`Resolution details for ${item.id}`}>
-      {/* Header */}
       <div className="panel-header">
         <div>
           <div className="panel-badges">
@@ -77,28 +95,47 @@ export function ResolutionPanel({
             </span>
             <span className="mono badge-neutral">{item.code}</span>
             <span className="mono badge-neutral">{item.policy_pack_id}</span>
+            <span className="mono badge-neutral">v{item.evidence_version}</span>
           </div>
           <h2>
-            {item.employee_name}{' '}
-            <span className="mono muted">({item.employee_id})</span>
+            {item.employee_name} <span className="mono muted">({item.employee_id})</span>
           </h2>
           <p className="muted small">
             {item.job} • {item.location} • Work Date: <span className="mono">{item.work_date}</span> ({item.timezone})
           </p>
         </div>
-        <button type="button" className="btn-ghost" onClick={onClose} aria-label="Close panel">
-          ✕
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {item.status !== 'resolved' && !item.stale_warning && (
+            <button
+              type="button"
+              className="btn-secondary small"
+              title="Simulate a new punch arriving while viewing this proposal"
+              onClick={() => onSimulateStale(item.id)}
+            >
+              Simulate Stale (409)
+            </button>
+          )}
+          <button type="button" className="btn-ghost" onClick={onClose} aria-label="Close panel (Esc)">
+            ✕
+          </button>
+        </div>
       </div>
 
-      {/* Role authorization warning */}
-      {!canDecide && (
-        <div className="banner banner-warn" role="alert">
-          <strong>Read-only role ({role}):</strong> Only an authorized <code>manager</code> can approve, edit, or reject timecard corrections. Switch role in the top header to decide.
+      {item.stale_warning && (
+        <div className="banner banner-error" role="alert">
+          <strong>Stale Proposal Blocked (HTTP 409):</strong> Underlying punch evidence updated to v{item.evidence_version + 1} after this AI draft was generated. Approval is blocked until re-proposed.{' '}
+          <button type="button" className="btn-primary" style={{ marginLeft: 8, padding: '4px 10px' }} onClick={() => onRepropose(item.id)}>
+            Re-Propose on Latest Evidence
+          </button>
         </div>
       )}
 
-      {/* Already resolved state */}
+      {!canDecide && (
+        <div className="banner banner-warn" role="alert">
+          <strong>Access Denied for Edits ({role}):</strong> Only an authorized <code>manager</code> can approve, edit, or reject timecard corrections.
+        </div>
+      )}
+
       {item.status === 'resolved' && item.resolution && (
         <div className="banner banner-success">
           <strong>Resolved ({item.resolution.decision.toUpperCase()})</strong> by {item.resolution.decided_by} • Trace{' '}
@@ -107,7 +144,6 @@ export function ResolutionPanel({
         </div>
       )}
 
-      {/* Observed Evidence Section */}
       <PunchTimeline item={item} editedTimeHHMM={mode === 'edit' ? editedTime : null} />
 
       <div className="card-block">
@@ -127,7 +163,6 @@ export function ResolutionPanel({
         )}
       </div>
 
-      {/* Before / After Hours Diff */}
       <div className="diff-grid">
         <div className="diff-box">
           <span className="section-label">Before Correction</span>
@@ -137,19 +172,12 @@ export function ResolutionPanel({
         </div>
         <div className="diff-box diff-after">
           <span className="section-label">After Proposed Fix</span>
-          <div className="mono">
-            Regular: {item.after_hours?.regular_hours ?? item.before_hours.regular_hours}
-          </div>
-          <div className="mono">
-            Overtime: {item.after_hours?.overtime_hours ?? item.before_hours.overtime_hours}
-          </div>
-          <div className="small">
-            {item.after_hours?.pay_status ?? 'Manual manager resolution required'}
-          </div>
+          <div className="mono">Regular: {item.after_hours?.regular_hours ?? item.before_hours.regular_hours}</div>
+          <div className="mono">Overtime: {item.after_hours?.overtime_hours ?? item.before_hours.overtime_hours}</div>
+          <div className="small">{item.after_hours?.pay_status ?? 'Manual manager resolution required'}</div>
         </div>
       </div>
 
-      {/* AI Proposal Card (Strictly Violet Labeled) */}
       {!aiEnabled ? (
         <div className="banner banner-warn">
           <strong>AI Kill-Switch Active (Rules-Only Mode):</strong> AI proposal generation is disabled. Deterministic detection and manual manager resolution remain active.
@@ -162,9 +190,7 @@ export function ResolutionPanel({
               Confidence: <strong>{Math.round(proposal.confidence * 100)}%</strong> • Model: {proposal.model_id} • Prompt: {proposal.prompt_hash}
             </span>
           </div>
-
           <p className="ai-rationale">{proposal.rationale}</p>
-
           {proposal.actions.length > 0 && (
             <div className="proposed-actions">
               <span className="section-label">Proposed Action</span>
@@ -177,7 +203,6 @@ export function ResolutionPanel({
               ))}
             </div>
           )}
-
           {proposal.missing_information.length > 0 && (
             <div className="escalation-box">
               <strong>Escalated — Missing Information:</strong>
@@ -188,8 +213,6 @@ export function ResolutionPanel({
               </ul>
             </div>
           )}
-
-          {/* Policy Citations */}
           <div className="citations-block">
             <span className="section-label">Grounded Policy Citations ({proposal.citations.length})</span>
             {proposal.citations.map((c) => (
@@ -202,7 +225,6 @@ export function ResolutionPanel({
         </div>
       ) : null}
 
-      {/* Deterministic Validator Checklist */}
       {activeRuleOutcomes.length > 0 && (
         <div className="card-block">
           <div className="section-label">
@@ -220,61 +242,35 @@ export function ResolutionPanel({
         </div>
       )}
 
-      {/* Interactive Edit Mode */}
       {mode === 'edit' && (
         <div className="edit-box">
           <div className="section-label">Manual Manager Correction (Live Validator Re-Check)</div>
           <label className="field-label">
             Corrected Out-Punch Time ({item.timezone}):
-            <input
-              type="time"
-              value={editedTime}
-              onChange={(e) => setEditedTime(e.target.value)}
-              className="input-field mono"
-            />
+            <input type="time" value={editedTime} onChange={(e) => setEditedTime(e.target.value)} className="input-field mono" />
           </label>
           <label className="field-label">
             Audit Note (optional):
-            <input
-              type="text"
-              placeholder="e.g., Confirmed exit timestamp with security log"
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              className="input-field"
-            />
+            <input type="text" placeholder="e.g., Confirmed exit timestamp with security log" value={comment} onChange={(e) => setComment(e.target.value)} className="input-field" />
           </label>
           {editCheck && !editCheck.valid && (
-            <div className="banner banner-error" role="alert">
-              {editCheck.error}
-            </div>
+            <div className="banner banner-error" role="alert">{editCheck.error}</div>
           )}
           <div className="button-row">
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={!canDecide || !editCheck?.valid || submitting}
-              onClick={() => handleSubmit('edited', { editedTime, comment })}
-            >
+            <button type="button" className="btn-primary" disabled={!canDecide || !editCheck?.valid || submitting} onClick={() => handleSubmit('edited', { editedTime, comment })}>
               Save & Re-Validate Edit
             </button>
-            <button type="button" className="btn-secondary" onClick={() => setMode('review')}>
-              Cancel
-            </button>
+            <button type="button" className="btn-secondary" onClick={() => setMode('review')}>Cancel (Esc)</button>
           </div>
         </div>
       )}
 
-      {/* Interactive Reject Mode */}
       {mode === 'reject' && (
         <div className="edit-box">
           <div className="section-label">Reject Proposal (Reason Code Required)</div>
           <label className="field-label">
             Reason Code:
-            <select
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              className="input-field"
-            >
+            <select value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} className="input-field">
               <option value="INSUFFICIENT_EVIDENCE">INSUFFICIENT_EVIDENCE — Needs employee confirmation</option>
               <option value="POLICY_MISMATCH">POLICY_MISMATCH — Incorrect pay/break treatment</option>
               <option value="UNAUTHORIZED_OT">UNAUTHORIZED_OT — Overtime not pre-approved</option>
@@ -283,60 +279,31 @@ export function ResolutionPanel({
           </label>
           <label className="field-label">
             Manager Comment:
-            <input
-              type="text"
-              placeholder="Explain why proposal is rejected..."
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              className="input-field"
-            />
+            <input type="text" placeholder="Explain why proposal is rejected..." value={comment} onChange={(e) => setComment(e.target.value)} className="input-field" />
           </label>
           <div className="button-row">
-            <button
-              type="button"
-              className="btn-danger"
-              disabled={!canDecide || submitting}
-              onClick={() => handleSubmit('rejected', { reasonCode: rejectReason, comment })}
-            >
+            <button type="button" className="btn-danger" disabled={!canDecide || submitting} onClick={() => handleSubmit('rejected', { reasonCode: rejectReason, comment })}>
               Confirm Rejection
             </button>
-            <button type="button" className="btn-secondary" onClick={() => setMode('review')}>
-              Cancel
-            </button>
+            <button type="button" className="btn-secondary" onClick={() => setMode('review')}>Cancel (Esc)</button>
           </div>
         </div>
       )}
 
-      {/* Primary Action Footer */}
       {mode === 'review' && item.status !== 'resolved' && (
         <div className="panel-footer">
           <button
             type="button"
             className="btn-primary"
-            disabled={!canDecide || !proposal || !proposal.validator_passed || proposal.decision === 'escalate' || submitting}
-            title={
-              !proposal?.validator_passed
-                ? 'Blocked: AI proposal did not pass deterministic validation'
-                : 'Approve AI proposal (Shortcut: A)'
-            }
+            disabled={!canDecide || Boolean(item.stale_warning) || !proposal || !proposal.validator_passed || proposal.decision === 'escalate' || submitting}
             onClick={() => handleSubmit('approved', {})}
           >
             Approve Proposal (A)
           </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            disabled={!canDecide}
-            onClick={() => setMode('edit')}
-          >
+          <button type="button" className="btn-secondary" disabled={!canDecide} onClick={() => setMode('edit')}>
             Edit Fix (E)
           </button>
-          <button
-            type="button"
-            className="btn-danger-outline"
-            disabled={!canDecide}
-            onClick={() => setMode('reject')}
-          >
+          <button type="button" className="btn-danger-outline" disabled={!canDecide} onClick={() => setMode('reject')}>
             Reject (R)
           </button>
         </div>

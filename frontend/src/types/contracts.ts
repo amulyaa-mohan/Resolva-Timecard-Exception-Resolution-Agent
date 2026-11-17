@@ -1,27 +1,19 @@
-﻿export type Role = 'manager' | 'employee' | 'payroll_admin' | 'compliance' | 'admin';
-
-export type Severity = 'problem' | 'warning';
-
-export type ExceptionCode =
-  | 'MISSING_PUNCH'
-  | 'OVERLAPPING_SHIFT'
-  | 'MEAL_BREAK_BREACH'
-  | 'OVERTIME_RISK'
-  | 'SPREAD_OVER_BREACH'
-  | 'SCHEDULE_DEVIATION';
-
+﻿export type Severity = 'problem' | 'warning';
 export type ExceptionStatus = 'open' | 'proposed' | 'escalated' | 'resolved';
+export type DecisionType = 'approved' | 'edited' | 'rejected';
+export type Role = 'employee' | 'manager' | 'payroll_admin' | 'compliance' | 'admin';
+export type UILang = 'en' | 'kn' | 'hi';
 
-export type ActionType =
-  | 'add_punch'
-  | 'adjust_punch'
-  | 'void_shift'
-  | 'add_break'
-  | 'flag_premium'
-  | 'suggest_schedule_swap'
-  | 'acknowledge';
+export interface PunchEvent {
+  id: string;
+  employee_id: string;
+  ts: string;
+  type: 'in' | 'out' | 'break_start' | 'break_end';
+  source: 'kiosk' | 'mobile' | 'badge';
+  device_id: string;
+}
 
-export interface ScheduledShift {
+export interface ScheduleShift {
   id: string;
   employee_id: string;
   start: string;
@@ -31,19 +23,16 @@ export interface ScheduledShift {
   job: string;
 }
 
-export interface Punch {
-  id: string;
-  employee_id: string;
-  ts: string;
-  type: 'in' | 'out' | 'break_start' | 'break_end';
-  source: 'kiosk' | 'mobile' | 'web';
-  device_id: string;
+export interface HoursSummary {
+  regular_hours: string;
+  overtime_hours: string;
+  pay_status: string;
 }
 
 export interface ProposedAction {
-  type: ActionType;
-  punch_id?: string | null;
-  new_ts?: string | null;
+  type: 'add_punch' | 'edit_punch' | 'waive_warning' | 'escalate';
+  target_punch_id?: string;
+  new_ts?: string;
   note: string;
 }
 
@@ -53,7 +42,7 @@ export interface Citation {
 }
 
 export interface RuleOutcome {
-  rule: ExceptionCode;
+  rule: string;
   passed: boolean;
   detail: string;
 }
@@ -74,15 +63,18 @@ export interface LLMProposal {
   rule_outcomes: RuleOutcome[];
 }
 
-export interface HoursSummary {
-  regular_hours: string;
-  overtime_hours: string;
-  pay_status: string;
+export interface ResolutionRecord {
+  decision: DecisionType;
+  decided_by: string;
+  reason_code?: string;
+  comment?: string;
+  decided_at: string;
+  trace_id: string;
 }
 
 export interface ExceptionItem {
   id: string;
-  code: ExceptionCode;
+  code: string;
   severity: Severity;
   employee_id: string;
   employee_name: string;
@@ -93,21 +85,15 @@ export interface ExceptionItem {
   work_date: string;
   status: ExceptionStatus;
   evidence_version: number;
+  stale_warning?: boolean;
   summary: string;
   employee_note?: string;
-  schedule?: ScheduledShift;
-  punches: Punch[];
+  schedule?: ScheduleShift;
+  punches: PunchEvent[];
   before_hours: HoursSummary;
   after_hours?: HoursSummary;
   proposal?: LLMProposal;
-  resolution?: {
-    decision: 'approved' | 'edited' | 'rejected';
-    decided_by: string;
-    reason_code?: string;
-    comment?: string;
-    decided_at: string;
-    trace_id: string;
-  };
+  resolution?: ResolutionRecord;
 }
 
 export interface AuditEvent {
@@ -129,9 +115,20 @@ export interface PolicyPack {
   daily_regular_hours: number;
   weekly_regular_hours: number;
   overtime_rate: number;
-  quarterly_ot_cap: number | null;
-  rest_after_hours: number;
+  quarterly_ot_cap?: number;
   rest_minutes: number;
-  max_spread_hours: number | null;
-  late_tolerance_min: number;
+  rest_after_hours: number;
+  max_spread_hours?: number;
+}
+
+export interface ImportRow {
+  row_num: number;
+  employee_id: string;
+  employee_name: string;
+  work_date: string;
+  in_time: string;
+  out_time: string;
+  location: string;
+  valid: boolean;
+  error?: string;
 }

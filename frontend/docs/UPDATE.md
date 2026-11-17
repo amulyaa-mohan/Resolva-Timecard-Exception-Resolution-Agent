@@ -47,3 +47,7 @@ Append entries; preserve other developers' history. Use repository-relative path
 - Validation: `npm --prefix frontend run build` (`tsc --noEmit && vite build`) passed with 0 errors; inspected desktop and narrow layouts in browser.
 - Blockers and next step: Awaiting `SHARED-01` OpenAPI schema from backend to swap `frontend/src/lib/api.ts` from synthetic fixtures to live endpoints (`FE-03`).
 - Publication: Pushed to `origin/frontend`.
+
+### 2026-11-17 (Late) - Chaithanya - FE-03, FE-04, FE-05 & Root README.md (D1)
+- Status: frontend -> main; REVIEW / DONE (stale 409 guard, CSV import preview, EN/KN/HI switcher, E/R/Esc shortcuts, Playwright E2E spec, and README.md complete).
+- Validation: `npm --prefix frontend run build` passed with 0 errors.
