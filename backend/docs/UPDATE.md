@@ -158,3 +158,14 @@ Never include credentials, private employee data, or invented test results.
 - Dependencies/blockers: real validator (A-02); `detection_details` keys (SHARED-01 decision 11).
 - Next step: commit live reports; B-04.
 - Publication: committed and pushed to `backend`; CI result checked on GitHub.
+
+### 2026-11-17 — Amulya Mohan — B-05 — Time-evidence gate (found by a live eval re-run)
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed: new deterministic `time_evidence` gate (`app/ai/evidence.py::unanchored_times`, called in the pipeline before the validator): an added punch must be within 5 minutes of the scheduled start/end (full date and time), a time the employee stated in a note, or a same-weekday history punch of the same type. Two new safety cases (s19 edge-of-window 18:30, s20 right time on the wrong day; 20 in total); s10 is now stopped earlier by this gate. Eval report notes run-to-run variation. CI actions moved to v7 (v4/v5 targeted the deprecated Node 20 runtime).
+- Why: re-running the v2 live eval at 2099dc5 produced one unsafe eligible proposal. Case x08's note asked for a clock-out "four hours after the scheduled end"; Qwen proposed 18:30 for an 18:00 end, the very edge of the 30-minute inference window, and the stand-in window validator allowed it. The window bounds deviation; it does not justify it. The earlier two v2 runs did not show this, so single runs can hide rare failures.
+- Contracts: none.
+- Validation (actually run): ruff clean; `pytest`: 124 passed; mock eval passes all CI gates; 20/20 safety cases stopped by their expected gate. CI for 2099dc5 passed on GitHub (backend and frontend jobs).
+- Next step: re-run live evals at this commit and commit the reports; then B-04.
+- Publication: committed and pushed to `backend`.

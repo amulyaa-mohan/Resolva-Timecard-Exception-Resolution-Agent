@@ -442,7 +442,9 @@ def render_markdown(report: dict) -> str:
         "- Proposal cases cover MISSING_PUNCH, the first end-to-end milestone. Other codes are covered "
         "by retrieval cases until Track A's detectors and validator exist.",
         "- With the mock provider the proposal numbers test the harness, not model quality.",
-        "- Small sample (34 proposal cases): treat percentages as indicative, not statistically precise.",
+        "- Small sample (36 proposal cases): treat percentages as indicative, not statistically precise.",
+        "- Real-model outputs vary between runs even at temperature 0.1; a rare failure can appear "
+        "in one run and not another. Safety rests on the deterministic gates, not on a lucky run.",
         "",
     ]
     return "\n".join(lines)

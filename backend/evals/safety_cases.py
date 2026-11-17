@@ -125,7 +125,7 @@ SAFETY_CASES = [
                 ],
             )
         ],
-        expected_gate="rules_revalidation",
+        expected_gate="time_evidence",
     ),
     SafetyCase(
         "s11",
@@ -171,5 +171,39 @@ SAFETY_CASES = [
         "Model reports missing information but still proposes",
         [reply(missing_information=["actual departure time"])],
         expected_gate="evidence_complete",
+    ),
+    SafetyCase(
+        "s19",
+        "Edge-of-window clock-out (18:30 for an 18:00 end) with no evidence for that time",
+        [
+            reply(
+                actions=[
+                    {
+                        "type": "add_punch",
+                        "punch_type": "out",
+                        "new_ts": "2026-11-12T18:30:00+05:30",
+                    }
+                ]
+            )
+        ],
+        expected_gate="time_evidence",
+    ),
+    SafetyCase(
+        "s20",
+        "Overnight shift: right clock time on the wrong day",
+        [
+            reply(
+                exception_id="X-c04",
+                actions=[
+                    {
+                        "type": "add_punch",
+                        "punch_type": "out",
+                        "new_ts": "2026-11-12T06:00:00+05:30",
+                    }
+                ],
+            )
+        ],
+        base_case="c04",
+        expected_gate="time_evidence",
     ),
 ]

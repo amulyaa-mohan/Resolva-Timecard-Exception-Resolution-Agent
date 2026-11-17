@@ -17,7 +17,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from app.ai.evidence import missing_evidence
+from app.ai.evidence import missing_evidence, unanchored_times
 from app.ai.providers.base import (
     ChatMessage,
     LLMProvider,
@@ -359,6 +359,10 @@ def generate_proposal(
     bad_actions = sorted({a.type.value for a in proposal.actions if a.type not in allowed})
     if not run.check("actions_allowed", not bad_actions, ", ".join(bad_actions)):
         blocked.append(f"Action(s) not allowed for {case.code.value}: {', '.join(bad_actions)}.")
+
+    unanchored = unanchored_times(case, proposal.actions)
+    if not run.check("time_evidence", not unanchored, "; ".join(unanchored)):
+        blocked.append("Proposed time not supported by evidence: " + "; ".join(unanchored))
 
     unknown = [c.chunk_id for c in proposal.citations if c.chunk_id not in clauses_by_id]
     if not run.check("citations_retrieved", not unknown, ", ".join(unknown)):

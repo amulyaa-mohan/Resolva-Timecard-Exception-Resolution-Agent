@@ -298,3 +298,25 @@ def test_escalation_strips_fabricated_citations(case, policy, settings):
     assert [c.chunk_id for c in result.proposal.citations] == [KA8]
     check = next(c for c in result.gate_checks if c.name == "escalation_citations")
     assert not check.passed and "KA-99" in check.detail
+
+
+@pytest.mark.parametrize(
+    ("new_ts", "notes", "ok"),
+    [
+        ("2026-11-12T18:00:00+05:30", (), True),  # scheduled end
+        ("2026-11-12T18:04:00+05:30", (), True),  # within 5 min of schedule
+        ("2026-11-12T18:30:00+05:30", (), False),  # edge of window, no evidence (live x08)
+        ("2026-11-12T18:20:00+05:30", ("Left at 18:20 after closing the till.",), True),
+        ("2026-11-13T18:00:00+05:30", (), False),  # right time, wrong day
+    ],
+)
+def test_time_evidence_gate(policy, settings, new_ts, notes, ok):
+    actions = [{"type": "add_punch", "punch_type": "out", "new_ts": new_ts}]
+    result = run(
+        make_case(notes=notes),
+        policy,
+        settings,
+        MockProvider(script=[proposal_json(actions=actions)]),
+    )
+    assert (result.status == GateStatus.ELIGIBLE) is ok
+    assert any(c.name == "time_evidence" and c.passed is ok for c in result.gate_checks)
