@@ -28,7 +28,7 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 ## Decisions pending
 
 - Teammate names and task ownership within the shared team branches.
-- Repository owner sets `main` as GitHub default; then retire `cv-jayanth`.
+- Branch migration complete: `main` is default and `cv-jayanth` is removed.
 - Final schemas, policy fixtures, and action-specific validation semantics.
 - Model provider for the first live demonstration.
 

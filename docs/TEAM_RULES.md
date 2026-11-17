@@ -55,8 +55,7 @@ Before pushing to a shared branch, fetch and integrate teammates' published work
 If a push is rejected, reconcile changes and rerun relevant checks; never force-push to bypass it.
 Use task ownership to avoid simultaneous edits. Optional personal feature branches may target the relevant team branch.
 Open reviewed PRs from team branches into `main`; do not automatically merge.
-GitHub default-branch migration is pending repository-owner action because the current account lacks admin access.
-`cv-jayanth` remains temporarily as the existing default branch until the owner changes it to `main`.
+`main` is the GitHub default branch. The obsolete `cv-jayanth` branch has been removed.
 Never force-push shared history or overwrite a teammate's changes.
 For conflicts in any area UPDATE.md, preserve both entries. Reconcile conflicting task statuses explicitly.
 Documentation updates become shared only after commit/push and integration or direct branch inspection.
