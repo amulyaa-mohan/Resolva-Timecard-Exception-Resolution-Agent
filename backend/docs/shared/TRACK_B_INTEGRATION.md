@@ -3,7 +3,7 @@
 Audience: C V Jayanth (Track A) and his coding agent (Codex). Maintained by Amulya Mohan (Track B).
 Purpose: show exactly what Track B already provides, what Track A must supply, and how the two
 connect, so Track A can build against real code instead of guessing.
-Last updated: 2026-11-17. Contract version: `0.1.0-draft` (not frozen; see "Decisions for SHARED-01").
+Last updated: 2026-11-17 (B-03). Contract version: `0.1.0-draft` (not frozen; see "Decisions for SHARED-01").
 
 ## 1. What already exists and runs
 
@@ -16,13 +16,17 @@ All paths are relative to the repository root. Everything listed was run and tes
 | `backend/app/core/errors.py` | RFC 7807 `application/problem+json` for every error, with `trace_id` | Shared (proposal) |
 | `backend/app/core/tracing.py` | `X-Trace-Id` per request; `get_trace_id()` for logs and audit events | Shared (proposal) |
 | `backend/app/policies/registry.py` | Loads versioned packs; `resolve_policy(employee, work_date, registry)` | B |
-| `backend/policies/IN-KA/2025.1.yaml` + `.md` | Karnataka pack: structured thresholds + 10 citable clauses (`IN-KA@2025.1#KA-8`) | B |
-| `backend/app/retrieval/keyword.py` | Clause retrieval restricted to the applicable pack and version | B |
-| `backend/app/ai/providers/` | `LLMProvider` interface and offline `MockProvider` (Ollama/Groq in B-03) | B |
+| `backend/policies/IN-KA/2025.1.*` | Karnataka pack (active): thresholds + 11 citable clauses (`IN-KA@2025.1#KA-8`) | B |
+| `backend/policies/IN-KA/2025.2-proposed.*` | Proposed amendment (status `proposed`, never resolved); wrong-version tests | B |
+| `backend/policies/US-FED/2025.1.*` | US federal + California overlay pack: 8 h daily / 40 h weekly OT, 30 min meal | B |
+| `backend/app/retrieval/hybrid.py` | Hybrid retrieval: pack/version filter, BM25 + vector, rank fusion (ADR-006) | B |
+| `backend/app/ai/providers/` | `LLMProvider` interface: `MockProvider` (offline), `OllamaProvider`, `GroqProvider` | B |
 | `backend/app/ai/pipeline.py` | `generate_proposal(...)`: prompt, parse, evidence gates, **calls your validator** | B |
+| `backend/app/ai/evidence.py` | Pre-model evidence gate: escalates without calling the model when a fix cannot be justified | B |
 | `backend/prompts/propose_v1.md` | Versioned system prompt | B |
 | `backend/tests/factories.py` | `make_case()`, `passing_validator`, `failing_validator` test builders | Shared |
-| `backend/Dockerfile`, `backend/docker-compose.yml` | Backend container (`docker compose up --build` from `backend/`) | B |
+| `backend/Dockerfile`, `backend/docker-compose*.yml` | Backend container; optional `ollama` profile and GPU override | B |
+| `backend/scripts/live_check.py` | Six-case smoke check against a real model | B |
 
 Running API today: `GET /health` (now also reports `ai_enabled`, `llm_status`, `mode`) and `/docs`.
 No exception, proposal, decision or audit endpoints exist yet; those depend on Track A.
@@ -63,6 +67,9 @@ def validate_correction(
 ```
 
 Return `ValidationResult(passed, checks=[RuleCheck(code, passed, reason), ...], rule_version)`.
+**Return at least one `RuleCheck`.** A result with an empty `checks` list has validated nothing, so the pipeline blocks it even when `passed=True`.
+Jurisdictions available now: `IN-KA` and `US-FED`. In US-FED, `max_spread_hours` and
+`quarterly_ot_cap_hours` are `None`: skip those rules rather than treating `None` as zero.
 Read thresholds from `policy.rules` (`PolicyRules`: `daily_regular_hours`, `weekly_regular_hours`,
 `max_spread_hours`, `overtime_rate`, `quarterly_ot_cap_hours`, `rest_after_hours`, `rest_minutes`,
 `late_tolerance_min`, `missing_punch_window_min`). Never read thresholds from retrieved policy text.
@@ -89,6 +96,18 @@ version" and "prompt hash" audit fields.
 2. `evidence_version` still matches a freshly built `CaseContext`.
 3. `validate_correction` passes again against current evidence.
 4. The proposal has not already been decided (idempotency).
+
+### Evidence gate before the model (B-03)
+
+Some cases escalate without calling the model at all (`gate_checks` entry `evidence_sufficient`).
+Today: `MISSING_PUNCH` with no `schedule` and no same-weekday punch in `punch_history`. The live
+Qwen2.5-7B check showed why: with no schedule the model invented a clock-out 30 minutes after
+clock-in, and no attendance rule flags such a shift. Fill `punch_history` (previous 7 days) so
+this gate can use it.
+
+The design doc's other "always escalate" cases need agreed `detection_details` keys. Proposed:
+`overlap_minutes` (OVERLAPPING_SHIFT; escalate above 120), `spread_minutes` (SPREAD_OVER_BREACH),
+`quarter_ot_hours` (OVERTIME_RISK). Confirm or rename them as part of SHARED-01 decision 11.
 
 ## 3. Wiring example (for your resolution module)
 
@@ -134,7 +153,7 @@ from tests.factories import make_case, passing_validator, failing_validator
 
 ## 5. Decisions for SHARED-01 (Jayanth to confirm or change)
 
-Reply in `backend/docs/UPDATE.md` or a PR comment. Until agreed, the contract stays `0.1.0-draft`.
+There are 11 decisions. Reply in `backend/docs/UPDATE.md` or a PR comment. Until agreed, the contract stays `0.1.0-draft`.
 
 1. **IDs** are opaque strings everywhere. OK?
 2. **`work_date`** is the local date in `employee.timezone` of the shift start (overnight shifts belong to their start date). OK?
@@ -146,6 +165,8 @@ Reply in `backend/docs/UPDATE.md` or a PR comment. Until agreed, the contract st
 8. **Persistence**: Track B proposes `proposals` (from `ProposalResult`) and `llm_traces` (from `LLMTrace`) tables; you and the database team own migration ordering.
 9. **Route ownership**: suggest Track A owns `/exceptions/*` and `/proposals/*` routes and calls `generate_proposal`. OK?
 10. **Severity**: `DEFAULT_SEVERITY` follows design doc section 8. OK?
+11. **`detection_details` keys** for the evidence gate: `overlap_minutes`, `spread_minutes`,
+    `quarter_ot_hours` (see "Evidence gate before the model"). OK, or other names?
 
 ## 6. Rules for both agents
 

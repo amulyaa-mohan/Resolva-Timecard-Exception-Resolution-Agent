@@ -34,7 +34,7 @@ npm --prefix frontend run build
 
 Only the health endpoint and connection page are exposed over HTTP. No database or model is required:
 the default `LLM_PROVIDER=mock` runs offline. Set `AI_ENABLED=false` in backend/.env for rules-only mode.
-Database migrations, domain routes, real model providers (B-03) and CI (B-05) remain assigned work.
+Database migrations, domain routes and CI (B-05) remain assigned work.
 
 Windows (Git Bash): use `python -m venv venv` and `venv/Scripts/python.exe` in place of `.venv/bin/python`.
 
@@ -44,4 +44,23 @@ Backend container (needs Docker Desktop running):
 cd backend
 docker compose up --build
 ```
+
+Real model, local and offline (Ollama in Docker; about 5 GB of models, pulled once):
+
+```bash
+cd backend
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ollama up -d ollama   # NVIDIA GPU
+# or without a GPU: docker compose --profile ollama up -d ollama
+docker compose exec ollama ollama pull qwen2.5:7b-instruct
+docker compose exec ollama ollama pull nomic-embed-text
+python scripts/live_check.py --provider ollama --embeddings ollama
+```
+
+The first request after Ollama starts loads the model into memory and takes 30-60 s (measured on
+an RTX 5060 laptop), far beyond the 8 s budget, so it escalates. Run `live_check.py` once before a
+demo to warm the models; Resolva asks Ollama to keep them loaded for 30 minutes.
+
+Then set `LLM_PROVIDER=ollama` (and optionally `EMBEDDING_PROVIDER=ollama`) in backend/.env.
+Hosted alternative: put `GROQ_API_KEY` in backend/.env and set `LLM_PROVIDER=groq`.
+`/health` reports `llm_status` and `mode` (`ai_assisted` or `rules_only`).
 This scaffold does not implement authentication, business rules or correction approval.

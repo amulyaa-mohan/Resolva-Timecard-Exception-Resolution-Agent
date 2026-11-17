@@ -34,3 +34,26 @@ def test_errors_are_problem_json(settings):
 
 def test_openapi_available(settings):
     assert client(settings).get("/openapi.json").status_code == 200
+
+
+def test_health_reuses_one_provider(settings):
+    app = create_app(settings)
+    with TestClient(app) as c:
+        c.get("/health")
+        first = app.state.provider
+        c.get("/health")
+        assert app.state.provider is first
+
+
+def test_health_reports_unavailable_groq_without_key(settings):
+    groq = settings.model_copy(update={"llm_provider": "groq", "groq_api_key": None})
+    body = client(groq).get("/health").json()
+    assert body["llm_status"] == "unavailable" and body["mode"] == "rules_only"
+
+
+def test_health_reports_unreachable_ollama(settings):
+    down = settings.model_copy(
+        update={"llm_provider": "ollama", "ollama_base_url": "http://127.0.0.1:9"}
+    )
+    body = client(down).get("/health").json()
+    assert body["llm_status"] == "unreachable" and body["mode"] == "rules_only"

@@ -2,4 +2,4 @@
 
 Track B: clause ingestion, metadata filtering and keyword/vector retrieval.
 
-Implemented (B-02): keyword retrieval restricted to the applicable pack and version. Hybrid vector search arrives in B-03.
+Implemented (B-03): `hybrid.retrieve` filters to the applicable pack and version, scores with BM25 (`keyword.py`) and embeddings (`vector.py`), and fuses rankings. See docs/shared/adr/ADR-006.

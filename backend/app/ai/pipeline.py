@@ -11,15 +11,18 @@ import hashlib
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from pathlib import Path
 
 from pydantic import ValidationError
 
+from app.ai.evidence import missing_evidence
 from app.ai.providers.base import (
     ChatMessage,
     LLMProvider,
-    ProviderError,
     ProviderRequest,
+    ProviderResponse,
     ProviderTimeout,
 )
 from app.core.config import Settings
@@ -36,7 +39,8 @@ from app.core.contracts import (
     ValidationResult,
 )
 from app.core.tracing import get_trace_id
-from app.retrieval.keyword import RetrievedClause, retrieve
+from app.retrieval.hybrid import RetrievedClause, retrieve
+from app.retrieval.vector import Embedder, build_embedder
 
 PROMPT_VERSION = "propose_v1"
 
@@ -108,6 +112,22 @@ def _quote_is_verbatim(quote: str, clause_text: str) -> bool:
     return len(normalised.split()) >= MIN_QUOTE_WORDS and normalised in _normalise(clause_text)
 
 
+def call_with_deadline(provider: LLMProvider, request: ProviderRequest) -> ProviderResponse:
+    """Enforce a hard wall-clock budget on any provider.
+
+    HTTP timeouts bound each network phase, not the whole call, so a slow-streaming server could
+    exceed the budget. The worker thread is abandoned on timeout; its own HTTP timeout ends it.
+    """
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-call")
+    future = executor.submit(provider.complete, request)
+    try:
+        return future.result(timeout=request.timeout_s)
+    except FutureTimeout as exc:
+        raise ProviderTimeout(f"no response within {request.timeout_s:g}s") from exc
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
 # ---------------------------------------------------------------------------- pipeline
 
 
@@ -170,6 +190,7 @@ def generate_proposal(
     provider: LLMProvider,
     validator: CorrectionValidator,
     settings: Settings,
+    embedder: Embedder | None = None,
 ) -> ProposalResult:
     """Contract function generate_proposal(case_context, policy_snapshot) -> ProposalResult."""
     run = _Run(case, policy, provider)
@@ -194,8 +215,17 @@ def generate_proposal(
             [f"Policy {policy.pack_id}@{policy.version} does not apply to this case."],
         )
 
-    # Gate 2: retrieval must find supporting clauses in the applicable version only.
-    retrieved = retrieve(case, policy, top_k=settings.retrieval_top_k)
+    # Gate 2: deterministic evidence sufficiency. If a fix cannot be justified, never ask the model.
+    gaps = missing_evidence(case)
+    if not run.check("evidence_sufficient", not gaps, "; ".join(gaps)):
+        return run.finish(GateStatus.ESCALATED, gaps)
+
+    # Gate 3: retrieval must find supporting clauses in the applicable version only.
+    retrieval = retrieve(
+        case, policy, top_k=settings.retrieval_top_k, embedder=embedder or build_embedder(settings)
+    )
+    retrieved = retrieval.clauses
+    run.check("retrieval_mode", True, retrieval.mode)
     run.retrieved_ids = [r.clause.chunk_id for r in retrieved]
     if not run.check("policy_evidence", bool(retrieved), f"{len(retrieved)} clause(s)"):
         return run.finish(GateStatus.ESCALATED, ["No supporting policy clause was retrieved."])
@@ -205,21 +235,26 @@ def generate_proposal(
     messages = build_messages(case, retrieved, settings.prompts_dir)
     run.prompt_hash = prompt_hash(messages)
     proposal: LLMProposal | None = None
+    # One budget for the whole generation, repair retry included (design target: p95 under 8 s).
+    deadline = time.perf_counter() + settings.llm_timeout_s
     for _ in range(1 + settings.llm_max_repair_retries):
-        run.attempts += 1
+        remaining = deadline - time.perf_counter()
         request = ProviderRequest(
             messages=messages,
             temperature=settings.llm_temperature,
-            timeout_s=settings.llm_timeout_s,
+            timeout_s=max(remaining, 0.001),
         )
         try:
-            response = provider.complete(request)
+            if remaining <= 0:
+                raise ProviderTimeout(f"budget of {settings.llm_timeout_s:g}s used up")
+            run.attempts += 1
+            response = call_with_deadline(provider, request)
         except ProviderTimeout as exc:
             run.error = f"timeout: {exc}"
             run.check("provider", False, "timeout")
             return run.finish(GateStatus.ESCALATED, ["AI timed out; manual review (rules-only)."])
-        except ProviderError as exc:
-            run.error = f"provider_error: {exc}"
+        except Exception as exc:  # ProviderError or any adapter bug: fail safe to manual review
+            run.error = f"provider_error: {type(exc).__name__}: {exc}"[:500]
             run.check("provider", False, "unavailable")
             return run.finish(GateStatus.ESCALATED, ["AI unavailable; manual review (rules-only)."])
         run.model_id = response.model_id
@@ -290,7 +325,11 @@ def generate_proposal(
             blocked.append("Rule re-validation failed to run.")
         else:
             failed = [f"{c.code.value}: {c.reason}" for c in validation.checks if not c.passed]
-            if not run.check("rules_revalidation", validation.passed, "; ".join(failed)):
+            if not validation.checks:
+                # A result with no rule checks has validated nothing; it cannot approve.
+                run.check("rules_revalidation", False, "validator returned no rule checks")
+                blocked.append("Rule re-validation returned no checks.")
+            elif not run.check("rules_revalidation", validation.passed, "; ".join(failed)):
                 blocked.append("Proposed correction fails rule validation: " + "; ".join(failed))
     if blocked:
         return run.finish(GateStatus.BLOCKED, blocked, proposal, validation)

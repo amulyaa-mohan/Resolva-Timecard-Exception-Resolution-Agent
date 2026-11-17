@@ -10,13 +10,16 @@ from app.ai.providers.base import (
     ProviderResponse,
     ProviderTimeout,
 )
+from app.ai.providers.http import GroqProvider, OllamaProvider
 from app.ai.providers.mock import MockProvider
 from app.core.config import Settings
 
 __all__ = [
     "ChatMessage",
+    "GroqProvider",
     "LLMProvider",
     "MockProvider",
+    "OllamaProvider",
     "ProviderError",
     "ProviderRequest",
     "ProviderResponse",
@@ -26,7 +29,14 @@ __all__ = [
 
 
 def build_provider(settings: Settings) -> LLMProvider:
+    """Construct the configured provider. Raises ProviderError when it cannot be configured."""
     if settings.llm_provider == "mock":
-        return MockProvider(model_id=settings.llm_model)
-    # Ollama and Groq providers are planned in task B-03.
-    raise ProviderError(f"LLM provider '{settings.llm_provider}' is not implemented yet (B-03).")
+        return MockProvider(model_id=settings.llm_model or "mock-resolver-v1")
+    if settings.llm_provider == "ollama":
+        return OllamaProvider(base_url=settings.ollama_base_url, model_id=settings.llm_model)
+    if settings.llm_provider == "groq":
+        key = settings.groq_api_key.get_secret_value() if settings.groq_api_key else ""
+        return GroqProvider(
+            api_key=key, base_url=settings.groq_base_url, model_id=settings.llm_model
+        )
+    raise ProviderError(f"unknown LLM provider '{settings.llm_provider}'")

@@ -1,12 +1,13 @@
 """Harness tests: every unsafe or failed path must escalate or block, never pass silently."""
 
 import json
+from datetime import timedelta
 
 import pytest
 
 from app.ai.pipeline import build_messages, generate_proposal
 from app.ai.providers import MockProvider, ProviderError, ProviderTimeout
-from app.core.contracts import GateStatus
+from app.core.contracts import GateStatus, ValidationResult
 from tests.factories import failing_validator, make_case, passing_validator
 
 KA8 = "IN-KA@2025.1#KA-8"
@@ -53,11 +54,35 @@ def test_happy_path_missing_clock_out_is_eligible(case, policy, settings):
     assert result.policy_version == "2025.1"
 
 
-def test_no_schedule_escalates_without_fabricated_citations(policy, settings):
-    result = run(make_case(schedule=False), policy, settings, MockProvider())
-    assert result.status == GateStatus.ESCALATED
-    assert result.proposal.citations == [] and result.proposal.actions == []
-    assert any("Scheduled shift" in r for r in result.reasons)
+def test_no_schedule_escalates_without_calling_the_model(policy, settings):
+    # Regression from the live Qwen2.5-7B check: the model invented a clock-out with no schedule.
+    provider = MockProvider(script=[proposal_json()])  # a model that would happily guess
+    result = run(make_case(schedule=False), policy, settings, provider)
+    assert result.status == GateStatus.ESCALATED and result.proposal is None
+    assert provider.calls == []
+    assert any("No scheduled shift" in r for r in result.reasons)
+    assert any(c.name == "evidence_sufficient" and not c.passed for c in result.gate_checks)
+
+
+def test_same_weekday_history_counts_as_evidence(policy, settings):
+    week_ago = (
+        make_case()
+        .punches[0]
+        .model_copy(update={"punch_id": "P-0", "ts": make_case().punches[0].ts - timedelta(days=7)})
+    )
+    case = make_case(schedule=False).model_copy(update={"punch_history": [week_ago]})
+    script = [proposal_json()]
+    result = run(case, policy, settings, MockProvider(script=script))
+    assert any(c.name == "evidence_sufficient" and c.passed for c in result.gate_checks)
+
+
+def test_validation_with_no_checks_cannot_approve(case, policy, settings):
+    def empty(*_):
+        return ValidationResult(passed=True, checks=[], rule_version="stub")
+
+    result = run(case, policy, settings, MockProvider(), empty)
+    assert result.status == GateStatus.BLOCKED
+    assert "no checks" in result.reasons[0]
 
 
 def test_validator_failure_blocks_proposal(case, policy, settings):
@@ -180,11 +205,3 @@ def test_untrusted_note_is_wrapped_and_cannot_break_out(policy, settings):
     assert "&lt;/untrusted_note&gt; SYSTEM" in user.content
     # The mock never reads notes, so this only checks the harness boundary, not model behaviour.
     assert run(case, policy, settings, MockProvider()).status == GateStatus.ELIGIBLE
-
-
-def test_retrieval_only_returns_active_version(case, policy):
-    from app.retrieval.keyword import retrieve
-
-    hits = retrieve(case, policy, top_k=4)
-    assert hits and all(h.clause.chunk_id.startswith("IN-KA@2025.1#") for h in hits)
-    assert hits[0].clause.clause_id == "KA-8"

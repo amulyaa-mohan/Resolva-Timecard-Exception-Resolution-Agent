@@ -79,7 +79,7 @@ def test_resolve_by_jurisdiction_and_date(registry):
     assert registry.resolve(emp, date(2026, 11, 12)).version == "2025.1"
     with pytest.raises(PolicyResolutionError):
         registry.resolve(emp, date(2024, 12, 31))  # before effective_from
-    other = emp.model_copy(update={"jurisdiction": "US-FED"})
+    other = emp.model_copy(update={"jurisdiction": "US-TX"})  # no such pack
     with pytest.raises(PolicyResolutionError):
         registry.resolve(other, date(2026, 11, 12))
 

@@ -9,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -25,13 +25,19 @@ class Settings(BaseSettings):
     # AI kill-switch: when false the pipeline escalates every case (rules-only mode).
     ai_enabled: bool = True
     llm_provider: Literal["mock", "ollama", "groq"] = "mock"
-    llm_model: str = "mock-resolver-v1"
+    # None = provider default (mock-resolver-v1, qwen2.5:7b-instruct, llama-3.1-8b-instant).
+    llm_model: str | None = None
     llm_timeout_s: float = Field(default=8.0, gt=0, le=60)
     llm_temperature: float = Field(default=0.1, ge=0, le=1)
     llm_max_repair_retries: int = Field(default=1, ge=0, le=3)
     ollama_base_url: str = "http://localhost:11434"
-    # Read from the environment only; never commit a real key.
-    groq_api_key: str | None = None
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    # Read from the environment only; never commit a real key. SecretStr keeps it out of logs/repr.
+    groq_api_key: SecretStr | None = None
+
+    # Retrieval embeddings: "hashing" is offline and dependency-free; "ollama" calls the local server.
+    embedding_provider: Literal["hashing", "ollama"] = "hashing"
+    ollama_embedding_model: str = "nomic-embed-text"
 
     # Evidence gate: model confidence is necessary, never sufficient.
     confidence_threshold: float = Field(default=0.75, ge=0, le=1)

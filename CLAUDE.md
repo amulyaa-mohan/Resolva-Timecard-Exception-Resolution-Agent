@@ -44,24 +44,29 @@ cd backend && docker compose up --build                                    # nee
 The local virtualenv is `venv/` (Jayanth's docs use `.venv/`; both are git-ignored).
 Settings are unprefixed env vars or `backend/.env` (`AI_ENABLED`, `LLM_PROVIDER`, `CONFIDENCE_THRESHOLD`, ...).
 
-## Current state (2026-11-17)
+## Current state (2026-11-17, after B-03)
 
-- Branch `backend`, based on `main` 68ede72 (Jayanth's two-folder layout).
-- SHARED-01: draft contracts `0.1.0-draft` in `backend/app/core/contracts.py`, awaiting Jayanth's review
-  (10 open decisions listed in TRACK_B_INTEGRATION.md section 5).
-- B-01 (REVIEW): settings + kill-switch, RFC 7807 errors, `X-Trace-Id`, `/health` with AI mode,
-  provider interface + offline `MockProvider`, Dockerfile + compose. Verified: clean install, server, Docker.
-- B-02 (REVIEW): IN-KA@2025.1 policy pack, registry + `resolve_policy`, version-filtered keyword retrieval,
-  `prompts/propose_v1.md`, `generate_proposal` with gates (schema + 1 repair retry, allowed actions,
-  citation membership, verbatim quote of at least 5 words, validator, missing info, confidence).
-- Tests: 43 passing. The validator is a test stub until Track A's A-02 lands.
+- Branch `backend` (on top of `main` 68ede72). B-01/B-02 in 3874367; B-03 in the following commit.
+- SHARED-01: draft contracts `0.1.0-draft`, awaiting Jayanth's review (11 decisions in
+  TRACK_B_INTEGRATION.md section 5). Track A's validator must return at least one `RuleCheck`.
+- B-01, B-02, B-03 in REVIEW. Pipeline order: kill-switch -> policy applicable -> pre-model evidence gate
+  (`app/ai/evidence.py`) -> hybrid retrieval -> model (hard 8 s budget, 1 repair retry) -> schema ->
+  exception id -> allowed actions -> citations retrieved + verbatim (>= 5 words) -> validator (non-empty)
+  -> missing info -> confidence.
+- Providers: mock (default), Ollama `qwen2.5:7b-instruct`, Groq `llama-3.1-8b-instant` (Groq tested only
+  with mocked HTTP). Retrieval: BM25 + embeddings with RRF (ADR-006); hashing embedder by default,
+  `nomic-embed-text` via Ollama optional. Packs: IN-KA@2025.1, IN-KA@2025.2-proposed (never resolved), US-FED@2025.1.
+- Tests: 91 passing. Live Ollama smoke check (`backend/scripts/live_check.py`): 6/6 after the evidence-gate
+  fix, warm latency 2-5 s; cold model load 30-60 s, so warm up before demos.
+- Local Ollama runs in Docker: `cd backend && docker compose -f docker-compose.yml -f docker-compose.gpu.yml
+  --profile ollama up -d ollama` (models persist in the `ollama-models` volume).
 
 ## Next up
 
-1. B-03: Ollama and Groq providers (real timeout enforcement), hybrid keyword + vector retrieval,
-   US-FED (+CA) pack and IN-KA@2025.2-proposed pack for wrong-version tests, an overlapping-shift clause.
+1. B-05: labelled eval cases in `backend/evals/` (clear / ambiguous / adversarial / jurisdiction-flip),
+   `evals/run.py` reporting real numbers, GitHub Actions CI with an eval gate.
 2. B-04: English/Kannada/Hindi intents with parity tests.
-3. B-05: GitHub Actions CI and `backend/evals/` with measured results (feeds slide 4).
+3. When Track A lands A-02: replace stub validators in live_check/evals with `validate_correction`.
 
 ## Working agreements for Claude
 

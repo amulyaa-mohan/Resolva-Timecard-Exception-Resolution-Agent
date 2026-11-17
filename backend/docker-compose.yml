@@ -1,5 +1,10 @@
-# Backend API container. Run from backend/: docker compose up --build
-# The frontend team adds its service separately; Ollama arrives with task B-03.
+# Backend API container. Run from backend/:
+#   docker compose up --build                       API only (mock provider by default)
+#   docker compose --profile ollama up --build      API + local Ollama (CPU)
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ollama up --build
+#                                                   API + Ollama on an NVIDIA GPU
+# Pull models once: docker compose exec ollama ollama pull qwen2.5:7b-instruct
+#                   docker compose exec ollama ollama pull nomic-embed-text
 services:
   api:
     build: .
@@ -10,8 +15,21 @@ services:
         required: false
     environment:
       CORS_ORIGINS: http://localhost:5173
+      # Inside Docker, reach the ollama service by name (backend/.env localhost would point at the container).
+      OLLAMA_BASE_URL: ${COMPOSE_OLLAMA_URL:-http://ollama:11434}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
       timeout: 3s
       retries: 5
+
+  ollama:
+    image: ollama/ollama:0.40.16
+    profiles: ["ollama"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  ollama-models:

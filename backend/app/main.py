@@ -44,8 +44,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         llm_status = "disabled"
         if settings.ai_enabled:
             try:
-                provider = build_provider(settings)
-                llm_status = "reachable" if provider.is_reachable() else "unreachable"
+                # Build once per app: each provider owns an HTTP connection pool.
+                if getattr(app.state, "provider", None) is None:
+                    app.state.provider = build_provider(settings)
+                reachable = app.state.provider.is_reachable()
+                llm_status = "reachable" if reachable else "unreachable"
             except ProviderError:
                 llm_status = "unavailable"
         return {

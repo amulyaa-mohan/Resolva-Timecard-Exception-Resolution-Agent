@@ -115,3 +115,31 @@ Never include credentials, private employee data, or invented test results.
 - Dependencies/blockers: real `validate_correction` (A-02) and `build_case_context` (A-01/A-02); SHARED-01 agreement.
 - Next step: Jayanth reviews the contracts; Amulya starts B-03 (Ollama/Groq, hybrid retrieval, US-FED and IN-KA@2025.2-proposed packs).
 - Publication: committed locally on `backend`; not pushed.
+
+### 2026-11-17 — Amulya Mohan — B-03 — Real providers, hybrid retrieval, evidence gates
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed:
+  - Providers: `OllamaProvider` (JSON mode, `keep_alive` 30 m) and `GroqProvider` (OpenAI-compatible, key held as `SecretStr`, never in errors or repr) in `app/ai/providers/http.py`; `build_provider` picks one from settings; `LLM_MODEL` unset means the provider default.
+  - Pipeline: one hard wall-clock budget (`LLM_TIMEOUT_S`) per generation, repair retry included, enforced even if a provider ignores its timeout; any adapter exception escalates; new pre-model evidence gate (`app/ai/evidence.py`); a validation result with no rule checks now blocks.
+  - Retrieval: `app/retrieval/hybrid.py` (pack/version filter, BM25 + embeddings, reciprocal rank fusion, per-embedder relevance floors, BM25-only fallback recorded in `gate_checks`); `HashingEmbedder` (offline) and `OllamaEmbedder` (`nomic-embed-text`). Decision recorded in `docs/shared/adr/ADR-006`.
+  - Policy packs: IN-KA@2025.1 gains KA-11 (overlapping records); new IN-KA@2025.2-proposed (status `proposed`, near-duplicate clauses) and US-FED@2025.1 (federal + California overlay).
+  - Packaging: optional `ollama` Compose profile (image pinned to 0.40.16, named volume for models) and `docker-compose.gpu.yml`; `httpx` moved to runtime dependencies (the container failed to import without it).
+  - Docs: `docs/MODEL_CARD.md`, ADR-006, `scripts/live_check.py`, LOCAL_DEVELOPMENT, TRACK_B_INTEGRATION (validator must return at least one check; evidence gate; decision 11 on `detection_details` keys), `.env.example`.
+- Contracts: no change to `contracts.py`. New expectations for Track A: `validate_correction` returns at least one `RuleCheck`; proposed `detection_details` keys listed as decision 11.
+- Validation (actually run): `pytest backend/tests`: 86 passed; ruff check and format clean. Retrieval top-1 on 11 code/pack pairs: 11/11 with the hashing embedder, 10/11 with `nomic-embed-text` (US overtime ranks the weekly clause US-2 above daily US-3; both relevant); US spread-over correctly retrieves nothing. Live check with `qwen2.5:7b-instruct` on Ollama (GPU): 5/6 before the evidence gate (no-schedule case invented 09:32 and was eligible), then 6/6 on three runs including inside Docker; warm latency 2.2-4.8 s; cold load 30-60 s. Groq verified only with mocked HTTP (no key used).
+- Dependencies/blockers: real validator (A-02); `detection_details` keys for the remaining evidence rules (SHARED-01 decision 11).
+- Next step: B-05 evaluation suite and CI (turn live_check cases into labelled eval cases with measured results); B-04 multilingual intents.
+- Publication: superseded by the verification entry below.
+
+### 2026-11-17 — Amulya Mohan — B-03 — Verification pass before publication
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed: `/health` now builds the provider once per app (it previously opened an HTTP client per request and never closed it); hybrid retrieval now degrades to BM25-only on NaN similarities or malformed vectors (mismatched dimensions previously raised an unhandled ValueError); tests added for both, plus `/health` with Groq unconfigured and Ollama unreachable.
+- Contracts: none.
+- Validation (actually run): fresh venv from `requirements-dev.lock` + `-e backend[dev]` on Windows; `pytest backend/tests`: 91 passed (three runs); ruff check and format clean; 24/24 adversarial probes (malformed Ollama/Groq replies, HTTP 404/429, NaN and mismatched embeddings, 50 ms budget against a 500 ms model, every exception code in both packs, empty policy); `docker compose ... --profile ollama up --build` with the GPU override: API container healthy, live check 6/6 against `qwen2.5:7b-instruct` + `nomic-embed-text` inside Compose (p50 4.7 s, max 5.3 s; warm-up 9 s with cached model files). Groq still verified with mocked HTTP only.
+- Dependencies/blockers: unchanged (A-02 validator; SHARED-01 decisions).
+- Next step: B-05 evaluation suite and CI.
+- Publication: committed and pushed to `backend` with this entry.
