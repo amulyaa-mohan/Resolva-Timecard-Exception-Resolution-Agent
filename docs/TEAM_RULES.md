@@ -4,7 +4,7 @@
 
 Build import → deterministic exception detection → policy-grounded proposal → validation → manager decision → immutable correction and audit.
 The first milestone is one employee, one shift, and one missing clock-out resolved end to end.
-The repository currently contains documentation; application implementation has not started.
+The repository now includes a runnable health/API and frontend scaffold; business implementation remains pending.
 
 ## Ownership
 
@@ -17,8 +17,8 @@ The repository currently contains documentation; application implementation has 
 Each developer owns tests for their modules and reviews the other's changes.
 Suggested module boundaries: `backend/app/{attendance,rules,resolution,audit}` for A; `backend/app/{policies,retrieval,ai,language}` for B.
 `backend/app/core` and shared schema changes must be coordinated before implementation.
-For migration changes, B proposes the model changes and A coordinates migration ordering.
-These directories and interfaces are planned, not existing application code.
+Database contributors own migration ordering; track A coordinates backend compatibility and track B proposes its policy/proposal model requirements.
+The module directories are scaffolded; the business interfaces still require joint agreement.
 
 ## Contracts to agree first
 
@@ -58,7 +58,7 @@ Open reviewed PRs from team branches into `main`; do not automatically merge.
 GitHub default-branch migration is pending repository-owner action because the current account lacks admin access.
 `cv-jayanth` remains temporarily as the existing default branch until the owner changes it to `main`.
 Never force-push shared history or overwrite a teammate's changes.
-For conflicts in UPDATE.md, preserve both entries. Reconcile conflicting task statuses explicitly.
+For conflicts in any area UPDATE.md, preserve both entries. Reconcile conflicting task statuses explicitly.
 Documentation updates become shared only after commit/push and integration or direct branch inspection.
 
 ## Definition of done
@@ -66,5 +66,15 @@ Documentation updates become shared only after commit/push and integration or di
 - The task's acceptance check passes, or any limitation is stated explicitly.
 - Relevant tests/checks have been run and their actual outcomes recorded.
 - Interfaces and setup documentation reflect the implementation.
-- TASKS.md and UPDATE.md are updated in the same change.
+- The relevant area task tracker and UPDATE.md are updated in the same change.
 - Changes are reviewed before integration; blocked or untested work is not marked done.
+
+## Area instruction routing
+
+- Frontend: frontend/docs/AGENTS.md, BUILD_PLAN.md, TASKS.md and UPDATE.md.
+- Backend: backend/docs/AGENTS.md, TASKS.md and UPDATE.md.
+- Database: database/docs/AGENTS.md, TASKS.md and UPDATE.md.
+- Shared contracts: docs/CONTRACTS.md; shared milestones: docs/TASKS.md.
+
+Frontend owns UI and client integration; database owns schema/migrations/seeds in coordination with backend.
+No team should implement another team's missing functionality by silently crossing ownership boundaries.

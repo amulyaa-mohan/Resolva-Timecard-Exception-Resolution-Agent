@@ -78,62 +78,32 @@ Corrections are appended as new records rather than overwriting original punches
 
 ## Install and Run Locally
 
-> The commands below describe the intended Docker setup.
-> They will become runnable when the application and packaging are implemented.
+The runnable scaffold includes a FastAPI health endpoint and a React connection page.
+Business workflows, database migrations, and model providers are still to be implemented.
 
-### Requirements
+See [Local development](docs/LOCAL_DEVELOPMENT.md) for setup, startup, URLs, and checks.
+See [Repository structure](docs/STRUCTURE.md) for module boundaries and team ownership.
 
-- Git
-- Docker Desktop with Docker Compose
-- A configured model provider for AI-generated proposals
-
-### 1. Clone the Repository
+Quick setup (Python 3.11+, Node.js 22+):
 
 ```bash
-git clone https://github.com/amulyaa-mohan/Resolva-Timecard-Exception-Resolution-Agent.git
-cd Resolva-Timecard-Exception-Resolution-Agent
-git switch main
-```
-
-### 2. Configure the Application
-
-The planned `.env.example` file will document the required settings.
-
-```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r backend/requirements-dev.lock -e './backend[dev]'
 cp .env.example .env
+npm --prefix frontend ci --cache ./work/npm-cache
 ```
 
-Configure the model provider and its connection settings in `.env`.
-Keep API keys out of version control.
-Use synthetic attendance data for the demonstration.
-
-### 3. Start the Application
-
-The planned Compose configuration will start the frontend and backend.
+Run the API and frontend in separate terminals:
 
 ```bash
-docker compose up --build
+.venv/bin/python -m uvicorn app.main:app --reload --port 8000
 ```
-
-Local URLs and any model-download or database-seeding steps will be documented
-once the startup configuration is implemented and verified.
-
-### 4. Try the Workflow
-
-1. Open the web application at the address shown during startup.
-2. Load the demonstration dataset or import a supported attendance file.
-3. Open an exception and inspect its attendance and policy evidence.
-4. Generate a proposal and review its validation results.
-5. Approve a valid correction and inspect the resulting audit history.
-
-If AI is unavailable, deterministic detection and manual review should remain
-available, with all corrections subject to validation and audit requirements.
-
-### 5. Stop the Application
 
 ```bash
-docker compose down
+npm --prefix frontend run dev
 ```
+
+Open http://localhost:5173. API documentation is at http://localhost:8000/docs.
 
 ## Safety and Scope
 

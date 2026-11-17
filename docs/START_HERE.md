@@ -3,20 +3,20 @@
 Give your coding agent this prompt at the beginning of a session:
 
 ```text
-We are building Resolva in this repository with two backend developers.
-Read AGENTS.md, docs/TEAM_RULES.md, docs/TASKS.md, and UPDATE.md first.
-Check my branch and Git identity, and fetch published teammate updates if possible.
-I am [YOUR NAME], working on track [A or B], on branch [YOUR BRANCH].
-Select the next unclaimed task in my track whose dependencies are ready.
-Before coding, record the task claim and explain the acceptance check.
-Follow the shared contracts and preserve the other developer's work.
-After changes, run relevant checks, update docs/TASKS.md, and append UPDATE.md.
-Report what changed, actual test results, blockers, and the next integration step.
-Do not commit or push unless I authorize it. Do not merge automatically.
+We are building Resolva with frontend, backend and database teams.
+Read root AGENTS.md and route to my area's docs/AGENTS.md, TASKS.md and UPDATE.md.
+Read docs/TEAM_RULES.md, docs/TASKS.md and docs/CONTRACTS.md.
+I am [NAME], working in [frontend/backend/database], on [BRANCH].
+For backend I own track [A/B]. Verify my Git identity and existing local changes.
+Fetch published team updates if available. Claim an available task with ready dependencies.
+Follow ownership boundaries; coordinate contract changes with affected teams.
+After work, run relevant checks, update task status and append my area's UPDATE.md.
+Report real results, blockers, next step and whether changes are local or published.
+Do not commit, push or merge unless I authorize it.
 ```
 
 For the first session, use SHARED-01 to agree contracts together instead of starting implementation independently.
-AGENTS.md is automatically read by compatible coding agents. For other tools, explicitly supply the prompt above.
+The root AGENTS.md routes compatible agents to the relevant area; each area also has a discovery pointer. For other tools, explicitly supply the prompt above.
 These files instruct agents to maintain updates; they are not a background synchronization service.
 
 ## Get the shared files
@@ -57,7 +57,7 @@ git branch -r
 To inspect a team's published updates without merging:
 
 ```bash
-git show origin/backend:UPDATE.md
+git show origin/backend:backend/docs/UPDATE.md
 git show origin/backend:docs/TASKS.md
 ```
 

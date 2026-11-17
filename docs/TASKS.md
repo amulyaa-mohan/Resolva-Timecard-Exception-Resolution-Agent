@@ -6,6 +6,9 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 
 | ID | Task | Owner | Status | Depends on | Acceptance / next step |
 | --- | --- | --- | --- | --- | --- |
+| SCAFFOLD-01 | Workspace and runnable structural scaffold | Jayanth | REVIEW | — | Health test, lint, web build and live proxy checks passed; local review pending |
+| COORD-03 | Relocate agent instructions and updates to backend/docs | Jayanth | REVIEW | — | Files moved; root discovery pointer and references updated |
+| COORD-04 | Area-specific agent guidance and progress logs | Jayanth | REVIEW | — | Frontend/backend/database guides and routing verified |
 | COORD-01 | Shared instructions and tracker | Jayanth | REVIEW | — | Teammates read rules and record task ownership |
 | SHARED-01 | Freeze initial API/data contracts | Both | TODO | COORD-01 | Agree typed inputs, outputs, errors, and evidence versions |
 | A-01 | DB foundation, synthetic seed, role dependencies | Jayanth | TODO | SHARED-01 | Reproducible employee/shift/punch fixture and server-side permission checks |
