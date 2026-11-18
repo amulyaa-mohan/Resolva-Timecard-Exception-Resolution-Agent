@@ -210,3 +210,53 @@ Never include credentials, private employee data, or invented test results.
 - Dependencies/blockers: unchanged.
 - Next step: commit and push when authorised; then a live eval report including the language section.
 - Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-17 — C V Jayanth — A-START-01 — Attendance domain and first rule
+
+- Branch: backend; status REVIEW.
+- Changed: draft immutable attendance DTOs, shift-scoped missing-punch detector, non-mutating added-punch simulation, synthetic overnight fixture and boundary tests.
+- Contracts: proposed in backend/docs/shared/CONTRACTS.md; not frozen or exposed as an API. No database or teammate AI modules changed.
+- Validation: pytest 13 passed; Ruff check passed; Git whitespace check passed. Existing test-client dependency emits one upstream deprecation warning.
+- Limitations: only missing-punch pairing is implemented; approval eligibility remains false. Persistence, authorization, evidence grounding, remaining rules and HTTP endpoints are pending.
+- Next step: review domain contract with teammate/database owner, then connect persistence/permissions and expand validation.
+- Publication: local only, not committed or pushed.
+
+### 2026-11-18 — C V Jayanth — SHARED-01 / A-INTEGRATE-01 — Track B integration and contract answers
+
+- Branch: backend; status REVIEW for integration boundary; A-01/A-02 remain IN PROGRESS.
+- Integrated remote Track B commit 3874367 via fast-forward; restored local Track A work and preserved both update histories. A pre-integration stash remains as a backup.
+- Changed: CaseService, canonical evidence hashing, consistency checks, assigned-manager repository access, disposable SQLite snapshot persistence, and a CorrectionValidator-compatible adapter that reuses the missing-punch detector.
+- Contract answers (details in backend/docs/shared/TRACK_A_CONTRACT_RESPONSE.md):
+  1. Accept opaque IDs; enforce nonempty at boundaries.
+  2. Accept local shift-start work date, including overnight shifts.
+  3. SHA-256 canonical evidence JSON plus correction revision; policy and permission checks separate.
+  4. Target resolution and no new warnings/problems; incomplete checks block approval.
+  5. Propose explicit action targets now; unsupported actions remain rejected until agreed.
+  6. Accept shared ProposedAction for manual and AI corrections with identical validation.
+  7. Track A audit includes actor, evidence versions, rule/policy/model/prompt trace references and atomic correction linkage.
+  8. Accept proposal/trace tables; final relational schema/migrations remain database-team work.
+  9. Accept Track A exception/proposal route ownership; authenticated identity dependency still pending.
+  10. Accept DEFAULT_SEVERITY mapping and validate it at case load.
+- Shared contracts and Track B implementation modules were not changed; version remains 0.1.0-draft pending joint agreement.
+- Validation: 63 pytest tests passed; Ruff lint passed; Ruff format check passed for 79 files; Git whitespace check passed. One existing upstream test-client deprecation warning remains.
+- Limits: SQLite adapter is disposable integration storage, not production migrations. manager_id is an internal trusted argument, not authentication. No domain HTTP endpoints, full six-rule validator or approval writes exist yet. Mock proposals remain BLOCKED with the partial validator.
+- Next step: Amulya reviews responses; database team agrees schema/repository implementation; Track A adds authenticated API access and remaining deterministic rules before enabling approval.
+- Publication: local only; no commit or push made.
+
+### 2026-11-18 — C V Jayanth — GitHub backend synchronization
+
+- Fast-forwarded backend from 3874367 to origin/backend 475b4cc at the user's request.
+- Restored existing Track A work; reconciled UPDATE.md and CONTRACTS.md by preserving both developers' additions. Backup stash codex-before-github-update-2026-11-18 retained.
+- Validation: 191 backend tests passed (one upstream test-client deprecation warning); Ruff check passed.
+- Task statuses unchanged by synchronization; Track A work remains local pending review.
+- Publication: no new commit or push.
+
+### 2026-11-18 — C V Jayanth — A-INTEGRATE-01 — Clash check and publication
+
+- Branch: backend; status REVIEW.
+- Base: latest Track B commit 475b4cc, including B-03/B-04/B-05 work.
+- Conflicts: resolved shared UPDATE.md and CONTRACTS.md by preserving Track B additions and Track A entries; no source-code clashes found.
+- Validation: 191 tests passed; Ruff lint and format passed (106 files); all eight offline CI evaluation gates passed. Offline eval uses its existing stand-in validator; real Track A integration is separately tested to block incomplete approval checks.
+- Caveat: one existing upstream httpx test-client deprecation warning. No live-model evaluation rerun.
+- Publication: user authorized commit/push of Track A work and contract responses to backend; main and other team branches are unchanged.
+- Next step: review/freeze shared decisions, then finish persistence/authentication and deterministic validation.

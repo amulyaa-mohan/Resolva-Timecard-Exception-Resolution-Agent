@@ -2,7 +2,7 @@
 
 Status: SHARED-01 draft `0.1.0-draft` exists in `backend/app/core/contracts.py` (proposed by Track B; not yet agreed).
 Open decisions and how Track A plugs in: `backend/docs/shared/TRACK_B_INTEGRATION.md`.
-Actual running API: GET /health. Do not infer other routes from planning documents.
+Running APIs include GET /health and POST /assistant/query (documented below). Attendance/decision endpoints remain pending.
 
 Before implementing a shared boundary, record:
 - Task ID, proposing owner and affected teams.
@@ -39,3 +39,30 @@ OpenAPI-generated types replace hand-written ones:
 method: "rules"|"llm"|"none", intent: Intent, query: ExceptionQuery | null, message: string,
 model_id: string | null}`. See `backend/app/language/`. The frontend can call it now; results come
 from Track A's exception list once it accepts the `ExceptionQuery` filters.
+
+## A-START-01 — Attendance domain draft for review
+
+Owner: C V Jayanth. Reviewers: policy/AI teammate and database owner (pending).
+Implementation: backend/app/attendance/contracts.py and backend/app/rules/missing_punch.py.
+These are immutable Pydantic domain DTOs, not ORM models or published HTTP schemas.
+The fixture backend/data/fixtures/missing_punch_overnight.json is synthetic.
+
+- Employee includes manager/location IDs and a validated IANA timezone.
+- ScheduledShift contains aware start/end timestamps; end must follow start.
+- Punch carries a stable ID, employee, aware timestamp, event type and source event identity.
+- AttendanceCase contains the complete shift-scoped evidence, as-of time and opaque evidence version.
+- Case construction rejects cross-employee records, duplicate IDs/source events and future events.
+- Caller supplies policy closing_grace; negative values fail. No policy thresholds are hard-coded.
+- Detection waits through scheduled end plus grace before flagging a trailing clock-in.
+- No punches is not interpreted as a missing punch; attendance absence needs separate handling.
+- Equal-time work punches raise an ambiguity error. Break pairing is not implemented here.
+- validate_added_punch reparses a copied context and invokes the same detector, preserving originals.
+- PairingValidation always has approval_eligible=false: no persistence, authorization, evidence verification or full six-rule validator exists yet.
+- No database migrations or domain API routes are added. SHARED-01 remains pending actual teammate agreement.
+
+Next decisions: ingestion window/shift assignment, typed ambiguity/escalation results, policy snapshot shape, and persistence interfaces.
+
+## Track A response and integration boundary
+
+See TRACK_A_CONTRACT_RESPONSE.md for all ten decisions and additional draft issues.
+Track A adapts core/contracts.py without changing its version. CaseService and the partial validator are implemented; production persistence/authentication remain pending.

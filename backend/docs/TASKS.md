@@ -12,3 +12,11 @@ This index avoids contradictory copies of task status. Update the shared row whe
 A-01 coordinates DB-01/DB-02/DB-03 in backend/database/docs/TASKS.md; do not implement a second migration history.
 B-01 and B-02 are in REVIEW (mock provider, packaging, policy pack, proposal pipeline). Real providers are B-03.
 Record new backend-only tasks below; use a unique ID, owner, status, dependencies and acceptance check.
+
+## Active incremental work
+
+| ID | Owner | Status | Scope |
+| --- | --- | --- | --- |
+| A-START-01 | C V Jayanth | REVIEW | Draft attendance DTOs, deterministic pairing, missing-punch checks; review before shared API adoption |
+
+| A-INTEGRATE-01 | C V Jayanth | REVIEW | Track B case adapter, evidence hash, repository boundary and assigned-manager authorization |

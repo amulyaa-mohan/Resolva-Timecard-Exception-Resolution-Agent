@@ -33,3 +33,12 @@ Append entries; preserve other developers' history. Use repository-relative path
 - History: earlier update entries retain their original paths as historical records.
 - Next step: teammates bring the main reorganization into their working branches before new work.
 - Publication: user authorized direct commit and push to main; team branches are not changed by this operation.
+
+### 2026-11-18 — C V Jayanth — A-INTEGRATE-01 — Persistence boundary for database review
+
+- Added a disposable demo/test SQLite snapshot adapter in backend/app/attendance/repository.py, outside the final migration system and not wired into API startup.
+- CaseRepository requires an authorized, consistent case+correction-revision read. The final database adapter must preserve that contract and increment revision atomically on corrections.
+- Final normalized tables, migrations and authentication remain unimplemented; no database-owned implementation files were changed.
+- Verification: integration suite covers reopen, idempotent seeding, overwrite rejection and employee-manager scope; combined suite 63 passed.
+- Next step: review TRACK_A_CONTRACT_RESPONSE.md decisions 3, 7 and 8 before implementing production schema.
+- Publication: local only.

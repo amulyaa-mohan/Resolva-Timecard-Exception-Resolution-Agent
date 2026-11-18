@@ -11,10 +11,10 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 | COORD-04 | Area-specific agent guidance and progress logs | Jayanth | REVIEW | — | Frontend/backend/database guides and routing verified |
 | COORD-05 | Simplify to frontend/backend root folders | Jayanth | REVIEW | — | References/config verified; backend test, lint and frontend build passed |
 | COORD-01 | Shared instructions and tracker | Jayanth | REVIEW | — | Teammates read rules and record task ownership |
-| SHARED-01 | Freeze initial API/data contracts | Both | REVIEW | COORD-01 | Draft `0.1.0-draft` by Amulya in backend/app/core/contracts.py; Jayanth answers the 10 decisions in TRACK_B_INTEGRATION.md section 5, then both freeze |
-| A-01 | DB foundation, synthetic seed, role dependencies | Jayanth | TODO | SHARED-01 | Reproducible employee/shift/punch fixture and server-side permission checks |
+| SHARED-01 | Freeze initial API/data contracts | Both | REVIEW | COORD-01 | Draft `0.1.0-draft` by Amulya in backend/app/core/contracts.py; Track A answers in TRACK_A_CONTRACT_RESPONSE.md; Amulya confirmation pending before freeze |
+| A-01 | DB foundation, synthetic seed, role dependencies | Jayanth | IN PROGRESS | SHARED-01 | Reproducible employee/shift/punch fixture and server-side permission checks |
 | B-01 | App configuration, mock provider, development packaging | Amulya | REVIEW | SHARED-01 (draft) | Verified: clean install, server, offline mock, kill-switch, Docker healthy; startup in LOCAL_DEVELOPMENT.md |
-| A-02 | Missing-punch detection and correction validation | Jayanth | TODO | A-01 | Missing punch detected; valid fix passes; unsupported fix blocked |
+| A-02 | Missing-punch detection and correction validation | Jayanth | IN PROGRESS | A-01 | Missing punch detected; valid fix passes; unsupported fix blocked |
 | B-02 | One versioned policy pack and proposal pipeline | Amulya | REVIEW | B-01, SHARED-01 (draft) | IN-KA@2025.1 pack; generate_proposal returns eligible/blocked/escalated; real validator pending A-02 |
 | A-03 | Decisions, immutable corrections, audit | Jayanth | TODO | A-02 | Authorized decision creates correction and audit; stale approval rejected |
 | SHARED-02 | First end-to-end missing-punch integration | Both | TODO | A-03, B-02 | Ingest → detect → propose → validate → approve → audit passes |
