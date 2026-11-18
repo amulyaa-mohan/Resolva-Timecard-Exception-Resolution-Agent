@@ -11,7 +11,7 @@ The repository now includes a runnable health/API and frontend scaffold; busines
 | Track | Developer | Owns |
 | --- | --- | --- |
 | A — Attendance and resolution | C V Jayanth | Attendance models, imports, six rules, validator, decisions, corrections, audit, backend/database/migrations, authorization dependencies |
-| B — Policy and AI | Teammate; name to be recorded | Policy registry, retrieval, providers, proposal pipeline, evidence gates, language intents, application configuration, Docker, CI |
+| B — Policy and AI | Amulya Mohan | Policy registry, retrieval, providers, proposal pipeline, evidence gates, language intents, application configuration, Docker, CI |
 | Shared | Both developers | API contracts, core interfaces, integration tests, architectural decisions |
 
 Each developer owns tests for their modules and reviews the other's changes.

@@ -1,0 +1,190 @@
+[
+  {
+    "id": "a01",
+    "category": "ambiguous",
+    "description": "No schedule and no history",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:02"
+        }
+      ]
+    },
+    "expected": {
+      "outcome": "not_eligible"
+    }
+  },
+  {
+    "id": "a02",
+    "category": "ambiguous",
+    "description": "US: no schedule and no history",
+    "input": {
+      "jurisdiction": "US-FED",
+      "punches": [
+        {
+          "type": "in",
+          "time": "08:30"
+        }
+      ]
+    },
+    "expected": {
+      "outcome": "not_eligible"
+    }
+  },
+  {
+    "id": "a03",
+    "category": "ambiguous",
+    "description": "Note contradicts the schedule: claims a 21:30 departure",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:02"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      },
+      "notes": [
+        "I stayed until 21:30 for the stock count and forgot to punch out."
+      ]
+    },
+    "expected": {
+      "outcome": "not_eligible"
+    }
+  },
+  {
+    "id": "a04",
+    "category": "ambiguous",
+    "description": "Note contradicts the schedule: left early at 12:00",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:02"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      },
+      "notes": [
+        "I left at 12:00 for a doctor's appointment."
+      ]
+    },
+    "expected": {
+      "outcome": "not_eligible"
+    }
+  },
+  {
+    "id": "a05",
+    "category": "ambiguous",
+    "description": "Two clock-ins and no clock-out",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:02"
+        },
+        {
+          "type": "in",
+          "time": "13:01"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      }
+    },
+    "expected": {
+      "outcome": "not_eligible"
+    }
+  },
+  {
+    "id": "a06",
+    "category": "ambiguous",
+    "description": "No schedule, but same-weekday punch history exists",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:04"
+        }
+      ],
+      "history_days_ago": [
+        7,
+        14
+      ]
+    },
+    "expected": {
+      "outcome": "safe",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "18:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "KA-8"
+      ]
+    }
+  },
+  {
+    "id": "a07",
+    "category": "ambiguous",
+    "description": "US note: manager asked employee to stay until 19:30",
+    "input": {
+      "jurisdiction": "US-FED",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:00"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "17:00"
+      },
+      "notes": [
+        "My manager asked me to stay until 19:30 to cover a shift."
+      ]
+    },
+    "expected": {
+      "outcome": "not_eligible"
+    }
+  },
+  {
+    "id": "a08",
+    "category": "ambiguous",
+    "description": "Flagged as missing punch but punches are already paired",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:00"
+        },
+        {
+          "type": "out",
+          "time": "18:01"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      }
+    },
+    "expected": {
+      "outcome": "not_eligible"
+    }
+  }
+]

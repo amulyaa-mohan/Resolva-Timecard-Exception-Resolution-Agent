@@ -23,7 +23,10 @@ Logs do not synchronize automatically: another developer must fetch published ch
 - Start with a reviewed entity relationship design for employee, schedule, punch, exception, proposal, correction and audit event.
 - Agree IDs, foreign keys, timestamp/timezone semantics, policy versions, statuses and evidence versions with backend owners before migration code.
 - Keep one authoritative schema and one migration history. Do not introduce a parallel ORM/model definition that diverges from backend models.
-- The plan uses SQLite/SQLModel initially. Confirm migration tooling and model ownership with backend before implementing it.
+- Decided 2026-11-18: PostgreSQL 15+, plain ordered SQL migrations under `backend/database/migrations`,
+  applied by `backend/scripts/migrate_postgres.py`. No ORM: the Pydantic contracts in
+  `backend/app/core/contracts.py` are the only model definition, so a second layer cannot drift from them.
+  A disposable SQLite store remains only for offline demos and tests.
 - Database work in backend-owned model files requires an explicit coordinated task and both area guides.
 - Separate raw punch data, proposed changes and approved corrections. Preserve provenance and immutable original records.
 - Model audit records and reversals as append-only records; do not cascade-delete audit evidence.

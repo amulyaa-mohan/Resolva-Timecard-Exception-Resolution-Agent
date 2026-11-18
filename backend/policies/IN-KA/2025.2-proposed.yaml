@@ -1,0 +1,23 @@
+# Simplified demonstration policy. Not legal advice and not a compliance certification.
+# PROPOSED amendment (not in force). Values model the Karnataka Shops and Commercial Establishments Act as summarised in
+# the Resolva design document; verify against primary sources before any real use.
+id: IN-KA
+version: "2025.2-proposed"
+jurisdiction: IN-KA
+status: proposed
+effective_from: 2026-01-01
+effective_to: null
+rules:
+  daily_regular_hours: 10
+  weekly_regular_hours: 48
+  max_spread_hours: 12
+  overtime_rate: 2.0
+  quarterly_ot_cap_hours: 144
+  rest_after_hours: 5
+  rest_minutes: 60
+  late_tolerance_min: 7
+  missing_punch_window_min: 30
+  evidence_tolerance_min: 5
+  week_start: monday
+  quarter_start_month: 1
+source_doc: 2025.2-proposed.md

@@ -6,9 +6,41 @@ This index avoids contradictory copies of task status. Update the shared row whe
 | Track | Owner | Tasks | Scope |
 | --- | --- | --- | --- |
 | A | C V Jayanth | A-01 through A-06 | Attendance, rules, validator, decisions, audit; database liaison |
-| B | Teammate, name pending | B-01 through B-05 | Policies, retrieval, providers, intents, configuration and CI |
+| B | Amulya Mohan | B-01 through B-05 | Policies, retrieval, providers, intents, configuration and CI |
 | Shared | Both | SHARED-01 through SHARED-03 | Contracts, integration and delivery |
 
 A-01 coordinates DB-01/DB-02/DB-03 in backend/database/docs/TASKS.md; do not implement a second migration history.
-The application skeleton already exists, but B-01's providers/packaging are still unfinished.
+B-01 and B-02 are in REVIEW (mock provider, packaging, policy pack, proposal pipeline). Real providers are B-03.
 Record new backend-only tasks below; use a unique ID, owner, status, dependencies and acceptance check.
+
+## Active incremental work
+
+| ID | Owner | Status | Scope |
+| --- | --- | --- | --- |
+| A-START-01 | C V Jayanth | REVIEW | Draft attendance DTOs, deterministic pairing, missing-punch checks; review before shared API adoption |
+
+| A-INTEGRATE-01 | C V Jayanth | REVIEW | Track B case adapter, evidence hash, repository boundary and assigned-manager authorization |
+
+| A-RULES-02 | C V Jayanth | REVIEW | Six deterministic checks and shared action simulation; incomplete aggregate evidence blocks eligibility |
+
+| A-READ-API-01 | C V Jayanth | REVIEW | Demo authenticated exception reads, persisted assignment filtering and repeatable startup |
+
+| A-RULES-03 | C V Jayanth | REVIEW | Aggregate-aware real validator via existing CorrectionValidator interface; work-date scoping; pipeline integration tests (depends on A-RULES-02) |
+
+| A-RULES-04 | C V Jayanth | REVIEW | Agreed Track B answers: per-run totals reload, recorded totals/period/as-of, internal pass/violation/insufficient_evidence outcomes (depends on A-RULES-03; field wiring waits for contract 0.2.0) |
+
+| A-RULES-05 | C V Jayanth | REVIEW | Contract 0.2.0 adopted: RuleCheck.outcome, evidence_ref tolerance, as_of, policy week/quarter (depends on Track B 1c4e895) |
+
+| A-03-DEMO | C V Jayanth | REVIEW | Decision/correction/audit API and trusted day-totals loader on the demo SQLite store; final schema remains A-01/DB-02 |
+
+| A-DB-PG-01 | C V Jayanth | REVIEW | PostgreSQL schema, migrations, case repository and decision backend; same API suite passes on SQLite and PostgreSQL (see database/docs DB-01/DB-02) |
+
+| A-DETECT-01 | C V Jayanth | REVIEW | Detection job: work-date sessions, same rule functions as validator, corrections applied, deterministic exception ids, week totals |
+
+| A-PROPOSE-01 | C V Jayanth | REVIEW | POST /exceptions/{id}/proposal with proposal and llm_trace persistence, escalation state and the effective-timecard view |
+
+| A-AUDIT-01 | C V Jayanth | REVIEW | Review of Track B audit fixes A1-A6; structured detection_details keys; employee notes import and attach (depends on A-05, A-DETECT-01) |
+
+| A-AUDIT-02 | C V Jayanth | REVIEW | Self-audit of post-audit Track A code: 7 backend fixes with regression tests (see docs/AUDIT_TRACK_A_2026-11-18.md) |
+
+| A-AUDIT-03 | C V Jayanth | REVIEW | Align PostgreSQL timecard and approval totals with detection workday evidence |

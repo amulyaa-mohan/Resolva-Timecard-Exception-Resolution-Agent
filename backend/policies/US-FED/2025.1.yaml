@@ -1,0 +1,24 @@
+# Simplified demonstration policy. Not legal advice and not a compliance certification.
+# US federal model (40 h weekly overtime at 1.5x) with a California-style overlay for daily
+# overtime after 8 h and a 30-minute meal break before the end of the 5th hour, as described in
+# the Resolva design document. Verify against dol.gov and dir.ca.gov before any real use.
+id: US-FED
+version: "2025.1"
+jurisdiction: US-FED
+status: active
+effective_from: 2025-01-01
+effective_to: null
+rules:
+  daily_regular_hours: 8
+  weekly_regular_hours: 40
+  max_spread_hours: null
+  overtime_rate: 1.5
+  quarterly_ot_cap_hours: null
+  rest_after_hours: 5
+  rest_minutes: 30
+  late_tolerance_min: 7
+  missing_punch_window_min: 30
+  evidence_tolerance_min: 5
+  week_start: monday
+  quarter_start_month: 1
+source_doc: 2025.1.md

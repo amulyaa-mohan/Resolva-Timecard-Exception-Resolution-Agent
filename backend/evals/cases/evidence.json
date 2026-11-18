@@ -1,0 +1,255 @@
+[
+  {
+    "id": "e01",
+    "category": "evidence",
+    "description": "Clock-out missing, but trusted weekly/quarterly totals are unavailable",
+    "rules_only": true,
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:02"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      },
+      "aggregates": null
+    },
+    "expected": {
+      "outcome": "not_eligible",
+      "status": "escalated"
+    }
+  },
+  {
+    "id": "e02",
+    "category": "evidence",
+    "description": "Clock-out missing and no meal break was recorded on a 9-hour shift",
+    "rules_only": true,
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:02"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      },
+      "observed_break": false
+    },
+    "expected": {
+      "outcome": "not_eligible",
+      "status": "blocked"
+    }
+  },
+  {
+    "id": "e03",
+    "category": "evidence",
+    "description": "Completing the shift pushes the projected week past 40 h (US-FED): escalated for overtime review",
+    "rules_only": true,
+    "input": {
+      "jurisdiction": "US-FED",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:01"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "17:00"
+      },
+      "aggregates": {
+        "week_other_worked_hours": 32.0,
+        "week_remaining_scheduled_hours": 8.0
+      }
+    },
+    "expected": {
+      "outcome": "not_eligible",
+      "status": "escalated"
+    }
+  },
+  {
+    "id": "e04",
+    "category": "evidence",
+    "description": "Totals were read for the previous week, not this one",
+    "rules_only": true,
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:02"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      },
+      "aggregates": {
+        "week_offset_days": -7
+      }
+    },
+    "expected": {
+      "outcome": "not_eligible",
+      "status": "escalated"
+    }
+  },
+  {
+    "id": "e05",
+    "category": "evidence",
+    "description": "Shift still open at evaluation time (15:00, ends 18:00): no clock-out may be added",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:02"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      },
+      "as_of": {
+        "time": "15:00"
+      }
+    },
+    "expected": {
+      "outcome": "not_eligible",
+      "forbidden_times": [
+        "18:00"
+      ],
+      "status": "blocked"
+    }
+  },
+  {
+    "id": "e06",
+    "category": "evidence",
+    "description": "The attendance source cannot certify it holds every punch for the work date",
+    "rules_only": true,
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:02"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      },
+      "aggregates": {
+        "work_date_complete": false
+      }
+    },
+    "expected": {
+      "outcome": "not_eligible",
+      "status": "escalated"
+    }
+  },
+  {
+    "id": "e07",
+    "category": "evidence",
+    "description": "Recorded meal break of 15 minutes where IN-KA requires 60",
+    "rules_only": true,
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:02"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00",
+        "break_min": 15
+      }
+    },
+    "expected": {
+      "outcome": "not_eligible",
+      "status": "blocked"
+    }
+  },
+  {
+    "id": "e08",
+    "category": "evidence",
+    "description": "Control: heavy but in-limit week (IN-KA 30 + 8 + 8 = 46 h of 48), complete evidence",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:02"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      },
+      "aggregates": {
+        "week_other_worked_hours": 30.0,
+        "week_remaining_scheduled_hours": 8.0
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "18:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "KA-8"
+      ]
+    }
+  },
+  {
+    "id": "e09",
+    "category": "evidence",
+    "description": "Control: evaluated long after an overnight shift (US-FED), complete evidence",
+    "input": {
+      "jurisdiction": "US-FED",
+      "punches": [
+        {
+          "type": "in",
+          "time": "22:58"
+        }
+      ],
+      "schedule": {
+        "start": "23:00",
+        "end": "07:00",
+        "end_day": 1
+      },
+      "as_of": {
+        "time": "09:00",
+        "day": 2
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "07:00",
+          "day": 1,
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "US-5"
+      ]
+    }
+  }
+]
