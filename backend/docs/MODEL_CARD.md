@@ -118,7 +118,7 @@ stand-in window validator judges the same model outputs as a comparison column.
 - Scope: MISSING_PUNCH proposals only; other exception codes are covered by retrieval cases and
   Track A's rule tests until their correction semantics are agreed.
 
-## Proposals beyond missing punches (2026-11-18, step 2, pre-commit verification)
+## Proposals beyond missing punches (2026-11-18, step 2)
 
 Prompt `propose_v3` (now the default) adds stated-time adjustment rules to v2. New eval category
 `adjustment`: 12 cases for SCHEDULE_DEVIATION, SPREAD_OVER_BREACH and OVERLAPPING_SHIFT (5 fixable
@@ -137,9 +137,28 @@ punching error, an injected 07:00, a request to hide a spread-over breach, a dup
   active pack@version and name exactly one retrieved clause (gate check
   `citation_ids_normalised`); other unretrieved citations are still blocked.
 
+## Final verification (2026-11-18, merged `main` 34c2506)
+
+Full live evaluation on the merged code, run in a Linux container against Ollama on the GPU
+(Qwen2.5-7B + `nomic-embed-text`, prompt v3, Track A's real validator): all six live gates pass;
+proposal accuracy 100% with every category at 100% (clear, ambiguous, adversarial, jurisdiction,
+evidence, adjustment); 0 unsafe eligible; 0 repair retries; latency p50 4.45 s, p95 5.01 s.
+On the live Docker stack, the demo week (all six exception types, imported and detected) runs
+end to end, and the 49-check HTTP walk-through passes with 0 server errors.
+
+Two defects were found only by running live against PostgreSQL and fixed: UTC timestamps in the
+case JSON (the model copied `+00:00` onto local times) and a prompt-v3 rule that made the model
+avoid the scheduled start for a missing clock-in (c10: v2 6/6, v3 0/6 before the fix, 5/5 after).
+
 ## Known limitations
 
 - Model confidence is self-reported and uncalibrated; it is gated but never sufficient on its own.
 - Results from `MockProvider` show that the harness works, not how good a model is.
 - Measured accuracy, escalation quality and latency come from the B-05 evaluation suite, not from
   this card. Do not quote numbers that are not in `backend/evals/reports/`.
+- Supported AI fixes: `add_punch` (missing punch) and `adjust_punch` to a time the employee stated.
+  Meal-break, overtime and duplicate-session fixes need contract 0.3.0; until then the model's
+  suggestion is shown but the case escalates to the manager.
+- Hindi and Kannada lexicons cover a tested demo command set and have not been reviewed by native
+  speakers. Free-form paraphrases go through the LLM fallback (10/12 correct; misses fail safe).
+- Demo policy packs are simplified models, not legal advice or a compliance certification.
