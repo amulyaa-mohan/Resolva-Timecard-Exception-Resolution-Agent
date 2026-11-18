@@ -111,3 +111,11 @@ Append entries; preserve other developers' history. Use repository-relative path
   - Executed `node scratch/verify_phase1.mjs`: verified selection reconciliation, empty escalations handling, 7 proposal states, and timeline marker staggering.
 - Blockers and next step: Phase 1 complete. Awaiting review before starting Phase 2.
 - Publication: local only.
+
+## 2026-11-18 — Final frontend audit
+
+- Favicon: added an inline SVG icon in `index.html`; the browser's automatic `/favicon.ico` request was returning 404.
+- API: the proposal decision path now encodes the proposal ID, matching the other endpoints.
+- Verified at 375px, 768px and 1024px: no page-level horizontal overflow on any tab. Wide tables scroll inside their own boxes.
+- Verified: Policies and Kiosk screens show no untranslated sentences in Hindi.
+- Checks: `tsc --noEmit` and `vite build` pass.
