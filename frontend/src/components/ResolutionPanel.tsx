@@ -1,11 +1,13 @@
 ﻿import { useEffect, useState } from 'react';
 import { previewManualEditValidation } from '../lib/api';
-import { ExceptionItem, Role } from '../types/contracts';
+import { ExceptionItem, Role, UILang } from '../types/contracts';
+import { RecordedPunchesCard } from './RecordedPunchesCard';
 import { PunchTimeline } from './PunchTimeline';
 
 interface ResolutionPanelProps {
   item: ExceptionItem | null;
   role: Role;
+  lang?: UILang;
   aiEnabled: boolean;
   onClose: () => void;
   onSimulateStale: (itemId: string) => void;
@@ -20,6 +22,7 @@ interface ResolutionPanelProps {
 export function ResolutionPanel({
   item,
   role,
+  lang = 'en',
   aiEnabled,
   onClose,
   onSimulateStale,
@@ -101,7 +104,7 @@ export function ResolutionPanel({
             {item.employee_name} <span className="mono muted">({item.employee_id})</span>
           </h2>
           <p className="muted small">
-            {item.job} • {item.location} • Work Date: <span className="mono">{item.work_date}</span> ({item.timezone})
+            {item.job} • {item.location} • Work Date: <span className="tnum">{item.work_date}</span> ({item.timezone})
           </p>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
@@ -146,34 +149,28 @@ export function ResolutionPanel({
 
       <PunchTimeline item={item} editedTimeHHMM={mode === 'edit' ? editedTime : null} />
 
-      <div className="card-block">
-        <div className="section-label">Observed Facts (Immutable Source Records)</div>
-        <ul className="punch-list">
-          {item.punches.map((p) => (
-            <li key={p.id} className="mono small">
-              <strong>{p.type.toUpperCase()}</strong> — {p.ts} ({p.source} / {p.device_id}) [ID: {p.id}]
-            </li>
-          ))}
-        </ul>
-        {item.employee_note && (
-          <div className="untrusted-note">
+      <RecordedPunchesCard item={item} lang={lang} />
+
+      {item.employee_note && (
+        <div className="card-block">
+          <div className="untrusted-note" style={{ marginTop: 0 }}>
             <span className="untrusted-tag">UNTRUSTED EMPLOYEE NOTE (EVIDENCE ONLY)</span>
             <p>"{item.employee_note}"</p>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="diff-grid">
         <div className="diff-box">
           <span className="section-label">Before Correction</span>
-          <div className="mono">Regular: {item.before_hours.regular_hours}</div>
-          <div className="mono">Overtime: {item.before_hours.overtime_hours}</div>
+          <div className="hours-line">Regular: {item.before_hours.regular_hours}</div>
+          <div className="hours-line">Overtime: {item.before_hours.overtime_hours}</div>
           <div className="small muted">{item.before_hours.pay_status}</div>
         </div>
         <div className="diff-box diff-after">
           <span className="section-label">After Proposed Fix</span>
-          <div className="mono">Regular: {item.after_hours?.regular_hours ?? item.before_hours.regular_hours}</div>
-          <div className="mono">Overtime: {item.after_hours?.overtime_hours ?? item.before_hours.overtime_hours}</div>
+          <div className="hours-line">Regular: {item.after_hours?.regular_hours ?? item.before_hours.regular_hours}</div>
+          <div className="hours-line">Overtime: {item.after_hours?.overtime_hours ?? item.before_hours.overtime_hours}</div>
           <div className="small">{item.after_hours?.pay_status ?? 'Manual manager resolution required'}</div>
         </div>
       </div>
@@ -186,9 +183,7 @@ export function ResolutionPanel({
         <div className="ai-card">
           <div className="ai-card-header">
             <span className="badge-ai">AI DRAFT</span>
-            <span className="mono small">
-              Confidence: <strong>{Math.round(proposal.confidence * 100)}%</strong> • Model: {proposal.model_id} • Prompt: {proposal.prompt_hash}
-            </span>
+            <span className="small tnum">Confidence: <strong>{Math.round(proposal.confidence * 100)}%</strong> • Model: <code className="mono">{proposal.model_id}</code> • Prompt: <code className="mono">{proposal.prompt_hash}</code></span>
           </div>
           <p className="ai-rationale">{proposal.rationale}</p>
           {proposal.actions.length > 0 && (
@@ -247,7 +242,7 @@ export function ResolutionPanel({
           <div className="section-label">Manual Manager Correction (Live Validator Re-Check)</div>
           <label className="field-label">
             Corrected Out-Punch Time ({item.timezone}):
-            <input type="time" value={editedTime} onChange={(e) => setEditedTime(e.target.value)} className="input-field mono" />
+            <input type="time" value={editedTime} onChange={(e) => setEditedTime(e.target.value)} className="input-field tnum" />
           </label>
           <label className="field-label">
             Audit Note (optional):
@@ -311,3 +306,6 @@ export function ResolutionPanel({
     </aside>
   );
 }
+
+
+

@@ -9,8 +9,8 @@ export interface PunchEvent {
   employee_id: string;
   ts: string;
   type: 'in' | 'out' | 'break_start' | 'break_end';
-  source: 'kiosk' | 'mobile' | 'badge' | 'web';
-  device_id: string;
+  source?: 'kiosk' | 'mobile' | 'badge' | 'web' | 'import' | string;
+  device_id?: string;
 }
 
 export interface ScheduleShift {
@@ -133,3 +133,5 @@ export interface ImportRow {
   valid: boolean;
   error?: string;
 }
+
+

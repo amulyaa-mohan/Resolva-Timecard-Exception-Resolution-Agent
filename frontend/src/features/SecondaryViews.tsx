@@ -315,8 +315,7 @@ export function ImportPreviewView({ onImportValid }: { onImportValid: (items: Ex
         <p className="muted small">
           Validates CSV/JSON rows before ingestion. Invalid rows are flagged and blocked; valid unpaired rows route to the Exception Inbox.
         </p>
-        <textarea
-          className="input-field mono"
+        <textarea className="input-field code-editor mono"
           rows={6}
           style={{ width: '100%' }}
           value={csvInput}
@@ -368,3 +367,4 @@ export function ImportPreviewView({ onImportValid }: { onImportValid: (items: Ex
     </div>
   );
 }
+
