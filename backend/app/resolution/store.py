@@ -346,6 +346,9 @@ class ResolutionStore:
             case, revision = self._load(connection, exception_id, manager_id)
             if self._approved(connection, exception_id):
                 raise DecisionConflict("exception already resolved")
+            # Refuse before any model call: a dismissed case gets no draft (Codex review).
+            if not self.backend.still_open(connection, exception_id):
+                raise DecisionConflict("exception is no longer open; request a new proposal")
             try:
                 policy = self.registry.resolve(case.employee, case.work_date)
             except PolicyResolutionError:
