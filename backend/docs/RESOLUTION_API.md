@@ -9,8 +9,28 @@ Enable it the same way as the read API (see ATTENDANCE_API.md); the seed script 
 
 | Method | Path | Result |
 | --- | --- | --- |
-| POST | `/exceptions/{id}/decisions` | Approve or reject; 200 with `DecisionResult` |
+| POST | `/exceptions/{id}/proposal` | Draft a correction with Track B's pipeline; stores it and its model trace |
+| POST | `/exceptions/{id}/decisions` | Approve, reject or escalate; 200 with `DecisionResult` |
+| POST | `/exceptions/bulk-decisions` | Up to 50 decisions, each authorized and committed on its own |
+| GET | `/exceptions/{id}/timecard` | Raw punches, approved corrections applied, resulting hours |
 | GET | `/exceptions/{id}/audit` | Append-only audit events for an assigned exception |
+
+### Proposal
+
+`POST /exceptions/{id}/proposal` runs the gates and the real validator with totals read inside the
+same transaction, then stores the draft in `proposals` and its model call in `llm_traces`, and
+appends a `PROPOSAL_GENERATED` audit event (actor `ai`). It returns `ProposalResult`:
+`eligible` (every rule passes; a manager may now approve it), `blocked` (a rule is violated) or
+`escalated` (something cannot be decided). It approves nothing: approval is a separate decision
+that re-validates against fresh evidence, so a proposal can never be rubber-stamped.
+409 when the exception is already resolved; 503 when the model provider is unreachable.
+
+### Escalation
+
+`decision: "escalate"` (reason required, no actions) refers a case to a human and records
+`DECISION_ESCALATED`. The pipeline escalates on its own when a proposal comes back `escalated`.
+Either way the exception's status becomes `escalated`, which `GET /exceptions?status=escalated`
+lists. An approval later supersedes it: status is derived as resolved > escalated > open.
 
 Identity comes only from the bearer token; reads and writes are limited to the manager's assigned employees.
 Unknown and unassigned ids both return 404. No role header is trusted.
@@ -74,7 +94,7 @@ or any finished day of the quarter is missing or incomplete. Days from local tod
 - Only `add_punch` corrections can pass validation today.
 - Approval does not require a stored proposal; the server re-validates whatever actions are submitted.
 - The corrected punch is stored as a correction row; detail reads still show raw punches plus the resolved status.
-- No bulk decisions (A-06) and no escalation persistence yet.
+- Attendance event updates (pushing corrections to an external HCM) are not built.
 
 ## PostgreSQL setup
 

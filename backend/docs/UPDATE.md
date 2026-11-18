@@ -445,3 +445,29 @@ Never include credentials, private employee data, or invented test results.
 - Finding raised: two-sided tolerance can grant unclaimed time. With the real validator, a note stating 09:05 lets an adjustment to the scheduled 09:00 become ELIGIBLE. Proposed one-sided rounding of stated times; not changed unilaterally.
 - Validation: ruff check and format clean; pytest 441 passed and 31 PostgreSQL tests skipped without a database; with `TEST_DATABASE_URL` on local PostgreSQL 15.20 (compose profile), 466 passed and the guard passed, and without it the guard fails as intended; `docker compose config` valid; API image built, and `psycopg` 3.3.9 and the app import inside it; `python -m evals.run` 9/9 CI gates on Track A's c85111c validator.
 - Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — C V Jayanth — A-PROPOSE-01 — Proposal API, escalation, demo week, pay integrity
+
+- Branch: backend (pulled Track B dcccc0c first; no conflicts). Status REVIEW.
+- New: POST /exceptions/{id}/proposal runs Track B's pipeline with the real validator and trusted
+  totals inside one transaction, persists the draft and its model trace (migration 0002: proposals,
+  llm_traces, escalations) and audits PROPOSAL_GENERATED. It never approves.
+- Escalation is now persisted: the pipeline escalates a case on its own, a manager can escalate with
+  a reason, and GET /exceptions?status=escalated lists them. Status is derived resolved > escalated > open.
+- GET /exceptions/{id}/timecard shows raw punches, the approved corrections applied and the resulting hours.
+- Agreed with Track B and implemented: a stated time (note ref) is rounded only in the direction that
+  adds no paid time (their 09:05 -> 09:00 example is now refused); an evidenced fix whose only
+  remainder is a warning returns insufficient_evidence ("manager review") so it escalates, not blocks.
+- Bug found by the demo seed and fixed: an unpaired clock-in absorbed every following day into one
+  session, so a single missing clock-out hid the rest of the week. Regression test added.
+- scripts/seed_demo_week.py provisions a synthetic week through the real import path and detection
+  raises all six exception types plus one clean day.
+- Validation: 490 passed with TEST_DATABASE_URL on local PostgreSQL 15 (453 passed / 36 skipped
+  without it); Ruff lint and format pass; evals.run --gates ci 8/8 PASS.
+  HTTP demo on PostgreSQL: 6 exceptions detected -> proposal ELIGIBLE (6/6 checks, schedule_end
+  evidence, KA-8 citation) -> approve 200 resolved -> timecard 3 raw / 4 effective / 8.0 h ->
+  audit DETECTED, PROPOSAL_GENERATED, DECISION_APPROVED. Mock provider: this proves the harness, not model quality.
+- Limits: no attendance event push, no structured detection_details keys yet, and the correction
+  types awaiting contract 0.3.0 are still refused.
+- Next step: Amulya drafts 0.3.0 (add_break new_end_ts, void_shift target_punch_ids); Track A adds
+  structured detection_details and the remaining action types.

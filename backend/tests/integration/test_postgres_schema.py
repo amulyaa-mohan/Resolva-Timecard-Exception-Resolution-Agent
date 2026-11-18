@@ -37,7 +37,10 @@ def test_migrations_are_recorded_and_idempotent(dsn, tmp_path):
     from app.attendance.postgres import MIGRATIONS_DIR, apply_migrations
 
     assert apply_migrations(dsn) == []
-    assert run(dsn, "SELECT version FROM schema_migrations") == [("0001_initial",)]
+    on_disk = sorted(f.stem for f in MIGRATIONS_DIR.glob("[0-9][0-9][0-9][0-9]_*.sql"))
+    assert [r[0] for r in run(dsn, "SELECT version FROM schema_migrations ORDER BY version")] == (
+        on_disk
+    )
     edited = tmp_path / "migrations"
     edited.mkdir()
     original = (MIGRATIONS_DIR / "0001_initial.sql").read_text()

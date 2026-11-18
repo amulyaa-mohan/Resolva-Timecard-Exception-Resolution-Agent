@@ -23,7 +23,7 @@ class ExceptionSummary(BaseModel):
     code: ExceptionCode
     severity: Severity
     work_date: date
-    status: Literal["open", "resolved"] = "open"
+    status: Literal["open", "escalated", "resolved"] = "open"
     evidence_version: str
 
 
@@ -57,12 +57,11 @@ def list_exceptions(
     if date_from and date_to and date_from > date_to:
         raise HTTPException(422, "date_from must not follow date_to.")
     cases = request.app.state.attendance_repository.list_for_manager(manager.manager_id)
-    resolved = request.app.state.resolution_store.resolved_ids([c.exception_id for c in cases])
-    # Escalation state is not persisted yet, so "escalated" matches nothing.
+    state = request.app.state.resolution_store.statuses([c.exception_id for c in cases])
     filtered = [
         c
         for c in cases
-        if (status is None or status == ("resolved" if c.exception_id in resolved else "open"))
+        if (status is None or status == state[c.exception_id])
         and (exception_type is None or c.code == exception_type)
         and (severity is None or c.severity == severity)
         and (employee_id is None or c.employee.employee_id == employee_id)
@@ -79,7 +78,7 @@ def list_exceptions(
                 code=c.code,
                 severity=c.severity,
                 work_date=c.work_date,
-                status="resolved" if c.exception_id in resolved else "open",
+                status=state[c.exception_id],
                 evidence_version=c.evidence_version,
             )
             for c in filtered[offset : offset + limit]

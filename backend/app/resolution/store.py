@@ -21,10 +21,18 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.ai.pipeline import generate_proposal
 from app.attendance.context import build_verified_case
 from app.attendance.repository import CaseAccessDenied
 from app.audit import events as audit
-from app.core.contracts import CaseContext, ProposedAction, PunchRecord, PunchSource
+from app.core.contracts import (
+    CaseContext,
+    GateStatus,
+    ProposalResult,
+    ProposedAction,
+    PunchRecord,
+    PunchSource,
+)
 from app.policies.registry import PolicyRegistry, PolicyResolutionError
 from app.resolution import totals
 from app.rules.engine import net_worked_hours
@@ -35,7 +43,7 @@ CREATE TABLE IF NOT EXISTS decisions (
     decision_id TEXT PRIMARY KEY,
     exception_id TEXT NOT NULL REFERENCES demo_case_snapshots(exception_id),
     manager_id TEXT NOT NULL,
-    decision TEXT NOT NULL CHECK (decision IN ('approve', 'reject')),
+    decision TEXT NOT NULL CHECK (decision IN ('approve', 'reject', 'escalate')),
     source TEXT NOT NULL CHECK (source IN ('ai_proposal', 'manager_edit', 'none')),
     evidence_version TEXT NOT NULL,
     idempotency_key TEXT NOT NULL UNIQUE,
@@ -61,13 +69,42 @@ CREATE TRIGGER IF NOT EXISTS corrections_no_update BEFORE UPDATE ON corrections
 BEGIN SELECT RAISE(ABORT, 'corrections are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS corrections_no_delete BEFORE DELETE ON corrections
 BEGIN SELECT RAISE(ABORT, 'corrections are append-only'); END;
+CREATE TABLE IF NOT EXISTS proposals (
+    proposal_id TEXT PRIMARY KEY,
+    exception_id TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('eligible', 'blocked', 'escalated')),
+    evidence_version TEXT NOT NULL,
+    policy_pack_id TEXT, policy_version TEXT, rule_version TEXT,
+    proposal_json TEXT, validation_json TEXT,
+    gate_checks_json TEXT NOT NULL, reasons_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS llm_traces (
+    trace_id TEXT PRIMARY KEY,
+    proposal_id TEXT NOT NULL REFERENCES proposals(proposal_id),
+    provider TEXT NOT NULL, model_id TEXT, prompt_version TEXT NOT NULL, prompt_hash TEXT,
+    retrieved_chunk_ids TEXT NOT NULL, raw_outputs TEXT NOT NULL, parse_errors TEXT NOT NULL,
+    attempts INTEGER NOT NULL, latency_ms INTEGER NOT NULL, error TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS escalations (
+    exception_id TEXT PRIMARY KEY,
+    reason TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('pipeline', 'manager')),
+    escalated_at TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS proposals_no_update BEFORE UPDATE ON proposals
+BEGIN SELECT RAISE(ABORT, 'proposals are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS proposals_no_delete BEFORE DELETE ON proposals
+BEGIN SELECT RAISE(ABORT, 'proposals are append-only'); END;
 """
 
 
 class DecisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    decision: Literal["approve", "reject"]
+    decision: Literal["approve", "reject", "escalate"]
     actions: list[ProposedAction] = Field(default_factory=list, max_length=5)
     source: Literal["ai_proposal", "manager_edit"] = "ai_proposal"
     evidence_version: str = Field(min_length=1, max_length=100)
@@ -78,18 +115,19 @@ class DecisionRequest(BaseModel):
     def _shape(self):
         if self.decision == "approve" and not self.actions:
             raise ValueError("approve requires the actions being approved")
-        if self.decision == "reject" and self.actions:
-            raise ValueError("reject carries no actions")
-        if (self.decision == "reject" or self.source == "manager_edit") and not self.reason.strip():
-            raise ValueError("a reason is required to reject or to edit a proposal")
+        if self.decision != "approve" and self.actions:
+            raise ValueError("only an approval carries actions")
+        needs_reason = self.decision != "approve" or self.source == "manager_edit"
+        if needs_reason and not self.reason.strip():
+            raise ValueError("a reason is required to reject, escalate or edit a proposal")
         return self
 
 
 class DecisionResult(BaseModel):
     decision_id: str
     exception_id: str
-    decision: Literal["approve", "reject"]
-    status: Literal["open", "resolved"]
+    decision: Literal["approve", "reject", "escalate"]
+    status: Literal["open", "resolved", "escalated"]
     evidence_version: str = Field(description="The version the decision was made against.")
     current_evidence_version: str = Field(description="Version after the decision.")
     rule_version: str | None
@@ -153,6 +191,9 @@ class SqliteBackend:
             raise CaseAccessDenied("case unavailable for this manager")
         return CaseContext.model_validate_json(row[0]), row[1]
 
+    def mark_escalated(self, connection, exception_id: str) -> None:
+        """The escalations table is the demo store's only status record."""
+
     def mark_resolved(self, connection, exception_id: str, old: int, new: int) -> None:
         updated = connection.execute(
             "UPDATE demo_case_snapshots SET correction_revision=? "
@@ -188,17 +229,78 @@ class ResolutionStore:
         case = build_verified_case(case, correction_revision=revision)
         return case.model_copy(update={"as_of": self.clock().astimezone(UTC)}), revision
 
-    def resolved_ids(self, exception_ids: list[str]) -> set[str]:
+    def statuses(self, exception_ids: list[str]) -> dict[str, str]:
+        """exception_id -> open | escalated | resolved (an approval supersedes an escalation)."""
         if not exception_ids:
-            return set()
+            return {}
         with self._transaction(immediate=False) as connection:
             marks = ",".join("?" * len(exception_ids))
+            approved = {
+                r[0]
+                for r in connection.execute(
+                    f"SELECT exception_id FROM decisions WHERE decision='approve' "
+                    f"AND exception_id IN ({marks})",
+                    exception_ids,
+                )
+            }
+            escalated = {
+                r[0]
+                for r in connection.execute(
+                    f"SELECT exception_id FROM escalations WHERE exception_id IN ({marks})",
+                    exception_ids,
+                )
+            }
+        return {
+            i: "resolved" if i in approved else "escalated" if i in escalated else "open"
+            for i in exception_ids
+        }
+
+    def _escalate(self, connection, exception_id: str, reason: str, source: str, now) -> None:
+        connection.execute(
+            "INSERT INTO escalations VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+            (exception_id, reason[:500], source, now.astimezone(UTC).isoformat()),
+        )
+        self.backend.mark_escalated(connection, exception_id)
+
+    def effective_timecard(self, exception_id: str, manager_id: str) -> dict:
+        """Raw punches plus approved corrections: what the timecard now says (A-06)."""
+        with self._transaction(immediate=False) as connection:
+            case, _ = self._load(connection, exception_id, manager_id)
             rows = connection.execute(
-                f"SELECT exception_id FROM decisions WHERE decision='approve' "
-                f"AND exception_id IN ({marks})",
-                exception_ids,
+                "SELECT c.correction_id, c.actions_json FROM corrections c "
+                "JOIN decisions d ON d.decision_id = c.decision_id "
+                "WHERE c.exception_id = ? AND d.decision = 'approve' ORDER BY c.created_at",
+                (exception_id,),
             ).fetchall()
-        return {r[0] for r in rows}
+        punches = {p.punch_id: p for p in case.punches}
+        applied = []
+        for correction_id, actions_json in rows:
+            parsed = actions_json if isinstance(actions_json, list) else json.loads(actions_json)
+            for index, action in enumerate(parsed):
+                applied.append({"correction_id": correction_id, **action})
+                ts = datetime.fromisoformat(action["new_ts"]) if action.get("new_ts") else None
+                if action["type"] == "add_punch":
+                    key = f"correction:{correction_id}:{index}"
+                    punches[key] = PunchRecord(
+                        punch_id=key,
+                        employee_id=case.employee.employee_id,
+                        ts=ts,
+                        type=action["punch_type"],
+                        source=PunchSource.IMPORT,
+                    )
+                elif action["type"] == "adjust_punch" and action.get("punch_id") in punches:
+                    target = punches[action["punch_id"]]
+                    punches[action["punch_id"]] = target.model_copy(update={"ts": ts})
+        effective = sorted(punches.values(), key=lambda p: p.ts)
+        return {
+            "exception_id": exception_id,
+            "employee_id": case.employee.employee_id,
+            "work_date": case.work_date,
+            "raw_punches": case.punches,
+            "corrections_applied": applied,
+            "effective_punches": effective,
+            "net_worked_hours": net_worked_hours(effective),
+        }
 
     def audit_trail(self, exception_id: str, manager_id: str) -> list[dict]:
         with self._transaction(immediate=False) as connection:
@@ -209,6 +311,102 @@ class ResolutionStore:
         """Trusted provisioning only; not exposed over HTTP."""
         with self._transaction() as connection:
             totals.upsert_day_total(connection, now=self.clock(), **fields)
+
+    # ---------------------------------------------------------------- propose
+
+    def propose(self, exception_id: str, manager_id: str, *, provider, settings) -> ProposalResult:
+        """Draft a correction for an authorized case and persist it with its model trace.
+
+        Track B's generate_proposal runs the gates and calls the real validator with trusted
+        totals read inside this transaction. Nothing here approves: an eligible proposal is
+        only a draft a manager may then approve.
+        """
+        now = self.clock()
+        with self._transaction() as connection:
+            case, _revision = self._load(connection, exception_id, manager_id, lock=True)
+            if connection.execute(
+                "SELECT 1 FROM decisions WHERE exception_id=? AND decision='approve'",
+                (exception_id,),
+            ).fetchone():
+                raise DecisionConflict("exception already resolved")
+            try:
+                policy = self.registry.resolve(case.employee, case.work_date)
+            except PolicyResolutionError:
+                policy = None  # the pipeline escalates without an applicable policy
+
+            def validator(c, actions, p):
+                return make_validator(
+                    lambda inner: totals.load_aggregates(connection, inner, p, now)
+                )(c, actions, p)
+
+            result = generate_proposal(
+                case, policy, provider=provider, validator=validator, settings=settings
+            )
+            proposal_id = f"PRP-{uuid.uuid4().hex}"
+            connection.execute(
+                "INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    proposal_id,
+                    exception_id,
+                    manager_id,
+                    result.status.value,
+                    result.evidence_version,
+                    result.policy_pack_id,
+                    result.policy_version,
+                    result.validation.rule_version if result.validation else None,
+                    result.proposal.model_dump_json() if result.proposal else None,
+                    result.validation.model_dump_json() if result.validation else None,
+                    json.dumps([g.model_dump(mode="json") for g in result.gate_checks]),
+                    json.dumps(result.reasons),
+                    now.astimezone(UTC).isoformat(),
+                ),
+            )
+            trace = result.trace
+            connection.execute(
+                "INSERT INTO llm_traces VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    trace.trace_id,
+                    proposal_id,
+                    trace.provider,
+                    trace.model_id,
+                    trace.prompt_version,
+                    trace.prompt_hash,
+                    json.dumps(trace.retrieved_chunk_ids),
+                    json.dumps(trace.raw_outputs),
+                    json.dumps(trace.parse_errors),
+                    trace.attempts,
+                    trace.latency_ms,
+                    trace.error,
+                    now.astimezone(UTC).isoformat(),
+                ),
+            )
+            if result.status == GateStatus.ESCALATED:
+                self._escalate(
+                    connection,
+                    exception_id,
+                    "; ".join(result.reasons) or "escalated by gates",
+                    "pipeline",
+                    now,
+                )
+            audit.append_event(
+                connection,
+                actor_type="ai",
+                actor_id=f"{trace.provider}:{trace.model_id or 'unknown'}",
+                event_type="PROPOSAL_GENERATED",
+                exception_id=exception_id,
+                payload={
+                    "proposal_id": proposal_id,
+                    "status": result.status.value,
+                    "requested_by": manager_id,
+                    "evidence_version": result.evidence_version,
+                    "policy": f"{result.policy_pack_id}@{result.policy_version}",
+                    "prompt_version": trace.prompt_version,
+                    "trace_id": trace.trace_id,
+                    "reasons": result.reasons,
+                },
+                occurred_at=now,
+            )
+            return result
 
     # ---------------------------------------------------------------- decide
 
@@ -255,12 +453,15 @@ class ResolutionStore:
                 "policy": policy_ref,
                 "reason": request.reason,
             }
-            if request.decision == "reject":
+            if request.decision in ("reject", "escalate"):
+                escalating = request.decision == "escalate"
+                if escalating:
+                    self._escalate(connection, exception_id, request.reason, "manager", now)
                 event = audit.append_event(
                     connection,
                     actor_type="manager",
                     actor_id=manager_id,
-                    event_type="DECISION_REJECTED",
+                    event_type="DECISION_ESCALATED" if escalating else "DECISION_REJECTED",
                     exception_id=exception_id,
                     decision_id=decision_id,
                     payload=base,
@@ -269,8 +470,8 @@ class ResolutionStore:
                 result = DecisionResult(
                     decision_id=decision_id,
                     exception_id=exception_id,
-                    decision="reject",
-                    status="open",
+                    decision=request.decision,
+                    status="escalated" if escalating else "open",
                     evidence_version=case.evidence_version,
                     current_evidence_version=case.evidence_version,
                     rule_version=None,

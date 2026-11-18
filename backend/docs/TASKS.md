@@ -36,3 +36,5 @@ Record new backend-only tasks below; use a unique ID, owner, status, dependencie
 | A-DB-PG-01 | C V Jayanth | REVIEW | PostgreSQL schema, migrations, case repository and decision backend; same API suite passes on SQLite and PostgreSQL (see database/docs DB-01/DB-02) |
 
 | A-DETECT-01 | C V Jayanth | REVIEW | Detection job: work-date sessions, same rule functions as validator, corrections applied, deterministic exception ids, week totals |
+
+| A-PROPOSE-01 | C V Jayanth | REVIEW | POST /exceptions/{id}/proposal with proposal and llm_trace persistence, escalation state and the effective-timecard view |

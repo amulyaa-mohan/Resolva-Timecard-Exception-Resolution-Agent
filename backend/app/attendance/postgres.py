@@ -166,6 +166,12 @@ class PostgresBackend:
         )
         return case, revision
 
+    def mark_escalated(self, connection, exception_id: str) -> None:
+        connection.execute(
+            "UPDATE exceptions SET status = 'escalated' WHERE exception_id = ? AND status = 'open'",
+            (exception_id,),
+        )
+
     def mark_resolved(self, connection, exception_id: str, old: int, new: int) -> None:
         updated = connection.execute(
             "UPDATE exceptions SET correction_revision = ?, status = 'resolved' "
