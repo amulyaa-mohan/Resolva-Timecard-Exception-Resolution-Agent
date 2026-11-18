@@ -611,3 +611,8 @@ Never include credentials, private employee data, or invented test results.
 - PostgreSQL open and escalated cases now use the effective workday for evidence snapshots, proposal validation and approval. A correction on a sibling exception changes that snapshot's evidence version, even when its exception revision stays the same.
 - Replaced the linked-punch equality guard. An outdated request still conflicts, and a refreshed request reaches the deterministic rules. Historical case and timecard raw evidence remain scoped to the exception.
 - Added a PostgreSQL regression for a clock-out added by a correction on another exception.
+
+### 2026-11-18 — Overtime warning carry-over regression
+
+- Reproduced an approval that increased projected weekly hours from 49 to 50 against a 48-hour limit.
+- The validator keeps an existing overtime warning blocking if a correction increases net worked hours. Corrections that leave hours unchanged or reduce them retain the existing carry-over behavior.
