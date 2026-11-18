@@ -494,11 +494,10 @@ function App() {
 
         {tab === 'import' && (
           <ImportPreviewView
-            onImportValid={(newItems) => {
-              setExceptions((prev) => [...newItems, ...prev]);
-              if (newItems[0]) setSelectedId(newItems[0].id);
+            onImported={(message) => {
+              setToast({ msg: message });
+              void reload();
               setTab('inbox');
-              setToast({ msg: `Imported ${newItems.length} valid exception(s) into Inbox.` });
             }}
           />
         )}
@@ -507,25 +506,12 @@ function App() {
 
         {tab === 'kiosk' && (
           <KioskView
-            onSimulatePunch={(newExc) => {
-              setExceptions((prev) => [newExc, ...prev]);
-              setAuditEvents((prev) => [
-                {
-                  id: `AUD-${Math.floor(4000 + Math.random() * 5000)}`,
-                  trace_id: `tr-${Math.random().toString(16).slice(2, 9)}`,
-                  actor_type: 'system',
-                  actor_name: 'KioskIngest -> RulesEngine',
-                  action: 'LIVE_PUNCH_EXCEPTION_DETECTED',
-                  entity_ref: `${newExc.id} / ${newExc.employee_id}`,
-                  before_summary: 'Raw kiosk clock-in received',
-                  after_summary: 'Flagged MISSING_PUNCH & generated validated AI draft',
-                  ts: new Date().toISOString(),
-                },
-                ...prev,
-              ]);
-              setSelectedId(newExc.id);
-              setTab('inbox');
-              setToast({ msg: `Live exception ${newExc.id} detected from Kiosk Simulator!` });
+            employees={Array.from(
+              new Map(exceptions.map((e) => [e.employee_id, e.employee_name])).entries()
+            ).map(([id, name]) => ({ id, name }))}
+            onPunchSent={(message) => {
+              setToast({ msg: message });
+              void reload();
             }}
           />
         )}

@@ -14,7 +14,6 @@ import {
   AuditEvent,
   Citation,
   ExceptionItem,
-  ImportRow,
   LLMProposal,
   PunchEvent,
   RuleOutcome,
@@ -434,6 +433,12 @@ export async function fetchAudit(exceptionId: string): Promise<AuditEvent[]> {
     .reverse(); // newest first, as the audit view expects
 }
 
+/** Does the scheduled shift end on a later local date than it starts? (Local wall-clock text.) */
+function isOvernight(item: ExceptionItem): boolean {
+  const schedule = item.schedule;
+  return Boolean(schedule && schedule.end.slice(0, 10) > schedule.start.slice(0, 10));
+}
+
 /**
  * Syntax check for a manually typed time. It is **not** a rule check: whether the correction is
  * allowed is decided by the backend when the decision is submitted.
@@ -446,7 +451,8 @@ export function checkEditedTime(
   if (!match) return { valid: false, error: 'Enter a valid 24-hour time (HH:MM).' };
   const minutes = Number(match[1]) * 60 + Number(match[2]);
   const inPunch = item.punches.find((p) => p.type === 'in');
-  if (inPunch) {
+  // On an overnight shift the clock-out is legitimately earlier in the day than the clock-in.
+  if (inPunch && !isOvernight(item)) {
     const [h, m] = inPunch.ts.slice(11, 16).split(':').map(Number);
     if (minutes <= h * 60 + m) {
       return { valid: false, error: 'The clock-out must be later than the clock-in.' };
@@ -459,31 +465,90 @@ export function checkEditedTime(
 export function editedTimestamp(item: ExceptionItem, editedOutHHMM: string): string {
   const reference = item.schedule?.end ?? item.punches[0]?.ts ?? `${item.work_date}T00:00:00Z`;
   const offset = reference.slice(19) || 'Z';
-  return `${item.work_date}T${editedOutHHMM}:00${offset}`;
+  let date = item.work_date;
+  const inPunch = item.punches.find((p) => p.type === 'in');
+  if (inPunch && isOvernight(item) && editedOutHHMM < inPunch.ts.slice(11, 16)) {
+    // Past midnight: the next local date. Plain calendar arithmetic, no timezone involved.
+    const next = new Date(`${item.work_date}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    date = next.toISOString().slice(0, 10);
+  }
+  return `${date}T${editedOutHHMM}:00${offset}`;
 }
 
-/** Client-side preview of an attendance CSV before the backend import endpoint sees it. */
-export function parseAndValidateImportCsv(csvText: string): ImportRow[] {
-  const lines = csvText
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-  if (lines.length <= 1) return [];
-  return lines.slice(1).map((line, idx) => {
-    const [employee_id = '', employee_name = '', work_date = '', in_time = '', out_time = '', location = ''] =
-      line.split(',').map((c) => c.trim());
-    const row_num = idx + 2;
-    const base = { row_num, employee_id, employee_name, work_date, in_time, out_time, location };
-    if (!employee_id) return { ...base, valid: false, error: 'Missing employee_id.' };
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(work_date)) {
-      return { ...base, valid: false, error: 'Invalid work_date (expected YYYY-MM-DD).' };
-    }
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(in_time)) {
-      return { ...base, valid: false, error: 'Invalid in_time (expected HH:MM).' };
-    }
-    if (out_time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(out_time)) {
-      return { ...base, valid: false, error: 'Invalid out_time (expected HH:MM or blank).' };
-    }
-    return { ...base, valid: true };
+export type ImportKind = 'punches' | 'shifts' | 'notes';
+
+export interface ImportPreviewRow {
+  row_number: number;
+  status: 'valid' | 'invalid' | 'duplicate';
+  error: string | null;
+  duplicate_of: number | null;
+  punch: { punch_id: string; employee_id: string; ts: string; type: string; source: string } | null;
+  shift: { shift_id: string; employee_id: string; start: string; end: string } | null;
+  note: { note_id: string; employee_id: string; text: string; submitted_at: string } | null;
+}
+
+export interface ImportPreviewResult {
+  kind: ImportKind;
+  rows: ImportPreviewRow[];
+  valid: number;
+  invalid: number;
+  duplicates: number;
+}
+
+export interface ImportCommitResult {
+  batch_id: string;
+  inserted: number;
+  invalid: number;
+  duplicates: number;
+  detected_exception_ids: string[];
+  notes_attached: Record<string, string[]>;
+}
+
+/** The backend reads CSV or JSON; JSON always starts with [ or {. */
+function importFormat(content: string): 'csv' | 'json' {
+  return /^[\s\uFEFF]*[[{]/.test(content) ? 'json' : 'csv';
+}
+
+/** Parse and validate on the server. Writes nothing. */
+export function previewImport(kind: ImportKind, content: string): Promise<ImportPreviewResult> {
+  return request('/imports/preview', {
+    method: 'POST',
+    body: JSON.stringify({ kind, format: importFormat(content), content }),
   });
+}
+
+/** Import for real. The server re-validates, deduplicates, scopes to your employees and runs detection. */
+export function commitImport(
+  kind: ImportKind,
+  content: string,
+  allowPartial: boolean
+): Promise<ImportCommitResult> {
+  return request('/imports', {
+    method: 'POST',
+    body: JSON.stringify({
+      kind,
+      format: importFormat(content),
+      content,
+      allow_partial: allowPartial,
+    }),
+  });
+}
+
+/** A single clock event, as a kiosk would send it, through the same import path. */
+export function sendKioskPunch(input: {
+  employeeId: string;
+  date: string;
+  time: string;
+  type: 'in' | 'out' | 'break_start' | 'break_end';
+}): Promise<ImportCommitResult> {
+  const row = [
+    input.employeeId,
+    `${input.date} ${input.time}`,
+    input.type,
+    'kiosk',
+    `kiosk-sim-${Date.now()}`,
+  ];
+  const csv = `employee_id,timestamp,type,source,source_event_id\n${row.join(',')}\n`;
+  return commitImport('punches', csv, false);
 }

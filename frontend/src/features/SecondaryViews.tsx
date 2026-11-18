@@ -1,5 +1,18 @@
 ﻿import { useState } from 'react';
+import { ApiError, commitImport, ImportKind, ImportPreviewResult, previewImport, sendKioskPunch } from '../lib/api';
 import { AuditEvent, ExceptionItem, PolicyPack } from '../types/contracts';
+
+/**
+ * One CSV cell. Quoting alone does not stop a spreadsheet running a formula: a value that
+ * starts with = + - @ (or a tab or carriage return) is executed when the file is opened, and
+ * audit fields carry user-supplied text such as a manager's rejection reason. OWASP's rule is to
+ * prefix such a value with an apostrophe so it is read as text.
+ */
+export function csvCell(value: unknown): string {
+  let text = String(value ?? '');
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
 
 export function AuditView({ events }: { events: AuditEvent[] }) {
   const exportCsv = () => {
@@ -7,7 +20,7 @@ export function AuditView({ events }: { events: AuditEvent[] }) {
     const rows = events
       .map((e) =>
         [e.id, e.trace_id, e.actor_type, e.actor_name, e.action, e.entity_ref, e.before_summary, e.after_summary, e.ts]
-          .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+          .map((v) => csvCell(v))
           .join(',')
       )
       .join('\n');
@@ -67,104 +80,87 @@ export function AuditView({ events }: { events: AuditEvent[] }) {
   );
 }
 
-export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: ExceptionItem) => void }) {
-  const [empId, setEmpId] = useState('EMP-BLR-07');
-  const [empName, setEmpName] = useState('Meera Krishnan');
+export function KioskView({
+  employees,
+  onPunchSent,
+}: {
+  employees: { id: string; name: string }[];
+  onPunchSent: (message: string) => void;
+}) {
+  const [empId, setEmpId] = useState('');
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [punchTime, setPunchTime] = useState('09:05');
-  const [note, setNote] = useState('Clocked in at Bengaluru store kiosk; forgot evening out-punch.');
+  const [kind, setKind] = useState<'in' | 'out' | 'break_start' | 'break_end'>('in');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const selected = empId || employees[0]?.id || '';
 
-  const handleIngest = (e: React.FormEvent) => {
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    const id = `EXC-${Math.floor(106 + Math.random() * 890)}`;
-    const newExc: ExceptionItem = {
-      id,
-      code: 'MISSING_PUNCH',
-      severity: 'problem',
-      employee_id: empId,
-      employee_name: empName,
-      job: 'Cashier',
-      location: 'Bengaluru (BLR-01)',
-      timezone: 'IST (UTC+05:30)',
-      policy_pack_id: 'IN-KA@2025.1',
-      work_date: '2026-11-17',
-      status: 'proposed',
-      evidence_version: 'demo-v1',
-      summary: `Live kiosk clock-in at ${punchTime} IST without matching clock-out punch.`,
-      employee_note: note,
-      schedule: {
-        id: 'SHD-912',
-        employee_id: empId,
-        start: '2026-11-17T09:00:00+05:30',
-        end: '2026-11-17T18:00:00+05:30',
-        planned_break_min: 60,
-        location: 'Bengaluru (BLR-01)',
-        job: 'Cashier',
-      },
-      punches: [
-        {
-          id: `PNC-${Math.floor(9200 + Math.random() * 700)}`,
-          employee_id: empId,
-          ts: `2026-11-17T${punchTime}:00+05:30`,
-          type: 'in',
-          source: 'kiosk',
-          device_id: 'KIOSK-BLR-01',
-        },
-      ],
-      before_hours: { regular_hours: '0.00 h', overtime_hours: '0.00 h', pay_status: 'Blocked (unpaired in-punch)' },
-      after_hours: { regular_hours: '8.92 h', overtime_hours: '0.00 h', pay_status: 'Payable (Regular)' },
-      proposal: {
-        id: `PRP-${Math.floor(600 + Math.random() * 300)}`,
-        exception_id: id,
-        decision: 'propose',
-        actions: [{ type: 'add_punch', new_ts: '2026-11-17T18:00:00+05:30', note: 'Infer scheduled shift end 18:00 IST.' }],
-        rationale: `Detected unpaired clock-in at ${punchTime} IST on scheduled 09:00–18:00 IST shift. Proposed 18:00 IST out-punch passes all 6 deterministic rules.`,
-        citations: [{ chunk_id: 'IN-KA@2025.1#sec-4.2', quote: 'Missing out-punches may be inferred within ±30 minutes of scheduled shift end.' }],
-        confidence: 0.91,
-        missing_information: [],
-        model_id: 'qwen2.5-7b-instruct',
-        prompt_hash: 'sha256:9f82c1a4',
-        evidence_version: 'demo-v1',
-        validator_passed: true,
-        rule_outcomes: [
-          { rule: 'MISSING_PUNCH', passed: true, detail: 'Paired with 18:00 IST proposed out-punch.' },
-          { rule: 'OVERLAPPING_SHIFT', passed: true, detail: 'No overlap.' },
-          { rule: 'MEAL_BREAK_BREACH', passed: true, detail: 'Within policy.' },
-          { rule: 'OVERTIME_RISK', passed: true, detail: 'Within 9h daily limit.' },
-          { rule: 'SPREAD_OVER_BREACH', passed: true, detail: 'Within 12h spread-over.' },
-          { rule: 'SCHEDULE_DEVIATION', passed: true, detail: 'Within 7 min tolerance.' },
-        ],
-      },
-    };
-    onSimulatePunch(newExc);
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await sendKioskPunch({ employeeId: selected, date, time: punchTime, type: kind });
+      const found = result.detected_exception_ids.length
+        ? `Detection raised ${result.detected_exception_ids.length} exception(s).`
+        : 'Detection raised nothing new.';
+      onPunchSent(
+        result.inserted
+          ? `Punch stored (immutable). ${found}`
+          : 'That punch was already on file, so nothing changed.'
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : 'The punch was not sent.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <div className="panel-card" style={{ maxWidth: 640, padding: 20 }}>
-      <h2 style={{ marginTop: 0 }}>Kiosk Punch Simulator (Live Event Demo)</h2>
+      <h2 style={{ marginTop: 0 }}>Kiosk Punch Simulator</h2>
       <p className="muted">
-        Simulates a raw immutable punch event entering the deterministic rules detector and routing an AI-drafted proposal into the Manager Inbox.
+        Sends one raw clock event to the backend through the same import path a kiosk feed would use.
+        The server stores it as an immutable punch and re-runs the rules for that day. Nothing is
+        invented here: whatever appears in the inbox was detected by the backend.
       </p>
-      <form onSubmit={handleIngest} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <label className="field-label">
-          Employee ID:
-          <input className="input-field mono" value={empId} onChange={(e) => setEmpId(e.target.value)} required />
-        </label>
-        <label className="field-label">
-          Employee Name:
-          <input className="input-field" value={empName} onChange={(e) => setEmpName(e.target.value)} required />
-        </label>
-        <label className="field-label">
-          Clock-In Time (IST):
-          <input type="time" className="input-field mono" value={punchTime} onChange={(e) => setPunchTime(e.target.value)} required />
-        </label>
-        <label className="field-label">
-          Employee Note (Untrusted Evidence):
-          <input className="input-field" value={note} onChange={(e) => setNote(e.target.value)} />
-        </label>
-        <button type="submit" className="btn-primary">
-          Post Raw Punch & Trigger Detection
-        </button>
-      </form>
+      {employees.length === 0 ? (
+        <div className="banner banner-error">No employees are visible to you yet.</div>
+      ) : (
+        <form onSubmit={handleSend} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <label className="field-label">
+            Employee:
+            <select className="input-field" value={selected} onChange={(e) => setEmpId(e.target.value)}>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name} ({emp.id})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field-label">
+            Local date:
+            <input type="date" className="input-field mono" value={date} onChange={(e) => setDate(e.target.value)} required />
+          </label>
+          <label className="field-label">
+            Local time (employee's timezone):
+            <input type="time" className="input-field mono" value={punchTime} onChange={(e) => setPunchTime(e.target.value)} required />
+          </label>
+          <label className="field-label">
+            Event:
+            <select className="input-field" value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
+              <option value="in">Clock in</option>
+              <option value="out">Clock out</option>
+              <option value="break_start">Break start</option>
+              <option value="break_end">Break end</option>
+            </select>
+          </label>
+          {error && <div className="banner banner-error" role="alert">{error}</div>}
+          <button type="submit" className="btn-primary" disabled={busy}>
+            {busy ? 'Sending...' : 'Send punch to backend'}
+          </button>
+        </form>
+      )}
     </div>
   );
 }
@@ -247,124 +243,148 @@ EMP-BLR-12,Karthik Hegde,2026-11-17,09:15,18:10,Bengaluru (BLR-02)
 ,Unknown Worker,2026-11-17,09:00,18:00,Bengaluru (BLR-01)
 EMP-AUS-09,Hannah Brooks,11/17/2026,08:00,17:00,Austin (AUS-01)`;
 
-export function ImportPreviewView({ onImportValid }: { onImportValid: (items: ExceptionItem[]) => void }) {
-  const [csvInput, setCsvInput] = useState(SAMPLE_CSV);
-  const [rows, setRows] = useState<import('../types/contracts').ImportRow[]>(() =>
-    []
-  );
+const SAMPLES: Record<ImportKind, string> = {
+  punches:
+    'employee_id,timestamp,type,source_event_id\nE-DEMO-1,2026-11-16 09:00,in,sample-1\nE-DEMO-1,2026-11-16 13:00,break_start,sample-2\nE-DEMO-1,2026-11-16 14:00,break_end,sample-3\n',
+  shifts:
+    'employee_id,shift_id,start,end,planned_break_min\nE-DEMO-1,S-SAMPLE-1,2026-11-16 09:00,2026-11-16 18:00,60\n',
+  notes:
+    'employee_id,submitted_at,text\nE-DEMO-1,2026-11-16 19:00,"I left at 6:00 pm but forgot to punch out."\n',
+};
 
-  // Lazy parse on render/button click
-  const parsedRows = rows.length > 0 ? rows : (() => {
-    const lines = csvInput.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    if (lines.length <= 1) return [];
-    return lines.slice(1).map((line, idx) => {
-      const [employee_id = '', employee_name = '', work_date = '', in_time = '', out_time = '', location = ''] = line.split(',').map((c) => c.trim());
-      const row_num = idx + 2;
-      if (!employee_id || !employee_name) return { row_num, employee_id, employee_name, work_date, in_time, out_time, location, valid: false, error: 'Missing employee_id or employee_name.' };
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(work_date)) return { row_num, employee_id, employee_name, work_date, in_time, out_time, location, valid: false, error: 'Invalid work_date (expected YYYY-MM-DD).' };
-      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(in_time)) return { row_num, employee_id, employee_name, work_date, in_time, out_time, location, valid: false, error: 'Invalid in_time (expected HH:MM).' };
-      return { row_num, employee_id, employee_name, work_date, in_time, out_time, location: location || 'Bengaluru (BLR-01)', valid: true };
-    });
-  })();
+export function ImportPreviewView({ onImported }: { onImported: (message: string) => void }) {
+  const [kind, setKind] = useState<ImportKind>('punches');
+  const [content, setContent] = useState(SAMPLES.punches);
+  const [preview, setPreview] = useState<ImportPreviewResult | null>(null);
+  const [allowPartial, setAllowPartial] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const validMissingPunches = parsedRows.filter((r) => r.valid && !r.out_time);
-
-  const handleImport = () => {
-    const created: ExceptionItem[] = validMissingPunches.map((r, i) => ({
-      id: `EXC-${210 + i}`,
-      code: 'MISSING_PUNCH',
-      severity: 'problem',
-      employee_id: r.employee_id,
-      employee_name: r.employee_name,
-      job: 'Associate',
-      location: r.location,
-      timezone: r.location.includes('Austin') ? 'CST (UTC-06:00)' : 'IST (UTC+05:30)',
-      policy_pack_id: r.location.includes('Austin') ? 'US-FED+CA@2025.1' : 'IN-KA@2025.1',
-      work_date: r.work_date,
-      status: 'proposed',
-      evidence_version: 'demo-v1',
-      summary: `Imported shift ${r.in_time} missing out-punch.`,
-      punches: [
-        { id: `PNC-IMP-${i}`, employee_id: r.employee_id, ts: `${r.work_date}T${r.in_time}:00+05:30`, type: 'in', source: 'badge', device_id: 'CSV-IMPORT' },
-      ],
-      before_hours: { regular_hours: '0.00 h', overtime_hours: '0.00 h', pay_status: 'Blocked (missing out-punch)' },
-      after_hours: { regular_hours: '8.00 h', overtime_hours: '0.00 h', pay_status: 'Payable (Regular)' },
-      proposal: {
-        id: `PRP-IMP-${i}`,
-        exception_id: `EXC-${210 + i}`,
-        decision: 'propose',
-        actions: [{ type: 'add_punch', new_ts: `${r.work_date}T18:00:00+05:30`, note: 'Inferred scheduled end 18:00.' }],
-        rationale: 'Imported CSV shift had unpaired clock-in; proposed scheduled end timestamp.',
-        citations: [{ chunk_id: 'IN-KA@2025.1#sec-4.2', quote: 'Missing out-punches may be inferred within ±30 minutes of scheduled shift end.' }],
-        confidence: 0.89,
-        missing_information: [],
-        model_id: 'qwen2.5-7b-instruct',
-        prompt_hash: 'sha256:9f82c1a4',
-        evidence_version: 'demo-v1',
-        validator_passed: true,
-        rule_outcomes: [{ rule: 'MISSING_PUNCH', passed: true, detail: 'Paired with 18:00 out-punch.' }],
-      },
-    }));
-    onImportValid(created);
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : 'The request did not complete.');
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const handlePreview = () => run(async () => setPreview(await previewImport(kind, content)));
+
+  const handleImport = () =>
+    run(async () => {
+      const result = await commitImport(kind, content, allowPartial);
+      setPreview(null);
+      const attached = Object.keys(result.notes_attached).length;
+      onImported(
+        `Imported ${result.inserted} new record(s); ${result.duplicates} already on file; ` +
+          `${result.detected_exception_ids.length} exception(s) detected` +
+          (attached ? `; notes attached to ${attached} exception(s)` : '') +
+          '.'
+      );
+    });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div className="panel-card" style={{ padding: 18 }}>
-        <h2 style={{ marginTop: 0 }}>Schedule & Punch Import Preview (FE-04)</h2>
+        <h2 style={{ marginTop: 0 }}>Import</h2>
         <p className="muted small">
-          Validates CSV/JSON rows before ingestion. Invalid rows are flagged and blocked; valid unpaired rows route to the Exception Inbox.
+          Paste CSV or JSON. The backend checks every row, skips duplicates, limits you to your own
+          employees, and re-runs detection for the days it touches. Times without an offset are read
+          in the employee's timezone. Preview writes nothing.
         </p>
+        <label className="field-label">
+          What are you importing?
+          <select
+            className="input-field"
+            value={kind}
+            onChange={(e) => {
+              const next = e.target.value as ImportKind;
+              setKind(next);
+              setContent(SAMPLES[next]);
+              setPreview(null);
+            }}
+          >
+            <option value="punches">Clock punches</option>
+            <option value="shifts">Scheduled shifts</option>
+            <option value="notes">Employee notes</option>
+          </select>
+        </label>
         <textarea
           className="input-field mono"
-          rows={6}
-          style={{ width: '100%' }}
-          value={csvInput}
+          style={{ width: '100%', minHeight: 140, marginTop: 10 }}
+          value={content}
           onChange={(e) => {
-            setCsvInput(e.target.value);
-            setRows([]);
+            setContent(e.target.value);
+            setPreview(null);
           }}
+          aria-label="Import data"
         />
+        {error && <div className="banner banner-error" role="alert" style={{ marginTop: 10 }}>{error}</div>}
         <div className="button-row" style={{ marginTop: 12 }}>
-          <button type="button" className="btn-primary" disabled={validMissingPunches.length === 0} onClick={handleImport}>
-            Import Valid Exception Rows to Inbox ({validMissingPunches.length})
+          <button type="button" className="btn-secondary" disabled={busy || !content.trim()} onClick={handlePreview}>
+            Preview
           </button>
+          <button type="button" className="btn-primary" disabled={busy || !preview || preview.valid === 0} onClick={handleImport}>
+            Import {preview ? `${preview.valid} valid row(s)` : ''}
+          </button>
+          <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input type="checkbox" checked={allowPartial} onChange={(e) => setAllowPartial(e.target.checked)} />
+            Import the valid rows even if some are invalid
+          </label>
         </div>
       </div>
 
-      <div className="panel-card">
-        <div className="toolbar">
-          <strong>Row-Level Validation Preview ({parsedRows.filter((r) => r.valid).length} Valid / {parsedRows.filter((r) => !r.valid).length} Invalid)</strong>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Row</th>
-                <th>Status</th>
-                <th>Employee</th>
-                <th>Work Date & Punches</th>
-                <th>Validation Detail</th>
-              </tr>
-            </thead>
-            <tbody>
-              {parsedRows.map((r) => (
-                <tr key={r.row_num}>
-                  <td className="mono small">#{r.row_num}</td>
-                  <td>
-                    <span className={r.valid ? 'badge-pass' : 'badge-escalated'}>
-                      {r.valid ? 'VALID' : 'INVALID ROW'}
-                    </span>
-                  </td>
-                  <td className="small"><strong>{r.employee_name || '—'}</strong> ({r.employee_id || 'missing'})</td>
-                  <td className="mono small">{r.work_date} | {r.in_time} → {r.out_time || 'MISSING'}</td>
-                  <td className="small">{r.valid ? 'Ready for ingestion' : <span style={{ color: '#dc2626' }}>{r.error}</span>}</td>
+      {preview && (
+        <div className="panel-card">
+          <div className="toolbar">
+            <strong>
+              {preview.valid} valid, {preview.invalid} invalid, {preview.duplicates} duplicate
+            </strong>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Row</th>
+                  <th>Status</th>
+                  <th>What it is</th>
+                  <th>Detail</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {preview.rows.map((r) => {
+                  const record = r.punch ?? r.shift ?? r.note;
+                  const what = r.punch
+                    ? `${r.punch.employee_id} ${r.punch.type} ${r.punch.ts}`
+                    : r.shift
+                    ? `${r.shift.employee_id} ${r.shift.start} to ${r.shift.end}`
+                    : r.note
+                    ? `${r.note.employee_id}: "${r.note.text}"`
+                    : '—';
+                  return (
+                    <tr key={r.row_number}>
+                      <td className="mono small">#{r.row_number}</td>
+                      <td>
+                        <span className={r.status === 'valid' ? 'badge-pass' : r.status === 'duplicate' ? 'badge-neutral' : 'badge-escalated'}>
+                          {r.status.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="mono small">{record ? what : '—'}</td>
+                      <td className="small">
+                        {r.error ? <span style={{ color: r.status === 'invalid' ? '#dc2626' : undefined }}>{r.error}</span> : 'Ready to import'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -99,3 +99,25 @@ Append entries; preserve other developers' history. Use repository-relative path
   Policies & Settings (fixtures), bulk approve beyond per-item submission, Edit Fix for non-missing-punch cases,
   the Audit Trail tab shows only the selected case's events, and hours before/after a fix are mostly "—".
 - Dev: `VITE_API_TARGET=http://127.0.0.1:8001 npm run dev` points the proxy at another backend port.
+
+### 2026-11-18 — C V Jayanth — FE-08 — Import and Kiosk wired to the backend; audit-found frontend defects
+
+- Branch: frontend; REVIEW; local until pushed. Touches `src/features/SecondaryViews.tsx`, `src/lib/api.ts`, `src/main.tsx`.
+- **Removed fabricated data.** The Kiosk Simulator built a whole exception in browser memory, including an AI
+  proposal citing a clause that does not exist (`IN-KA@2025.1#sec-4.2`; the real one is `KA-8`), `validator_passed: true`,
+  six invented passing checks and a made-up 91% confidence. The Import tab did the same for imported rows, and both
+  inserted invented audit events into the audit view. All of it is gone.
+- **Import** now calls `POST /imports/preview` and `POST /imports` (punches, shifts or notes; CSV or JSON). Rows are
+  validated, deduplicated and scoped by the server; the view shows the server's verdict per row and, after import,
+  how many records were stored and how many exceptions detection raised.
+- **Kiosk Simulator** sends one real punch through the same import path, for one of the manager's own employees. The
+  inbox then shows only what the backend detected. Sending the missing clock-out made the open exception clear itself.
+- **CSV export formula injection fixed.** Cells were quoted but not neutralised, so a manager's rejection reason beginning
+  with `=` would run as a formula in a spreadsheet. Values starting with `= + - @`, tab or CR are prefixed with an apostrophe.
+- **Manual clock-out on an overnight shift** was rejected (it had to be later in the day than the clock-in) and was dated
+  on the wrong day. It now allows an earlier time on an overnight shift and uses the next local date, including at month end.
+- Validation: `tsc --noEmit` and `vite build` pass. Behaviour of `csvCell` (9 cases) and the overnight helpers (7 cases)
+  checked by running the transpiled functions. In a browser against PostgreSQL (mock provider): the server previewed
+  three punches, import stored them and detection raised a missing punch (confirmed in the database), and a kiosk
+  clock-out cleared it (`EXCEPTION_DETECTED` then `EXCEPTION_CLEARED`).
+- Still not wired: Policies & Settings (fixtures). There is no automated frontend test suite; the Playwright spec has not been run.
