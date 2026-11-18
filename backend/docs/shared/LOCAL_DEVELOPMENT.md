@@ -71,3 +71,7 @@ Evaluation (from backend/): `python -m evals.run` (offline, CI gates) or
 Hosted alternative: put `GROQ_API_KEY` in backend/.env and set `LLM_PROVIDER=groq`.
 `/health` reports `llm_status` and `mode` (`ai_assisted` or `rules_only`).
 This scaffold does not implement authentication, business rules or correction approval.
+
+## Optional attendance reads
+
+See `backend/docs/ATTENDANCE_API.md` (repository-relative) to provision synthetic persisted attendance and an expiring manager credential. The read endpoints are disabled until explicitly configured.

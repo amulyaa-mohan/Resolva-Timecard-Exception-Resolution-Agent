@@ -6,6 +6,9 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.ai.providers import ProviderError, build_provider
+from app.attendance.access import AttendanceSettings, read_credentials
+from app.attendance.repository import DemoCaseRepository
+from app.attendance.router import router as attendance_router
 from app.core.config import Settings
 from app.core.contracts import CONTRACT_VERSION
 from app.core.errors import install_error_handlers
@@ -13,7 +16,9 @@ from app.core.tracing import TRACE_HEADER, new_trace_id, set_trace_id
 from app.language.router import router as assistant_router
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, *, attendance_settings: AttendanceSettings | None = None
+) -> FastAPI:
     settings = settings or Settings()
     app = FastAPI(
         title=settings.app_name,
@@ -21,6 +26,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description="Timecard exception resolution: AI drafts, rules verify, the manager decides.",
     )
     app.state.settings = settings
+    attendance_settings = attendance_settings or AttendanceSettings()
+    app.state.attendance_repository = None
+    app.state.attendance_credentials = ()
+    if attendance_settings.enabled:
+        # Missing provisioning fails startup instead of silently creating an empty database.
+        if not attendance_settings.database_path.is_file():
+            raise ValueError("Provision the attendance demo database before enabling it.")
+        app.state.attendance_credentials = read_credentials(attendance_settings.credentials_path)
+        app.state.attendance_repository = DemoCaseRepository(attendance_settings.database_path)
+    app.include_router(attendance_router)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[origin.strip() for origin in settings.cors_origins.split(",")],

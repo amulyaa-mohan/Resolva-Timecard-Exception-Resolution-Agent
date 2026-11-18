@@ -1,7 +1,7 @@
 """Disposable SQLite evidence store for integration tests, not production migrations.
 
 Use a dedicated demo/test path. The database team owns the final relational schema.
-No HTTP routes expose this adapter; provisioning methods require trusted server code.
+Read-only demo HTTP routes expose authorized snapshots; provisioning requires trusted server code.
 """
 
 import sqlite3
@@ -91,3 +91,16 @@ class DemoCaseRepository:
         if row is None:
             raise CaseAccessDenied("case unavailable for this manager")
         return CaseContext.model_validate_json(row[0]), row[1]
+
+    def list_for_manager(self, manager_id: str) -> list[CaseContext]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT c.evidence_json, c.correction_revision FROM demo_case_snapshots c
+                   JOIN demo_employee_managers m ON m.employee_id=c.employee_id
+                   WHERE m.manager_id=? ORDER BY c.exception_id""",
+                (manager_id,),
+            ).fetchall()
+        return [
+            build_verified_case(CaseContext.model_validate_json(row[0]), correction_revision=row[1])
+            for row in rows
+        ]

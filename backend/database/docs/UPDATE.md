@@ -42,3 +42,11 @@ Append entries; preserve other developers' history. Use repository-relative path
 - Verification: integration suite covers reopen, idempotent seeding, overwrite rejection and employee-manager scope; combined suite 63 passed.
 - Next step: review TRACK_A_CONTRACT_RESPONSE.md decisions 3, 7 and 8 before implementing production schema.
 - Publication: local only.
+
+### 2026-11-18 — C V Jayanth — A-READ-API-01 — Demo persistence exposed through authorized reads
+
+- Existing disposable DemoCaseRepository now supplies manager-scoped lists as well as details, using stored assignment joins.
+- No final schema/migration files changed. Provisioning creates synthetic snapshots and private credential files in ignored backend/local or an explicitly supplied directory.
+- Combined suite: 244 passing tests; includes invalid/expired credentials, assignment isolation, hidden unauthorized records and filtering.
+- Final normalized attendance/aggregate source and correction/audit transactions remain database integration tasks.
+- Publication: local only.

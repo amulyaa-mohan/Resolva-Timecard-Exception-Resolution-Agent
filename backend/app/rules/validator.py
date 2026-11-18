@@ -1,97 +1,119 @@
-"""Track B-compatible partial validator; fails closed until full rule coverage."""
+"""Shared detector-backed simulation. No writes or AI dependencies.
 
-from datetime import timedelta
+Correction validity only: passing never authorizes a manager to approve.
+"""
 
-from app.attendance.contracts import AttendanceCase, Employee, Punch, ScheduledShift
+from collections.abc import Callable
+
 from app.core.contracts import (
     ActionType,
     CaseContext,
+    CorrectionValidator,
     ExceptionCode,
     PolicySnapshot,
     ProposedAction,
-    RuleCheck,
+    PunchRecord,
+    PunchSource,
+    PunchType,
     ValidationResult,
 )
-from app.rules.missing_punch import validate_added_punch
+from app.rules.engine import (
+    RULE_VERSION,
+    AggregateEvidence,
+    blocked_checks,
+    evaluate_rules,
+    instant,
+)
+
+# Trusted backend source of other-day totals, keyed by the case's own identifiers.
+# Never wire it to model output, client input or detection_details. Returning None
+# means "not available" and keeps the overtime check failed closed.
+AggregateLoader = Callable[[CaseContext], AggregateEvidence | None]
+
+
+def _reject(reason: str) -> ValidationResult:
+    return ValidationResult(passed=False, checks=blocked_checks(reason), rule_version=RULE_VERSION)
+
+
+def _validate(
+    case: CaseContext,
+    actions: list[ProposedAction],
+    policy: PolicySnapshot,
+    load_aggregates: AggregateLoader | None,
+) -> ValidationResult:
+    # Other actions await agreed target/evidence fields; never invent them.
+    if case.code != ExceptionCode.MISSING_PUNCH or len(actions) != 1 or case.schedule is None:
+        return _reject("Supported correction requires one missing-punch action and a schedule.")
+    try:
+        action = ProposedAction.model_validate(actions[0].model_dump())
+        if action.type != ActionType.ADD_PUNCH or action.punch_type not in (
+            PunchType.IN,
+            PunchType.OUT,
+        ):
+            return _reject("Only a work clock-in/clock-out can repair a missing work punch.")
+        if action.punch_id is not None:
+            return _reject("add_punch cannot target an existing punch.")
+        aggregates = None
+        if load_aggregates is not None:
+            try:
+                aggregates = load_aggregates(case)
+            except Exception as exc:  # a broken source must fail closed, not pass
+                return _reject(f"Trusted aggregate evidence unavailable: {type(exc).__name__}.")
+            if aggregates is not None and not isinstance(aggregates, AggregateEvidence):
+                return _reject("Aggregate source returned an unsupported value.")
+        before = evaluate_rules(case, policy, aggregates)
+        if next(c for c in before if c.code == ExceptionCode.MISSING_PUNCH).passed:
+            return _reject("Target missing-punch exception is no longer present.")
+        expected = case.schedule.start if action.punch_type == PunchType.IN else case.schedule.end
+        delta = abs((instant(action.new_ts) - instant(expected)).total_seconds())
+        if delta > policy.rules.missing_punch_window_min * 60:
+            return _reject("Proposed timestamp exceeds the configured inference window.")
+        # Until independent confirmed-time evidence is contracted, schedule is the only anchor.
+        # A note or an LLM rationale does not authorize arbitrary times inside the window.
+        if delta != 0:
+            return _reject(
+                "Proposed time requires verified evidence beyond the exact schedule anchor."
+            )
+        candidate_id = "simulation-added-punch"
+        if any(p.punch_id == candidate_id for p in case.punches + case.punch_history):
+            return _reject("Simulation identity conflicts with existing evidence.")
+        candidate = PunchRecord(
+            punch_id=candidate_id,
+            employee_id=case.employee.employee_id,
+            ts=action.new_ts,
+            type=action.punch_type,
+            source=PunchSource.IMPORT,
+        )
+        # Simulate on a re-validated copy; the caller's raw punches are never mutated.
+        simulated = CaseContext.model_validate(
+            {**case.model_dump(), "punches": [*case.punches, candidate]}
+        )
+        # Every applicable rule must pass afterwards, so a fix can neither leave nor create
+        # another violation (e.g. completing a shift that then exceeds weekly hours).
+        checks = evaluate_rules(simulated, policy, aggregates)
+        return ValidationResult(
+            passed=all(c.passed for c in checks), checks=checks, rule_version=RULE_VERSION
+        )
+    except (ValueError, AttributeError, KeyError) as exc:
+        return _reject(f"Invalid correction evidence: {exc}")
 
 
 def validate_correction(
     case: CaseContext, actions: list[ProposedAction], policy: PolicySnapshot
 ) -> ValidationResult:
-    checks = []
-    supported = (
-        case.code == ExceptionCode.MISSING_PUNCH
-        and case.schedule is not None
-        and len(actions) == 1
-        and actions[0].type == ActionType.ADD_PUNCH
-    )
-    if supported:
-        action, shift = actions[0], case.schedule
-        assert shift is not None
-        try:
-            context = AttendanceCase(
-                employee=Employee(
-                    id=case.employee.employee_id,
-                    manager_id="internal-validation-only",
-                    location_id=case.employee.location_id,
-                    timezone=case.employee.timezone,
-                ),
-                schedule=ScheduledShift(
-                    id=shift.shift_id,
-                    employee_id=shift.employee_id,
-                    start=shift.start,
-                    end=shift.end,
-                ),
-                punches=tuple(
-                    Punch(
-                        id=p.punch_id,
-                        employee_id=p.employee_id,
-                        event_time=p.ts,
-                        event_type=p.type.value,
-                        source=p.source.value,
-                        source_event_id=p.punch_id,
-                    )
-                    for p in case.punches
-                ),
-                evidence_version=case.evidence_version,
-                # The draft has no as_of field: evaluate closed-shift pairing only.
-                as_of=max([shift.end, *(p.ts for p in case.punches)]),
-            )
-            candidate = Punch(
-                id="proposed-addition",
-                employee_id=case.employee.employee_id,
-                event_time=action.new_ts,
-                event_type=action.punch_type.value,
-                source="proposal",
-                source_event_id="proposed-addition",
-            )
-            result = validate_added_punch(context, candidate, closing_grace=timedelta(0))
-            checks.append(
-                RuleCheck(
-                    code=case.code,
-                    passed=result.missing_punch_check_passed,
-                    reason="Pairing simulation only; evidence and remaining rules pending.",
-                )
-            )
-        except (ValueError, AttributeError) as exc:
-            checks.append(
-                RuleCheck(
-                    code=case.code, passed=False, reason=f"Invalid attendance evidence: {exc}"
-                )
-            )
-    else:
-        checks.append(
-            RuleCheck(
-                code=case.code,
-                passed=False,
-                reason="Action or context not supported by partial validator.",
-            )
-        )
-    for code in ExceptionCode:
-        if code != case.code:
-            checks.append(
-                RuleCheck(
-                    code=code, passed=False, reason="Rule implementation pending; approval blocked."
-                )
-            )
-    return ValidationResult(passed=False, checks=checks, rule_version=case.rule_version)
+    """Default validator: no aggregate source, so overtime and approval stay failed closed."""
+    return _validate(case, actions, policy, None)
+
+
+def make_validator(load_aggregates: AggregateLoader) -> CorrectionValidator:
+    """Bind a trusted aggregate source while keeping the shared three-argument interface.
+
+    The pipeline still calls validator(case, actions, policy); no contract field changes.
+    """
+
+    def validator(
+        case: CaseContext, actions: list[ProposedAction], policy: PolicySnapshot
+    ) -> ValidationResult:
+        return _validate(case, actions, policy, load_aggregates)
+
+    return validator
