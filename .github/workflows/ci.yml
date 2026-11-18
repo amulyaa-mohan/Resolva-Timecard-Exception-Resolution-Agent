@@ -1,0 +1,112 @@
+# Resolva CI (owner: Track B, task B-05).
+# Backend: lint, format, unit/harness tests, and the offline evaluation with its safety gates.
+# Frontend: typecheck and production build.
+name: CI
+
+on:
+  push:
+    branches: [main, backend, frontend, database]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint, tests, eval gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Disposable database for Track A's PostgreSQL tests. Trust auth: CI-only, nothing to leak.
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: resolva_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # The fixture wipes this database's public schema; the name must end in _test.
+      TEST_DATABASE_URL: postgresql://postgres@localhost:5432/resolva_test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock
+
+      - name: Install
+        run: python -m pip install -r requirements-dev.lock -e ".[dev,postgres]"
+
+      - name: Lint
+        run: python -m ruff check .
+
+      - name: Format
+        run: python -m ruff format --check .
+
+      - name: Unit, integration and harness tests (incl. PostgreSQL)
+        run: python -m pytest -q -rs | tee "$RUNNER_TEMP/pytest.log"; exit "${PIPESTATUS[0]}"
+
+      - name: PostgreSQL tests actually ran
+        # They skip without TEST_DATABASE_URL; a silent skip in CI would hide a broken database layer.
+        run: |
+          if grep -q "TEST_DATABASE_URL" "$RUNNER_TEMP/pytest.log"; then
+            echo "PostgreSQL tests were skipped in CI"; exit 1
+          fi
+
+      - name: Evaluation (mock provider, CI gates)
+        # Deterministic and offline: retrieval quality, wrong-version leakage, harness block rate,
+        # injection resistance and unsafe-eligible count. A failing gate fails the build.
+        run: python -m evals.run --gates ci --out "$RUNNER_TEMP/eval-report"
+
+      - name: Publish evaluation summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/eval-report/mock.md" ]; then
+            cat "$RUNNER_TEMP/eval-report/mock.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: eval-report-mock
+          path: ${{ runner.temp }}/eval-report
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend (typecheck, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck and build
+        run: npm run build

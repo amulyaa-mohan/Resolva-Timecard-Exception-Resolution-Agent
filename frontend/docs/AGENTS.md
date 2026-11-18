@@ -6,7 +6,7 @@ The existing stack is React, TypeScript and Vite. Preserve the package lock and 
 ## Session protocol
 
 All paths are relative to the repository root.
-Read `docs/TEAM_RULES.md`, `docs/TASKS.md`, this area's TASKS.md and latest UPDATE.md entries before work.
+Read `backend/docs/shared/TEAM_RULES.md`, `backend/docs/shared/TASKS.md`, this area's TASKS.md and latest UPDATE.md entries before work.
 Check branch, Git identity and existing changes; preserve other developers' work.
 Fetch published progress when available. Claim an unowned task before implementation; record owner and status.
 If identity or ownership is unknown, ask instead of assuming another contributor's identity.

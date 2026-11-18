@@ -88,3 +88,400 @@ Never include credentials, private employee data, or invented test results.
 - Validation: GitHub default-branch API and successful remote push/deletion responses checked; documentation whitespace checked.
 - Next step: synchronize backend, frontend and database to this shared baseline; teammates fetch before work.
 - Publication: main scaffold published; coordination update included in the following baseline synchronization commit.
+
+### 2026-11-17 — C V Jayanth — COORD-05 — Two-folder repository layout
+
+- Branch: main; status REVIEW.
+- Changed: consolidated database, policies, prompts, fixtures, evaluations and scripts under backend; shared guides now backend/docs/shared. Frontend remains self-contained. Root keeps README, agent routing and Git ignore rules.
+- Configuration: backend/.env.example and backend/.env are now the backend configuration paths, resolved independently of launch directory.
+- Validation: backend smoke test passed (one upstream deprecation warning); Ruff passed; TypeScript/Vite build passed; active instruction paths and whitespace checked.
+- History: earlier update entries retain their original paths as historical records.
+- Next step: teammates bring the main reorganization into their working branches before new work.
+- Publication: user authorized direct commit and push to main; team branches are not changed by this operation.
+
+### 2026-11-17 — Amulya Mohan — SHARED-01 / B-01 / B-02 — Contracts draft, AI pipeline, verification, integration docs
+
+- Branch: `backend`, rebased onto `main` 68ede72 (two-folder layout) before committing.
+- Status: REVIEW.
+- Changed:
+  - Draft SHARED-01 contracts `0.1.0-draft` in `backend/app/core/contracts.py`; RFC 7807 errors (`core/errors.py`) and `X-Trace-Id` propagation (`core/tracing.py`), proposed as shared infrastructure.
+  - B-01: AI settings and kill-switch merged into the scaffold `Settings` (unprefixed env vars, `backend/.env`); `/health` keeps the scaffold fields and adds `contract_version`, `ai_enabled`, `llm_provider`, `llm_status`, `mode`; provider interface and offline `MockProvider`; `backend/Dockerfile` and `backend/docker-compose.yml`.
+  - B-02: IN-KA@2025.1 policy pack (YAML rules + 10-clause handbook), registry and `resolve_policy`, version-filtered keyword retrieval, `prompts/propose_v1.md`, and `generate_proposal` gates: schema with 1 repair retry, exception match, allowed actions, citation membership, verbatim quote of at least 5 words, validator (a crash blocks), missing information, confidence.
+  - Verification fixes: trivial or empty citation quotes no longer pass; trace raw output is capped at 20,000 chars; one Markdown code fence around JSON is accepted.
+  - Touched scaffold files: `main.py`, `config.py`, `pyproject.toml`, `.env.example` merged (CORS and env location kept); `tests/test_health.py` now asserts the three scaffold fields instead of exact equality; `requirements-dev.lock` marks `uvloop` as non-Windows (it failed to install on Windows); root `.gitignore` adds `venv/`; ruff config added (E501 not selected; the formatter owns line length).
+  - Docs: `CLAUDE.md` at the root (imports AGENTS.md); `backend/docs/shared/TRACK_B_INTEGRATION.md` (Codex-ready guide for Track A); pointer added in `backend/docs/AGENTS.md`; STRUCTURE, CONTRACTS, LOCAL_DEVELOPMENT, module READMEs and task trackers updated.
+- Contracts: draft only. Differences from the design doc: escalations need no citations; `ProposedAction.punch_type`; `CaseContext.evidence_version` owned by Track A; `ProposalResult.status` is eligible/blocked/escalated. Ten open decisions are listed in TRACK_B_INTEGRATION.md section 5.
+- Validation (actually run, Windows): clean venv install from `requirements-dev.lock` + `-e backend[dev]` succeeded after the uvloop marker; `pytest backend/tests`: 43 passed; `ruff check backend` and `ruff format --check backend` passed; 20 adversarial pipeline probes passed; live uvicorn `/health`, `/docs`, `/openapi.json` OK, 404/405 return problem+json, unsafe trace headers are replaced; `AI_ENABLED=false` gives `rules_only`; `docker compose up --build` gives a healthy container that loads IN-KA@2025.1 and the prompt. Frontend build not run (no frontend changes). Mock results do not measure model quality.
+- Dependencies/blockers: real `validate_correction` (A-02) and `build_case_context` (A-01/A-02); SHARED-01 agreement.
+- Next step: Jayanth reviews the contracts; Amulya starts B-03 (Ollama/Groq, hybrid retrieval, US-FED and IN-KA@2025.2-proposed packs).
+- Publication: committed locally on `backend`; not pushed.
+
+### 2026-11-17 — Amulya Mohan — B-03 — Real providers, hybrid retrieval, evidence gates
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed:
+  - Providers: `OllamaProvider` (JSON mode, `keep_alive` 30 m) and `GroqProvider` (OpenAI-compatible, key held as `SecretStr`, never in errors or repr) in `app/ai/providers/http.py`; `build_provider` picks one from settings; `LLM_MODEL` unset means the provider default.
+  - Pipeline: one hard wall-clock budget (`LLM_TIMEOUT_S`) per generation, repair retry included, enforced even if a provider ignores its timeout; any adapter exception escalates; new pre-model evidence gate (`app/ai/evidence.py`); a validation result with no rule checks now blocks.
+  - Retrieval: `app/retrieval/hybrid.py` (pack/version filter, BM25 + embeddings, reciprocal rank fusion, per-embedder relevance floors, BM25-only fallback recorded in `gate_checks`); `HashingEmbedder` (offline) and `OllamaEmbedder` (`nomic-embed-text`). Decision recorded in `docs/shared/adr/ADR-006`.
+  - Policy packs: IN-KA@2025.1 gains KA-11 (overlapping records); new IN-KA@2025.2-proposed (status `proposed`, near-duplicate clauses) and US-FED@2025.1 (federal + California overlay).
+  - Packaging: optional `ollama` Compose profile (image pinned to 0.40.16, named volume for models) and `docker-compose.gpu.yml`; `httpx` moved to runtime dependencies (the container failed to import without it).
+  - Docs: `docs/MODEL_CARD.md`, ADR-006, `scripts/live_check.py`, LOCAL_DEVELOPMENT, TRACK_B_INTEGRATION (validator must return at least one check; evidence gate; decision 11 on `detection_details` keys), `.env.example`.
+- Contracts: no change to `contracts.py`. New expectations for Track A: `validate_correction` returns at least one `RuleCheck`; proposed `detection_details` keys listed as decision 11.
+- Validation (actually run): `pytest backend/tests`: 86 passed; ruff check and format clean. Retrieval top-1 on 11 code/pack pairs: 11/11 with the hashing embedder, 10/11 with `nomic-embed-text` (US overtime ranks the weekly clause US-2 above daily US-3; both relevant); US spread-over correctly retrieves nothing. Live check with `qwen2.5:7b-instruct` on Ollama (GPU): 5/6 before the evidence gate (no-schedule case invented 09:32 and was eligible), then 6/6 on three runs including inside Docker; warm latency 2.2-4.8 s; cold load 30-60 s. Groq verified only with mocked HTTP (no key used).
+- Dependencies/blockers: real validator (A-02); `detection_details` keys for the remaining evidence rules (SHARED-01 decision 11).
+- Next step: B-05 evaluation suite and CI (turn live_check cases into labelled eval cases with measured results); B-04 multilingual intents.
+- Publication: superseded by the verification entry below.
+
+### 2026-11-17 — Amulya Mohan — B-03 — Verification pass before publication
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed: `/health` now builds the provider once per app (it previously opened an HTTP client per request and never closed it); hybrid retrieval now degrades to BM25-only on NaN similarities or malformed vectors (mismatched dimensions previously raised an unhandled ValueError); tests added for both, plus `/health` with Groq unconfigured and Ollama unreachable.
+- Contracts: none.
+- Validation (actually run): fresh venv from `requirements-dev.lock` + `-e backend[dev]` on Windows; `pytest backend/tests`: 91 passed (three runs); ruff check and format clean; 24/24 adversarial probes (malformed Ollama/Groq replies, HTTP 404/429, NaN and mismatched embeddings, 50 ms budget against a 500 ms model, every exception code in both packs, empty policy); `docker compose ... --profile ollama up --build` with the GPU override: API container healthy, live check 6/6 against `qwen2.5:7b-instruct` + `nomic-embed-text` inside Compose (p50 4.7 s, max 5.3 s; warm-up 9 s with cached model files). Groq still verified with mocked HTTP only.
+- Dependencies/blockers: unchanged (A-02 validator; SHARED-01 decisions).
+- Next step: B-05 evaluation suite and CI.
+- Publication: committed and pushed to `backend` with this entry.
+
+### 2026-11-17 — Amulya Mohan — B-05 — Evaluation harness, CI, and pipeline fixes found by evaluation
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed:
+  - Evaluation (`backend/evals/`): case format and builders (`schema.py`); 36 labelled MISSING_PUNCH cases (12 clear incl. overnight shifts, 8 ambiguous, 8 adversarial incl. Hindi/Kannada injections, 8 jurisdiction-flip); 12 retrieval cases; 18 scripted unsafe model outputs (`safety_cases.py`) each mapped to the gate that must stop it; `run.py` producing Markdown + JSON reports with git commit, model, prompt and validator, and `ci`/`live` gate profiles; stand-in window validator (`stub_validator.py`, replaced when A-02 lands).
+  - CI: `.github/workflows/ci.yml` (backend lint, format, pytest, offline eval gates with summary + artifact; frontend typecheck + build). `backend/docs/CI.md` documents it.
+  - Pipeline fixes found by evaluation: pre-model gate now also escalates when an employee note mentions a time outside the inference window (policy forbids inference when evidence contradicts the schedule; parses 24 h, dotted and am/pm times, ignores dates/decimals); escalations now strip citations that are not verbatim retrieved clauses (live Qwen escalated while citing an invented KA-99); prompt `propose_v2` adds a trusted `<facts>` block with local dates (live Qwen v1 put overnight clock-outs on the wrong day); `PROMPT_VERSION` setting (default v2).
+  - Docs: CONTRACTS.md frontend alignment notes (read-only comparison with `origin/frontend` types); TRACK_B_INTEGRATION.md (validator must enforce the inference window; evaluating with the real validator); LOCAL_DEVELOPMENT, eval READMEs, `.env.example`, CLAUDE.md.
+- Contracts: none changed. New Track A expectation: `validate_correction` enforces the missing-punch inference window and punch pairing.
+- Validation (actually run): clean venv from `requirements-dev.lock`; ruff check and format clean; `pytest`: 119 passed; `python -m evals.run --gates ci` (mock): all six gates pass, 18/18 safety cases stopped by their expected gate. Preview live runs on Qwen2.5-7B before the last two fixes: v1 proposal accuracy 83%, v2 100%, all live gates passing; final reports are regenerated from the committed code in the next commit. Frontend: `tsc --noEmit` passes locally; the Vite build could not run on this Windows machine (Application Control blocked Rollup's native binary), so the CI frontend job is its first full build.
+- Dependencies/blockers: real validator (A-02); `detection_details` keys (SHARED-01 decision 11).
+- Next step: commit live reports; B-04.
+- Publication: committed and pushed to `backend`; CI result checked on GitHub.
+
+### 2026-11-17 — Amulya Mohan — B-05 — Time-evidence gate (found by a live eval re-run)
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed: new deterministic `time_evidence` gate (`app/ai/evidence.py::unanchored_times`, called in the pipeline before the validator): an added punch must be within 5 minutes of the scheduled start/end (full date and time), a time the employee stated in a note, or a same-weekday history punch of the same type. Two new safety cases (s19 edge-of-window 18:30, s20 right time on the wrong day; 20 in total); s10 is now stopped earlier by this gate. Eval report notes run-to-run variation. CI actions moved to v7 (v4/v5 targeted the deprecated Node 20 runtime).
+- Why: re-running the v2 live eval at 2099dc5 produced one unsafe eligible proposal. Case x08's note asked for a clock-out "four hours after the scheduled end"; Qwen proposed 18:30 for an 18:00 end, the very edge of the 30-minute inference window, and the stand-in window validator allowed it. The window bounds deviation; it does not justify it. The earlier two v2 runs did not show this, so single runs can hide rare failures.
+- Contracts: none.
+- Validation (actually run): ruff clean; `pytest`: 124 passed; mock eval passes all CI gates; 20/20 safety cases stopped by their expected gate. CI for 2099dc5 passed on GitHub (backend and frontend jobs).
+- Next step: re-run live evals at this commit and commit the reports; then B-04.
+- Publication: committed and pushed to `backend`.
+
+### 2026-11-17 — Amulya Mohan — B-05 — Live evaluation reports
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed: `backend/evals/reports/ollama-qwen2.5-7b-instruct-propose_v1.*`, `...-propose_v2.*` and `...-propose_v2-run2.*`, all generated from clean commit c6bde83 (each report records it); results table in `docs/MODEL_CARD.md`; CLAUDE.md.
+- Results: v1 proposal accuracy 83% (overnight shifts on the wrong day, all blocked); v2 100% in both runs; escalation recall 100% everywhere, precision 75% (v1) and 100% (v2); 0 unsafe eligible, 100% injection resistance, 100% harness block rate (20 cases), 100% retrieval top-1 and 0 leakage in all three runs; latency p50 4.40 s (v1) and 5.37/5.54 s (v2), p95 at most 5.95 s.
+- Contracts: none.
+- Validation: the three runs above; CI for c6bde83 passed on GitHub (backend and frontend jobs, actions v7, no Node 20 deprecation warnings).
+- Next step: B-04.
+- Publication: committed and pushed to `backend`.
+
+### 2026-11-17 — Amulya Mohan — B-04 — Multilingual intents and AI fallback
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed:
+  - `backend/app/language/`: `Intent` schema (LIST/COUNT/SHOW/EXPLAIN or UNSUPPORTED with a reason), script-based language detection, en/hi/kn lexicon parser with a confidence flag, LLM fallback (`prompts/intent_v1.md`; JSON mode; schema-validated; ids must appear verbatim in the request; timeouts and bad output fall back), fixed localized reply templates that keep ids/codes canonical, `ExceptionQuery` filters for Track A, `resolve_dates()`; `POST /assistant/query` (CORS now allows POST).
+  - Read-only by design: approve/reject/edit/delete/add requests are refused in every language.
+  - Evals: `evals/language_cases.json` (13 commands x 3 languages), `evals/language_paraphrases.json` (4 x 3, LLM-only), `evals/language_eval.py`; new CI and live gates `language_parity` and `language_write_refusal`; Markdown report section.
+  - Fix during development: a parse built only from a date ("anyone who didn't punch out today?" -> "today") is no longer treated as confident, so it no longer hides the request's meaning from the LLM.
+- Contracts: new HTTP endpoint documented in CONTRACTS.md; shared `contracts.py` unchanged.
+- Validation (actually run): ruff clean; `pytest`: 159 passed; `python -m evals.run` (mock) passes all 8 CI gates, lexicon parity 100% and write refusal 100% with AI off. Live Qwen2.5-7B paraphrase check: 10/12 correct (en 4/4, hi 3/4, kn 3/4); both misses were invalid model outputs (an EXPLAIN without an id; a COUNT with a stray reason) rejected by the schema, falling back to a partial parse or "not understood".
+- Dependencies/blockers: Track A's exception list must accept `ExceptionQuery` filters to return results; native-speaker review of Hindi/Kannada lexicons and templates.
+- Next step: live eval report including the language section; SHARED-02 once A-02/A-03 land.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-17 — Amulya Mohan — B-04 — Verification pass
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed (defects found and fixed):
+  - Hindi "कल" (yesterday) matched inside "निकल" (left) and "सकल" (total); Indic phrases now start on a word boundary, and words of three characters or fewer must also end on one (suffixes like पंचों and ಪಂಚ್‌ಗಳನ್ನು still match).
+  - Ids embedded in other tokens were picked up ("TIME-OFF" became employee E-OFF; "TAX-2026" opened exception X-2026); ids must now not follow a letter, digit or dash.
+  - "last week" was silently dropped; LAST_WEEK is now supported in all three languages, the intent prompt and `resolve_dates`.
+  - Live Qwen added filters nobody asked for ("Who skipped lunch?" -> severity=problem, status=open); severity, status and employee_id now come only from the deterministic parse, and dropped extras are recorded in `IntentResult.dropped_filters`.
+  - One test passed for the wrong reason (the lexicon answered, so the model path was never exercised); rewritten to assert the real behaviour.
+- Validation (actually run): clean venv from `requirements-dev.lock`; ruff check and format clean; `pytest`: 171 passed; `python -m evals.run` (mock) passes all 8 CI gates; 15/15 adversarial probes (word boundaries, embedded ids, write refusal with ZWNJ noise, mixed scripts, romanised Hindi, NFD input, injection via the request, tag breakout, 5000-char and blank input). Live HTTP: rules-only server 42/42 lexicon requests correct with 14/14 parity; Qwen-backed server 42/42 lexicon (no model calls) and 10/12 paraphrases in two consecutive runs (same two misses, both invalid model outputs rejected by the schema, failing safe); paraphrase latency p50 3.6-4.1 s, max 7.2 s. In-process parse 0.2 ms; HTTP with keep-alive 2.5 ms. On Windows, `localhost` adds about 2 s per request (IPv6 fallback); documented to use 127.0.0.1.
+- Dependencies/blockers: unchanged.
+- Next step: commit and push when authorised; then a live eval report including the language section.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-17 — C V Jayanth — A-START-01 — Attendance domain and first rule
+
+- Branch: backend; status REVIEW.
+- Changed: draft immutable attendance DTOs, shift-scoped missing-punch detector, non-mutating added-punch simulation, synthetic overnight fixture and boundary tests.
+- Contracts: proposed in backend/docs/shared/CONTRACTS.md; not frozen or exposed as an API. No database or teammate AI modules changed.
+- Validation: pytest 13 passed; Ruff check passed; Git whitespace check passed. Existing test-client dependency emits one upstream deprecation warning.
+- Limitations: only missing-punch pairing is implemented; approval eligibility remains false. Persistence, authorization, evidence grounding, remaining rules and HTTP endpoints are pending.
+- Next step: review domain contract with teammate/database owner, then connect persistence/permissions and expand validation.
+- Publication: local only, not committed or pushed.
+
+### 2026-11-18 — C V Jayanth — SHARED-01 / A-INTEGRATE-01 — Track B integration and contract answers
+
+- Branch: backend; status REVIEW for integration boundary; A-01/A-02 remain IN PROGRESS.
+- Integrated remote Track B commit 3874367 via fast-forward; restored local Track A work and preserved both update histories. A pre-integration stash remains as a backup.
+- Changed: CaseService, canonical evidence hashing, consistency checks, assigned-manager repository access, disposable SQLite snapshot persistence, and a CorrectionValidator-compatible adapter that reuses the missing-punch detector.
+- Contract answers (details in backend/docs/shared/TRACK_A_CONTRACT_RESPONSE.md):
+  1. Accept opaque IDs; enforce nonempty at boundaries.
+  2. Accept local shift-start work date, including overnight shifts.
+  3. SHA-256 canonical evidence JSON plus correction revision; policy and permission checks separate.
+  4. Target resolution and no new warnings/problems; incomplete checks block approval.
+  5. Propose explicit action targets now; unsupported actions remain rejected until agreed.
+  6. Accept shared ProposedAction for manual and AI corrections with identical validation.
+  7. Track A audit includes actor, evidence versions, rule/policy/model/prompt trace references and atomic correction linkage.
+  8. Accept proposal/trace tables; final relational schema/migrations remain database-team work.
+  9. Accept Track A exception/proposal route ownership; authenticated identity dependency still pending.
+  10. Accept DEFAULT_SEVERITY mapping and validate it at case load.
+- Shared contracts and Track B implementation modules were not changed; version remains 0.1.0-draft pending joint agreement.
+- Validation: 63 pytest tests passed; Ruff lint passed; Ruff format check passed for 79 files; Git whitespace check passed. One existing upstream test-client deprecation warning remains.
+- Limits: SQLite adapter is disposable integration storage, not production migrations. manager_id is an internal trusted argument, not authentication. No domain HTTP endpoints, full six-rule validator or approval writes exist yet. Mock proposals remain BLOCKED with the partial validator.
+- Next step: Amulya reviews responses; database team agrees schema/repository implementation; Track A adds authenticated API access and remaining deterministic rules before enabling approval.
+- Publication: local only; no commit or push made.
+
+### 2026-11-18 — C V Jayanth — GitHub backend synchronization
+
+- Fast-forwarded backend from 3874367 to origin/backend 475b4cc at the user's request.
+- Restored existing Track A work; reconciled UPDATE.md and CONTRACTS.md by preserving both developers' additions. Backup stash codex-before-github-update-2026-11-18 retained.
+- Validation: 191 backend tests passed (one upstream test-client deprecation warning); Ruff check passed.
+- Task statuses unchanged by synchronization; Track A work remains local pending review.
+- Publication: no new commit or push.
+
+### 2026-11-18 — C V Jayanth — A-INTEGRATE-01 — Clash check and publication
+
+- Branch: backend; status REVIEW.
+- Base: latest Track B commit 475b4cc, including B-03/B-04/B-05 work.
+- Conflicts: resolved shared UPDATE.md and CONTRACTS.md by preserving Track B additions and Track A entries; no source-code clashes found.
+- Validation: 191 tests passed; Ruff lint and format passed (106 files); all eight offline CI evaluation gates passed. Offline eval uses its existing stand-in validator; real Track A integration is separately tested to block incomplete approval checks.
+- Caveat: one existing upstream httpx test-client deprecation warning. No live-model evaluation rerun.
+- Publication: user authorized commit/push of Track A work and contract responses to backend; main and other team branches are unchanged.
+- Next step: review/freeze shared decisions, then finish persistence/authentication and deterministic validation.
+
+### 2026-11-18 — C V Jayanth — A-RULES-02 — Six deterministic demo-policy checks
+
+- Branch: backend; status REVIEW for rule module, A-02/A-04 remain IN PROGRESS for complete integration.
+- Changed: rules/engine.py provides six checks; validator.py simulates supported missing-punch actions and reruns that engine, preserving original evidence. Added 33 rule boundary/safety cases and RULE_ENGINE.md.
+- Checks cover work pairing, overlap, observed breaks, daily/projected weekly/quarterly limits, spread and schedule tolerance. Elapsed durations use UTC; invalid/ambiguous evidence fails closed.
+- Contracts: internal AggregateEvidence proposed for trusted complete work-date/week/quarter values. Shared contracts.py untouched; no client or model detection_details used as aggregate authority.
+- Validation: 224 pytest tests passed; Ruff lint passed; 108 files passed format check; all eight offline evaluation gates passed; Git whitespace passed. One existing upstream test-client warning remains. Offline eval still uses its stand-in validator; production-adapter safety is tested separately.
+- Limits: no API/database changes. Actual approval still blocked without trusted aggregate contract. Only exact schedule-anchored missing work punches supported; other actions, live as_of semantics and full schema integration pending.
+- Next step: agree aggregate/evaluation/action contracts with Track B and database team, then wire complete evidence and authorized decision persistence.
+- Publication: local only; not committed or pushed.
+
+### 2026-11-18 — C V Jayanth — A-READ-API-01 — Persisted manager-scoped exception reads
+
+- Branch: backend; status REVIEW; overall A-01 and approval workflow still incomplete.
+- Changed: optional read-only exception list/detail APIs; separate attendance settings; expiring server-provisioned bearer credentials with stored digests; persistent manager assignment checks; synthetic provisioning CLI; API/setup docs.
+- Filters: Track B-compatible exception type, severity, status, IDs, date presets/bounds, pagination and manager-scoped counts. Only open demo snapshots exist; escalation/decision persistence is pending.
+- Shared changes: main.py registers optional attendance repository/router; backend/.env.example adds attendance settings; .gitignore excludes local identity files. Track B modules and shared contracts.py unchanged.
+- Validation: 244 pytest tests passed; Ruff lint passed; 113 files passed formatting; synthetic provisioning plus authenticated list/detail smoke passed. One existing upstream test-client deprecation warning. No live model tests needed.
+- Limits: demo SQLite snapshot store and static expiring credentials, not final migrations/SSO. No approval writes, complete persisted aggregate loader or atomic correction/audit yet. Permissions are checked server-side; request role headers cannot grant access.
+- Next step: team reviews endpoint/aggregate contracts; database adapter and trusted aggregate source must be implemented before approval is enabled.
+- Publication: local only; not committed or pushed.
+
+### 2026-11-18 — C V Jayanth — A-RULES-03 — Real validator wired to the proposal pipeline
+
+- Branch: backend; status REVIEW. A-02/A-04 remain IN PROGRESS. Builds on Codex's uncommitted A-RULES-02/A-READ-API-01 work, which was preserved unchanged except the edits listed here.
+- Changed: validator.py adds make_validator(load_aggregates), which keeps the shared three-argument CorrectionValidator interface. A trusted aggregate source can let a fully evidenced missing-punch fix reach ELIGIBLE. validate_correction is unchanged in behaviour and still fails closed. If the loader raises, returns None or returns the wrong type, the correction is blocked. engine.py blocks contexts that contain a clock-in on another local date, so that time cannot be double-counted.
+- Tests: tests/unit/test_validator_aggregates.py and tests/integration/test_real_validator_pipeline.py cover exact weekly/quarterly boundaries, missing aggregates versus zero, a crashing source, fixes that leave a meal-break violation or create overtime, detection/validation equality, overnight shifts, local-versus-UTC dates, DST fall-back (US-FED), unsupported or ambiguous actions, cross-employee evidence, and eligible/blocked/escalated outcomes through generate_proposal.
+- Validation: 282 pytest passed (1 existing upstream warning); Ruff lint passed; 116 files formatted. Offline eval (`python -m evals.run --gates ci`): all 8 gates PASS, but this uses the STAND-IN validator stub-window-v1, not the real validator. The mock provider proves the harness only, not model quality. No live model run.
+- Unresolved (TRACK_A_CONTRACT_RESPONSE.md, A-RULES-03 section): aggregate delivery, insufficient-evidence outcome versus BLOCKED, time-anchor semantics versus the 5-minute gate, the eval validator swap, week/quarter calendars and as_of.
+- Limits: no production aggregate loader exists yet, so no running route produces ELIGIBLE. Only add_punch for a missing work punch is supported. No approval, persistence or audit.
+- Next step: Amulya answers questions 1-4; then implement a DemoCaseRepository-backed aggregate loader and swap the real validator into evals.
+- Publication: local only; not committed or pushed.
+
+### 2026-11-18 — C V Jayanth — A-RULES-04 — Track B contract answers applied on the Track A side
+
+- Branch: backend; status REVIEW. Amulya's answers to the five A-RULES-03 questions are recorded as agreed in TRACK_A_CONTRACT_RESPONSE.md.
+- Changed: engine.py (now attendance-rules@0.3-draft).
+  - Each check now has an explicit outcome: pass, violation or insufficient_evidence (evaluate_rule_outcomes).
+  - AggregateEvidence carries week_start, quarter_start and an aware as_of. Totals for a different week or quarter, or without a period or as-of time, count as insufficient evidence.
+  - The OVERTIME_RISK reason records the totals, periods and as-of time it used.
+  - make_validator already re-reads totals on every call; a test now proves it.
+- Shared files: no change to contracts.py or Track B modules. One assertion in test_track_a_boundary.py was updated for the new reason wording; the blocking behaviour is unchanged.
+- Validation: 296 pytest passed (1 existing upstream warning); Ruff lint passed; 116 files formatted. Offline eval `--gates ci`: 8/8 PASS on the STAND-IN validator (stub-window-v1), with the mock provider. No live model run.
+- Open: the Indian quarter definition still needs confirming; who authors 0.2.0 still needs Jayanth's confirmation.
+- Next step: publish the backend branch so Amulya can pull it. After 0.2.0, populate the outcome field, add evidence_ref and the tolerance, and add week_start weekday checks and as_of open-shift handling.
+- Publication: local only; not committed or pushed.
+
+### 2026-11-18 — Amulya Mohan — B-04 / B-05 — Live report including multilingual intents
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed: `backend/evals/reports/ollama-qwen2.5-7b-instruct-propose_v2-with-language.{md,json}` generated from clean commit 475b4cc (2026-11-17 18:40 UTC); results added to `docs/MODEL_CARD.md` and CLAUDE.md.
+- Results: all six live gates pass (unsafe eligible 0; injection resistance 100%; harness block rate 100% on 20 cases, each stopped by its expected gate; leakage 0; language parity 100%; write refusal 100%). Proposal accuracy 100% with every category at 100%; latency p50 4.23 s, p95 4.58 s. Lexicon intents 100% in English, Hindi and Kannada. Paraphrases 10/12 through the LLM fallback (same two safe misses as the verification runs).
+- Also: synced Track A commit 1c8b820 (append-only UPDATE.md conflict, both entries kept). On
+  Windows 15 Track A tests failed with `ZoneInfoNotFoundError` (no system IANA database);
+  added `tzdata` as a runtime dependency (`pyproject.toml`, `requirements-dev.lock`).
+- Contracts: none.
+- Validation: the run above; the report records its commit, model, prompt and validator. After the
+  sync: pytest 191 passed on Windows; ruff check and format clean; 8/8 CI eval gates pass.
+- Next step: Jayanth reviews SHARED-01; PR from `backend` into `main` after review.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan — SHARED-01 — Contract 0.2.0-draft
+
+- Branch: `backend`.
+- Status: REVIEW (Track A to adopt and confirm).
+- Changed: `app/core/contracts.py` to `0.2.0-draft`: `RuleOutcome` and `RuleCheck.outcome` (derived from `passed` when omitted; must agree with it); `ValidationResult(passed=True)` requires at least one check and all passing; `EvidenceKind`, `EvidenceRef`, `ProposedAction.evidence_ref`; `Weekday`; `PolicyRules.evidence_tolerance_min`, `week_start`, `quarter_start_month` (all three packs: 5, monday, 1); optional `CaseContext.as_of`.
+- Pipeline: a `violation` blocks, `insufficient_evidence` (with no violation) escalates with the proposal kept; the time-evidence gate (`anchor_times`) uses the policy tolerance, attaches an `EvidenceRef` (schedule, then note, then history) before the validator runs, rejects a model-supplied ref that does not resolve, and blocks any added punch after `as_of`; `<facts>` states the evaluation time.
+- Contracts: yes, SHARED-01 draft revision; handover table in TRACK_B_INTEGRATION.md 5a; CONTRACTS.md and shared TASKS.md updated. No Track A files changed. `build_verified_case` should exclude `as_of` from the hash once CaseService sets it.
+- Validation: ruff check and format clean; pytest 214 passed (23 new in `tests/unit/test_contract_v020.py`); all 8 CI eval gates pass; the pipeline with Track A's real `validate_correction` attaches `schedule_end S-1` and is BLOCKED by its pending rules, as intended.
+- Next step: Jayanth adopts 0.2.0 in the validator/CaseService and confirms; Amulya moves evals to complete evidence with both validators side by side.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan — SHARED-01 — Verification of contract 0.2.0-draft
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Defects found and fixed:
+  - Timestamps stored in UTC (what a database usually returns) broke the evidence gates: a note agreeing with the schedule was flagged as a conflict, note times could not be matched, and the model's `<facts>` showed 03:30-12:30 for a 09:00-18:00 shift. All failed safe (escalate/block) but would have rejected good cases. Every time is now read in `employee.timezone` (`local_zone` in `app/ai/evidence.py`).
+  - `Weekday.index` shadowed `str.index`; renamed to `Weekday.number`.
+  - For codes the time gate does not anchor, a model-supplied `evidence_ref` would have reached the validator unverified; it is now removed.
+  - `RuleCheck` derived `outcome` from `passed is True`, so a JSON `"true"` would have failed; it now uses the same bool coercion as the field.
+  - Live Qwen wrote `"note": null` on every x08 run; the schema rejected it, the repair retry pushed the case past the 8 s budget, and it escalated by timeout instead of being blocked by the time-evidence gate (safe either way). A null note is now read as empty.
+- Validation (actually run): clean venv from `requirements-dev.lock` (tzdata 2026f): pytest 223 passed, ruff check and format clean, 8/8 CI eval gates; real server over HTTP (`/health` reports `0.2.0-draft`, `/assistant/query`, problem+json on bad input, no server errors); probes for UTC storage, overnight note on the next day, a US DST date, `as_of` boundary to the second, wrong evidence kind; live Qwen2.5-7B: all 6 live gates, proposal accuracy 100%, 0% repair retries, p50 5.57 s, p95 6.28 s; x08 blocked by `time_evidence` in 5/5 direct runs. The same machine ran the previous commit at p50 5.66 s, so today's higher latency (vs 4.23 s yesterday) is the machine, not this change. Pipeline with Track A's real `validate_correction`: evidence ref attached, BLOCKED by its pending rules as intended.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — C V Jayanth — A-03 + A-RULES-05 — Decisions, audit, trusted totals; contract 0.2.0 adopted
+
+- Branch: backend (pulled Track B 1c4e895 fast-forward; no conflicts). Status REVIEW. Local only; not committed.
+- A-03 (demo store): POST /exceptions/{id}/decisions and GET /exceptions/{id}/audit.
+  - Each approval is one BEGIN IMMEDIATE transaction: authorize, idempotency, stale check, fresh totals,
+    real validator, then decision + correction + audit, then a revision bump.
+  - Failed validation is audited as APPROVAL_BLOCKED.
+  - Append-only triggers and a SHA-256 audit hash chain. Only one approval per exception.
+  - Rejects keep the exception open. The list endpoint shows resolved status.
+  - Details: docs/RESOLUTION_API.md.
+- Trusted totals: app/resolution/totals.py reads stored day totals by policy week and quarter.
+  An incomplete history returns None, which gives insufficient_evidence.
+  Approved corrections update that day's worked hours. The seed provisions synthetic totals and a break,
+  so the demo case is approvable.
+- Contract 0.2.0 adoption: outcome on every RuleCheck; evidence_ref tolerance (schedule, note via Track B's
+  pure note_times, history); as_of from the server clock, excluded from the hash; open shifts are not yet missing;
+  punches after as_of rejected; policy week_start and quarter_start_month. Rule version attendance-rules@0.4-draft.
+- Behaviour change: missing totals now ESCALATE instead of BLOCK (as Track B requested). A duplicate-time punch is a violation.
+- Validation:
+  - 390 pytest passed (1 existing upstream warning); Ruff lint passed; 124 files formatted.
+  - `evals.run --gates ci` 8/8 PASS on the STAND-IN validator with the mock provider.
+  - Synthetic end-to-end smoke: CaseService (as_of) -> generate_proposal with the real validator and trusted totals
+    -> ELIGIBLE with evidence_ref schedule_end -> approve 200 resolved -> audit DECISION_APPROVED.
+    That smoke used the mock provider.
+- Limits: demo SQLite store, not final migrations; only add_punch corrections; no bulk decisions or escalation persistence.
+- Open: should an evidence-backed late clock-out (SCHEDULE_DEVIATION, warning) escalate rather than block?
+- Next step: commit and push; Amulya swaps the real validator plus a totals fixture into evals; SHARED-02 review.
+
+### 2026-11-18 — C V Jayanth — A-DB-PG-01 — PostgreSQL persistence
+
+- Branch: backend; status REVIEW; local until committed. Decision: PostgreSQL (team call), built by Track A now.
+- Changed:
+  - ResolutionStore now runs over a backend: SqliteBackend (demo/tests) or PostgresBackend (normalized schema).
+    Shared decision, audit and totals code.
+  - AttendanceSettings.database_url selects PostgreSQL.
+  - Optional extra `postgres` (psycopg 3) in pyproject.toml.
+  - Migration runner and script; the seed script supports `--database-url`.
+- Found by PostgreSQL, fixed:
+  - the audit event referenced its decision before the decision row existed (FK now DEFERRABLE INITIALLY DEFERRED);
+  - the seed silently kept a conflicting shift, so seeding now refuses id clashes.
+- Validation:
+  - 390 passed / 27 skipped without PostgreSQL; 417 passed with TEST_DATABASE_URL on local PostgreSQL 15.
+  - Ruff lint and format pass; `evals.run --gates ci` 8/8 PASS (stand-in validator, mock provider).
+  - PostgreSQL end-to-end smoke: seed -> list/detail -> pipeline ELIGIBLE -> approve 200 resolved -> audit,
+    with the row status resolved at revision 1.
+- Needs Track B: a PostgreSQL service in CI and Docker (see RESOLUTION_API.md). Until then CI skips the PostgreSQL tests.
+- Next step: review with Soumya when her database work is pushed; commit and push on approval.
+
+### 2026-11-18 — C V Jayanth — A-05, detection, A-06, adjust_punch
+
+- Branch: backend; status REVIEW (A-06 attendance event updates still pending). Local only; not committed (held with the PostgreSQL work pending Soumya's review).
+- A-05 import: app/attendance/importer.py (pure preview) and imports_router.py (POST /imports/preview, POST /imports; PostgreSQL only).
+  It handles field mapping, type aliases, naive local times in the employee's timezone, DST gap/overlap refusal,
+  in-file and database duplicates, deterministic ids (re-import is a no-op), manager scope, and allow_partial.
+- Detection: app/rules/detection.py (work-date sessions, the same evaluate_rule_outcomes; violations only)
+  and app/attendance/ingest.py (effective timecard = raw + approved corrections, deterministic exception ids,
+  EXCEPTION_DETECTED audit, whole-week day totals).
+- day_totals now separates evidence_final from complete. Without it, a detected missing punch could never be approved:
+  the work date needs final evidence, while other days need known hours.
+- A-06: POST /exceptions/bulk-decisions (1-50 items; each authorized, validated and committed independently).
+- Item 7: adjust_punch for OVERLAPPING_SHIFT, SPREAD_OVER_BREACH and SCHEDULE_DEVIATION (note-evidence only, bounded move).
+  Other action types are refused until their semantics are agreed (questions in TRACK_A_CONTRACT_RESPONSE.md).
+- Validation:
+  - 429 passed / 31 skipped without PostgreSQL; 460 passed with TEST_DATABASE_URL (local PostgreSQL 15). Ruff passes.
+  - `evals.run --gates ci` 8/8 PASS (stand-in validator, mock provider).
+  - The SHARED-02 path on PostgreSQL is tested end to end: import shifts and punches -> detection (exactly one MISSING_PUNCH)
+    -> re-import no-op -> list/detail -> generate_proposal ELIGIBLE with derived totals -> approve -> audit -> re-detection quiet.
+- Next step: review with Soumya's database work; Amulya answers the adjust/acknowledge questions and adds PostgreSQL to CI.
+
+### 2026-11-18 — Amulya Mohan — B-05 — Evaluations on Track A's real validator with complete evidence
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed:
+  - `evals/schema.py`: cases carry complete evidence by default (observed meal break punches 4 h into the shift, trusted totals via `AggregateSpec`, `as_of` the next day at 12:00); cases opt out explicitly; new `evidence` category and `rules_only` flag; `detection_details` names the unmatched work punch, not a break.
+  - `evals/aggregates.py` (new): trusted `AggregateEvidence` per case, keyed by the case's own exception id; week and quarter starts from the pack (`week_start`, `quarter_start_month`); `real_validator` = Track A's `make_validator(load)`.
+  - `evals/run.py`: every proposal is validated by the real rules; the stand-in judges the same recorded model outputs (replayed, no extra model calls) as a comparison column; safety gates require zero unsafe under both; accuracy gated on the real validator (`--gate-validator`); new CI gate `evidence_case_accuracy`.
+  - `evals/cases/evidence.json` (new, 9 cases): totals unavailable, no break, weekly overtime (US-FED), totals for the wrong week, open shift at `as_of`, uncertified work date, short break, plus two eligible controls.
+- Results (mock, CI): 9/9 gates; real and stand-in agree on all shared cases. Rebased onto Track A's 0.2.0 adoption (8ad2e15): the gap cases now require exact outcomes, and each stops on the rule it targets: e01/e04/e06 ESCALATED (`insufficient_evidence`), e02/e03/e07 BLOCKED (`violation`), e05 BLOCKED by the as_of gate, controls e08/e09 ELIGIBLE. Live Qwen2.5-7B against 8ad2e15: all 6 live gates, proposal accuracy 100% under both validators, every category 100%, 0 repair retries, p50 5.24 s, p95 5.69 s. The real rules made 0 of 6 rules-only cases eligible; the stand-in would have made 6 of 6 eligible.
+- Contracts: none (uses `make_validator` and `AggregateEvidence` as published by Track A; no Track A files changed).
+- Validation: ruff check and format clean; pytest 396 passed (incl. Track A's 8ad2e15); `python -m evals.run` 9/9 CI gates; live run above.
+- Next step: commit, then generate the committed live report from a clean tree.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan — B-05 / SHARED-01 — CI PostgreSQL, adjust_punch evidence gate, answers to Track A
+
+- Branch: `backend` (pulled Track A c85111c: PostgreSQL store, import/detection, bulk decisions, adjust_punch).
+- Status: REVIEW.
+- CI and Docker (Track A request in RESOLUTION_API.md):
+  - The backend job has a `postgres:15` service with `TEST_DATABASE_URL` (a `_test` database, trust auth, CI only) and installs `.[dev,postgres]`.
+  - A guard step fails the build if any PostgreSQL test is skipped.
+  - `psycopg==3.3.9` and `psycopg-binary==3.3.9` are pinned in `requirements-dev.lock`.
+  - `docker-compose.yml` has a `postgres` profile (PostgreSQL 15, 127.0.0.1 only, volume `postgres-data`); the API image installs the `postgres` extra; `.env.example` and LOCAL_DEVELOPMENT.md show the local setup.
+- Evidence gate: `anchor_times` now handles `adjust_punch` for every code. The target must be one of the case's punches, its type is read from that punch, and only `note` refs are attached; schedule and history refs (including model-supplied ones) and times after `as_of` are refused. Other unanchored actions still have model-supplied refs removed.
+- Answers: Track B section in TRACK_A_CONTRACT_RESPONSE.md (adjust_punch; semantics proposals for acknowledge, add_break, void_shift, flag_premium, suggest_schedule_swap; detection_details keys; escalate evidenced warning-level deviations).
+- Finding raised: two-sided tolerance can grant unclaimed time. With the real validator, a note stating 09:05 lets an adjustment to the scheduled 09:00 become ELIGIBLE. Proposed one-sided rounding of stated times; not changed unilaterally.
+- Validation: ruff check and format clean; pytest 441 passed and 31 PostgreSQL tests skipped without a database; with `TEST_DATABASE_URL` on local PostgreSQL 15.20 (compose profile), 466 passed and the guard passed, and without it the guard fails as intended; `docker compose config` valid; API image built, and `psycopg` 3.3.9 and the app import inside it; `python -m evals.run` 9/9 CI gates on Track A's c85111c validator.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — C V Jayanth — A-PROPOSE-01 — Proposal API, escalation, demo week, pay integrity
+
+- Branch: backend (pulled Track B dcccc0c first; no conflicts). Status REVIEW.
+- New: POST /exceptions/{id}/proposal runs Track B's pipeline with the real validator and trusted
+  totals inside one transaction, persists the draft and its model trace (migration 0002: proposals,
+  llm_traces, escalations) and audits PROPOSAL_GENERATED. It never approves.
+- Escalation is now persisted: the pipeline escalates a case on its own, a manager can escalate with
+  a reason, and GET /exceptions?status=escalated lists them. Status is derived resolved > escalated > open.
+- GET /exceptions/{id}/timecard shows raw punches, the approved corrections applied and the resulting hours.
+- Agreed with Track B and implemented: a stated time (note ref) is rounded only in the direction that
+  adds no paid time (their 09:05 -> 09:00 example is now refused); an evidenced fix whose only
+  remainder is a warning returns insufficient_evidence ("manager review") so it escalates, not blocks.
+- Bug found by the demo seed and fixed: an unpaired clock-in absorbed every following day into one
+  session, so a single missing clock-out hid the rest of the week. Regression test added.
+- scripts/seed_demo_week.py provisions a synthetic week through the real import path and detection
+  raises all six exception types plus one clean day.
+- Validation: 490 passed with TEST_DATABASE_URL on local PostgreSQL 15 (453 passed / 36 skipped
+  without it); Ruff lint and format pass; evals.run --gates ci 8/8 PASS.
+  HTTP demo on PostgreSQL: 6 exceptions detected -> proposal ELIGIBLE (6/6 checks, schedule_end
+  evidence, KA-8 citation) -> approve 200 resolved -> timecard 3 raw / 4 effective / 8.0 h ->
+  audit DETECTED, PROPOSAL_GENERATED, DECISION_APPROVED. Mock provider: this proves the harness, not model quality.
+- Limits: no attendance event push, no structured detection_details keys yet, and the correction
+  types awaiting contract 0.3.0 are still refused.
+- Next step: Amulya drafts 0.3.0 (add_break new_end_ts, void_shift target_punch_ids); Track A adds
+  structured detection_details and the remaining action types.
+
+### 2026-11-18 — C V Jayanth — DB-03 — Display fields from the database branch review
+
+- Branch: backend; status REVIEW. Reviewed Soumya's `origin/database` 48b2a1a: it cannot be merged
+  as it stands (old layout, SQLite/SQLModel, naive timestamps, no immutability triggers, cascade
+  deletes, several contract mismatches). Details in `backend/database/docs/UPDATE.md`.
+- The one real gap it exposed is fixed: migration 0003 adds `organizations`, `locations` and
+  employee `full_name` / `job_title` / `pay_type`, and `GET /exceptions` now returns
+  `employee_name`, so a manager sees who an exception belongs to. Display only; detection and
+  validation are verified to work with every one of those columns null.
+- Validation: 491 passed with PostgreSQL (454 passed / 36 skipped without it); Ruff lint and format
+  pass; `evals.run --gates ci` 9/9 PASS. Demo seed re-run: six exceptions, now listed with names.
+- Next step: Soumya reworks her branch onto this schema (DB-06); Track A adds structured
+  `detection_details` keys.
