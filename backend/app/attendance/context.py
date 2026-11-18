@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
@@ -44,7 +45,8 @@ def build_verified_case(case: CaseContext, *, correction_revision: int) -> CaseC
         raise ValueError("duplicate punch identity")
     if len({n.note_id for n in case.notes}) != len(case.notes):
         raise ValueError("duplicate note identity")
-    payload = case.model_dump(exclude={"evidence_version"})
+    # as_of is evaluation time, not evidence: reloading must not make approvals stale.
+    payload = case.model_dump(exclude={"evidence_version", "as_of"})
     for field, key in [
         ("punches", "punch_id"),
         ("punch_history", "punch_id"),
@@ -69,9 +71,14 @@ class CaseRepository(Protocol):
 class CaseService:
     """Trusted application boundary. manager_id must come from authenticated identity."""
 
-    def __init__(self, repository: CaseRepository):
+    def __init__(
+        self, repository: CaseRepository, clock: Callable[[], datetime] = lambda: datetime.now(UTC)
+    ):
         self.repository = repository
+        self.clock = clock
 
     def build_case_context(self, exception_id: str, *, manager_id: str) -> CaseContext:
         case, revision = self.repository.load_for_manager(exception_id, manager_id)
-        return build_verified_case(case, correction_revision=revision)
+        case = build_verified_case(case, correction_revision=revision)
+        # Server clock, never the client's (contract 0.2.0).
+        return case.model_copy(update={"as_of": self.clock().astimezone(UTC)})

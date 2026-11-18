@@ -77,8 +77,17 @@ def test_same_weekday_history_counts_as_evidence(policy, settings):
 
 
 def test_validation_with_no_checks_cannot_approve(case, policy, settings):
-    def empty(*_):
+    # The contract already refuses passed=True with no checks; a validator that tries is a
+    # validator error, which blocks.
+    def claims_pass(*_):
         return ValidationResult(passed=True, checks=[], rule_version="stub")
+
+    result = run(case, policy, settings, MockProvider(), claims_pass)
+    assert result.status == GateStatus.BLOCKED
+    assert "failed to run" in result.reasons[0]
+
+    def empty(*_):
+        return ValidationResult(passed=False, checks=[], rule_version="stub")
 
     result = run(case, policy, settings, MockProvider(), empty)
     assert result.status == GateStatus.BLOCKED

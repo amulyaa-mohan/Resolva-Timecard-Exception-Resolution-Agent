@@ -244,10 +244,10 @@ def test_dst_fall_back_uses_elapsed_hours(registry):
     [
         ("none", "one missing-punch action"),
         ("two", "one missing-punch action"),
-        ("adjust", "clock-in/clock-out"),
+        ("adjust", "not allowed for MISSING_PUNCH"),
         ("target", "existing punch"),
         ("break", "clock-in/clock-out"),
-        ("early", "verified evidence"),
+        ("early", "exact schedule time"),
         ("outside", "inference window"),
     ],
 )
@@ -321,7 +321,9 @@ def test_reason_records_totals_period_and_as_of(policy):
         (dict(week_start=None), "period or as-of"),
         (dict(as_of=None), "period or as-of"),
         (dict(week_start=date(2026, 11, 2)), "different week"),  # last week
-        (dict(week_start=date(2026, 11, 13)), "different week"),  # starts after work date
+        (dict(week_start=date(2026, 11, 16)), "different week"),  # next Monday
+        (dict(week_start=date(2026, 11, 6)), "policy week start"),  # a Friday
+        (dict(quarter_start=date(2026, 11, 1)), "policy quarter boundary"),
         (dict(quarter_start=date(2026, 7, 1)), "different quarter"),
         (dict(quarter_start=None), "quarterly overtime total missing"),
     ],
@@ -336,26 +338,21 @@ def test_wrong_or_missing_periods_are_insufficient(overrides, needle, policy):
 
 
 def test_week_window_edges(policy):
-    # Containment only. Weekday alignment (Friday 6 Nov accepted here) is checked once
-    # contract 0.2.0 adds the policy week_start field; update this test then.
-    case = missing_out()  # Thursday 2026-11-12
+    case = missing_out()  # Thursday 2026-11-12; IN-KA weeks start on Monday
     action = [add(PunchType.OUT, case.schedule.end)]
     for start, ok in [
-        (date(2026, 11, 12), True),
-        (date(2026, 11, 6), True),
-        (date(2026, 11, 5), False),
+        (date(2026, 11, 9), True),  # the Monday of the work week
+        (date(2026, 11, 2), False),  # previous Monday
+        (date(2026, 11, 6), False),  # contains the date but starts on a Friday
     ]:
-        assert (
-            make_validator(lambda _, s=start: aggregates(week_start=s))(case, action, policy).passed
-            is ok
-        )
+        result = make_validator(lambda _, s=start: aggregates(week_start=s))(case, action, policy)
+        assert result.passed is ok
 
 
 @pytest.mark.parametrize(
     "kwargs",
     [
         dict(as_of=datetime(2026, 11, 13, 6, 0)),  # naive
-        dict(quarter_start=date(2026, 11, 1)),  # not a calendar quarter start
         dict(quarter_start=date(2026, 10, 2)),
     ],
 )

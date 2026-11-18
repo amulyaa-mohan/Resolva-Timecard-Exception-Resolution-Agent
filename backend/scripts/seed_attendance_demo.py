@@ -11,10 +11,17 @@ import os
 import secrets
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from app.attendance.repository import DemoCaseRepository
+from app.core.config import BACKEND_DIR
 from app.core.contracts import CaseContext
+from app.policies.registry import PolicyRegistry
+from app.resolution.store import ResolutionStore
+from app.resolution.totals import quarter_bounds, week_start
 from app.rules.engine import RULE_VERSION
+
+POLICIES = BACKEND_DIR / "policies"
 
 
 def private_json(path: Path, payload):
@@ -24,7 +31,30 @@ def private_json(path: Path, payload):
         stream.write("\n")
 
 
-def seed(directory: Path):
+def seed_day_totals(store: ResolutionStore, case: CaseContext) -> None:
+    """Synthetic trusted history: 8 h weekdays before today, scheduled hours afterwards.
+
+    Days before the employee's local today are complete. Re-run provisioning in a fresh
+    directory on a later day, or the loader will (correctly) report incomplete history.
+    """
+    today = datetime.now(UTC).astimezone(ZoneInfo(case.employee.timezone)).date()
+    quarter_start, _ = quarter_bounds(case.work_date)
+    day, last = quarter_start, week_start(max(today, case.work_date)) + timedelta(days=6)
+    while day <= last:
+        weekday = day.weekday() < 5
+        done = day < today or day == case.work_date
+        store.seed_day_total(
+            employee_id=case.employee.employee_id,
+            work_date=day,
+            worked_hours=8.0 if weekday and done else 0.0,
+            scheduled_hours=8.0 if weekday else 0.0,
+            complete=done,
+            source="synthetic-demo-seed",
+        )
+        day += timedelta(days=1)
+
+
+def seed(directory: Path, database_url: str | None = None):
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     credentials = directory / "manager-credentials.json"
     token_path = directory / "manager-token.json"
@@ -47,12 +77,15 @@ def seed(directory: Path):
             "rule_version": RULE_VERSION,
             "punches": [
                 {
-                    "punch_id": "P-DEMO-1",
+                    "punch_id": f"P-DEMO-{i}",
                     "employee_id": "E-DEMO-1",
-                    "ts": "2026-11-17T09:00:00+05:30",
-                    "type": "in",
+                    "ts": f"2026-11-17T{clock}:00+05:30",
+                    "type": kind,
                     "source": "import",
                 }
+                for i, (kind, clock) in enumerate(
+                    [("in", "09:00"), ("break_start", "13:00"), ("break_end", "14:00")], 1
+                )
             ],
             "schedule": {
                 "shift_id": "S-DEMO-1",
@@ -65,7 +98,24 @@ def seed(directory: Path):
             "evidence_version": "seed-pending",
         }
     )
-    DemoCaseRepository(directory / "attendance.sqlite").seed_case(case, manager_id="M-DEMO-1")
+    registry = PolicyRegistry.from_directory(POLICIES)
+    if database_url:
+        # PostgreSQL: migrate, then seed the normalized tables (never a shared database).
+        from app.attendance.postgres import (
+            PostgresBackend,
+            PostgresCaseRepository,
+            apply_migrations,
+        )
+
+        apply_migrations(database_url)
+        PostgresCaseRepository(database_url).seed_case(
+            case, manager_id="M-DEMO-1", manager_timezone="Asia/Kolkata"
+        )
+        seed_day_totals(ResolutionStore(PostgresBackend(database_url), registry), case)
+    else:
+        database = directory / "attendance.sqlite"
+        DemoCaseRepository(database).seed_case(case, manager_id="M-DEMO-1")
+        seed_day_totals(ResolutionStore(database, registry), case)
     token = secrets.token_urlsafe(32)
     private_json(
         credentials,
@@ -88,4 +138,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--directory", type=Path, default=Path(__file__).resolve().parents[1] / "local"
     )
-    seed(parser.parse_args().directory)
+    parser.add_argument(
+        "--database-url",
+        help="Seed PostgreSQL (migrated first) instead of the demo SQLite file. "
+        "Credentials are still written to --directory.",
+    )
+    arguments = parser.parse_args()
+    seed(arguments.directory, arguments.database_url)

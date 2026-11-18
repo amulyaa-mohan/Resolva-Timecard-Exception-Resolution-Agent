@@ -17,6 +17,15 @@ Design rules encoded here:
 - All contract models are immutable and reject unknown fields.
 - An escalation is representable without fabricated actions or citations.
 - The LLM may only propose actions allowed for the exception code.
+
+0.2.0-draft (agreed in TRACK_A_CONTRACT_RESPONSE.md and Track B's reply, 2026-11-18):
+- RuleCheck.outcome: pass / violation / insufficient_evidence. A violation blocks the
+  proposal; insufficient evidence escalates it to the manager. Neither is approval-ready.
+- ProposedAction.evidence_ref: the schedule time, note or history punch a proposed time
+  comes from. Attached by Track B's deterministic gate, never trusted from the model.
+- PolicyRules: evidence_tolerance_min, week_start, quarter_start_month.
+- CaseContext.as_of: when the case was evaluated, so open shifts are not treated as
+  overdue. Excluded from evidence_version.
 """
 
 from __future__ import annotations
@@ -25,9 +34,9 @@ from datetime import date
 from enum import StrEnum
 from typing import Literal, Protocol
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
-CONTRACT_VERSION = "0.1.0-draft"
+CONTRACT_VERSION = "0.2.0-draft"
 
 
 class _Contract(BaseModel):
@@ -73,6 +82,34 @@ class ActionType(StrEnum):
     FLAG_PREMIUM = "flag_premium"
     SUGGEST_SCHEDULE_SWAP = "suggest_schedule_swap"
     ACKNOWLEDGE = "acknowledge"
+
+
+class Weekday(StrEnum):
+    MONDAY = "monday"
+    TUESDAY = "tuesday"
+    WEDNESDAY = "wednesday"
+    THURSDAY = "thursday"
+    FRIDAY = "friday"
+    SATURDAY = "saturday"
+    SUNDAY = "sunday"
+
+    @property
+    def number(self) -> int:
+        """Python weekday number (Monday = 0), as returned by date.weekday()."""
+        return list(Weekday).index(self)
+
+
+class RuleOutcome(StrEnum):
+    PASS = "pass"
+    VIOLATION = "violation"  # the correction breaks the rule -> BLOCKED
+    INSUFFICIENT_EVIDENCE = "insufficient_evidence"  # cannot be decided -> ESCALATED
+
+
+class EvidenceKind(StrEnum):
+    SCHEDULE_START = "schedule_start"  # id = shift_id
+    SCHEDULE_END = "schedule_end"  # id = shift_id
+    NOTE = "note"  # id = note_id; the time is the one the employee stated
+    HISTORY_PUNCH = "history_punch"  # id = punch_id in punch_history (same weekday)
 
 
 DEFAULT_SEVERITY: dict[ExceptionCode, Severity] = {
@@ -164,6 +201,14 @@ class CaseContext(_Contract):
     evidence_version: str = Field(
         description="Opaque hash of the evidence above; approval rejects a stale version."
     )
+    as_of: AwareDatetime | None = Field(
+        default=None,
+        description=(
+            "When the case was evaluated (server clock). A shift still open at this time is "
+            "not overdue, and no correction may add a punch after it. Not part of "
+            "evidence_version. Optional during 0.2.0-draft; Track A's CaseService sets it."
+        ),
+    )
 
 
 # ------------------------------------------------------------ policy snapshot (B)
@@ -181,6 +226,17 @@ class PolicyRules(_Contract):
     rest_minutes: int = Field(ge=0)
     late_tolerance_min: int = Field(ge=0)
     missing_punch_window_min: int = Field(ge=0)
+    evidence_tolerance_min: int = Field(
+        ge=0,
+        le=60,
+        description="How far a proposed time may be from the evidence its evidence_ref names.",
+    )
+    week_start: Weekday = Field(description="First day of the policy week (weekly limits).")
+    quarter_start_month: int = Field(
+        ge=1,
+        le=12,
+        description="Month a quarter starts in (1 = calendar quarters Jan/Apr/Jul/Oct).",
+    )
 
 
 class PolicyClause(_Contract):
@@ -207,12 +263,36 @@ class PolicySnapshot(_Contract):
 # ------------------------------------------------------------ LLM output contract
 
 
+class EvidenceRef(_Contract):
+    """The evidence a proposed time comes from. Resolved against the CaseContext."""
+
+    kind: EvidenceKind
+    id: str = Field(min_length=1, description="shift_id, note_id or punch_id, per kind.")
+
+
 class ProposedAction(_Contract):
     type: ActionType
     punch_id: str | None = Field(default=None, description="Existing punch to adjust.")
     punch_type: PunchType | None = Field(default=None, description="Type of a punch to add.")
     new_ts: AwareDatetime | None = None
     note: str = Field(default="", max_length=200)
+    evidence_ref: EvidenceRef | None = Field(
+        default=None,
+        description=(
+            "Evidence for new_ts. Set by Track B's deterministic time-evidence gate; a "
+            "model-supplied ref is only kept if it resolves and matches. None means no "
+            "evidence was matched, and the validator must then treat the time strictly."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _null_note_is_empty(cls, data):
+        # Live Qwen2.5-7B writes "note": null; rejecting it cost a repair retry and pushed the
+        # injection case x08 past the 8 s budget. An absent note carries no meaning either way.
+        if isinstance(data, dict) and "note" in data and data["note"] is None:
+            data = {**data, "note": ""}
+        return data
 
     @model_validator(mode="after")
     def _required_fields(self) -> ProposedAction:
@@ -252,16 +332,46 @@ class LLMProposal(_Contract):
 # ------------------------------------------------------------ validation (A -> B)
 
 
+_BOOL = TypeAdapter(bool)
+
+
 class RuleCheck(_Contract):
+    """One rule's verdict. `outcome` may be omitted: it is then derived from `passed`
+    (True -> pass, False -> violation). When both are given they must agree."""
+
     code: ExceptionCode
     passed: bool
     reason: str
+    outcome: RuleOutcome
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_outcome(cls, data):
+        if isinstance(data, dict) and data.get("outcome") is None and "passed" in data:
+            try:  # same coercion as the field itself (e.g. JSON "true")
+                passed = _BOOL.validate_python(data["passed"])
+            except ValueError:
+                return data  # the field validation reports the bad value
+            data = {**data, "outcome": RuleOutcome.PASS if passed else RuleOutcome.VIOLATION}
+        return data
+
+    @model_validator(mode="after")
+    def _consistent(self) -> RuleCheck:
+        if self.passed != (self.outcome == RuleOutcome.PASS):
+            raise ValueError("passed must be true exactly when outcome is 'pass'")
+        return self
 
 
 class ValidationResult(_Contract):
     passed: bool
     checks: list[RuleCheck]
     rule_version: str
+
+    @model_validator(mode="after")
+    def _passed_needs_passing_checks(self) -> ValidationResult:
+        if self.passed and (not self.checks or not all(c.passed for c in self.checks)):
+            raise ValueError("passed=true needs at least one check and every check passing")
+        return self
 
 
 class CorrectionValidator(Protocol):

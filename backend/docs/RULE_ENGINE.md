@@ -1,7 +1,7 @@
 # Deterministic attendance checks
 
 Track A implementation: `backend/app/rules/engine.py`.
-Version: `attendance-rules@0.3-draft`. Uses simplified demo policy configuration, not legal certification.
+Version: `attendance-rules@0.4-draft` (contract 0.2.0). Uses simplified demo policy configuration, not legal certification.
 
 ## Entry points
 
@@ -87,3 +87,40 @@ validator = make_validator(load)  # same (case, actions, policy) interface
 Return None when totals are unavailable: overtime is then INSUFFICIENT_EVIDENCE. A loader that raises, or returns another type, blocks every check.
 The OVERTIME_RISK reason records the day hours, each total, its period and the as-of time.
 Until 0.2.0 adds week_start and quarter_start_month to the policy, the period check is containment only: the week_start weekday is not yet verified.
+
+## Contract 0.2.0 adoption (2026-11-18)
+
+- Every RuleCheck carries `outcome`. Validator rejections are `violation` (unsupported action, inexact or
+  unsupported time, punch after `as_of`, duplicate punch time). They are `insufficient_evidence` only when
+  the inputs cannot decide: no schedule, unreadable evidence, or totals unavailable.
+- Time evidence: with `evidence_ref` None the time must equal the scheduled boundary. With a ref, `new_ts`
+  must be within `policy.rules.evidence_tolerance_min` of what the ref names:
+  - `schedule_start` / `schedule_end`: the matching boundary of that shift, for an IN or OUT respectively.
+  - `note`: a clock time the employee stated, on the work date or the next day. It is parsed with Track B's
+    pure `note_times`, so both sides read notes identically.
+  - `history_punch`: a same-type, same-weekday history punch's clock time.
+
+  The `missing_punch_window_min` window still bounds every time.
+- `as_of`: CaseService and the resolution store set it from the server clock. It is excluded from evidence_version.
+  An added punch after `as_of` is a violation. An open trailing clock-in before the scheduled end is
+  `insufficient_evidence` (not yet missing) rather than a missing punch.
+- Totals: the week must start on `rules.week_start` and the quarter on a `rules.quarter_start_month` boundary.
+  The loader derives both periods from the policy.
+- Note: a correction backed by evidence but more than `late_tolerance_min` after the scheduled end introduces
+  a SCHEDULE_DEVIATION violation, so it is not eligible as-is (tested).
+
+## Correction types (2026-11-18)
+
+| Action | Allowed for (contract) | Status |
+| --- | --- | --- |
+| `add_punch` | MISSING_PUNCH | Supported (one action; schedule or evidence_ref anchored) |
+| `adjust_punch` | OVERLAPPING_SHIFT, SPREAD_OVER_BREACH, SCHEDULE_DEVIATION | Supported (1-2 actions) |
+| `acknowledge`, `add_break`, `void_shift`, `flag_premium`, `suggest_schedule_swap` | per contract | Refused: "not supported yet" until their semantics are agreed |
+
+`adjust_punch` rules:
+- It must target one of the case's own punches (`punch_id`). The type cannot change, and two actions cannot target the same punch.
+- The move is at most `missing_punch_window_min`, and never past `as_of`.
+- A recorded punch is evidence. It can only be moved to a time the employee stated: `evidence_ref.kind = note`,
+  within `evidence_tolerance_min`. Schedule and history refs are refused for adjustments,
+  so a late arrival cannot be silently moved to the scheduled start.
+- After simulation every rule is re-evaluated. Fixing the target rule while another rule still fails stays blocked.

@@ -50,3 +50,30 @@ Current code: `app/rules/validator.py` exposes `validate_correction` (no aggrega
 
 Contract process: all 0.2.0 changes (items 2, 3 and 5) go in one commit. Amulya proposed that she does contracts.py and the pipeline, and Jayanth reviews; Jayanth has not confirmed this yet. She pulls `backend` first, and the two tracks stay on separate files.
 After 0.2.0, Track A: populate outcome; accept evidence_ref within evidence_tolerance_min; check the week_start weekday and quarter_start_month in the aggregate check; use as_of for open shifts.
+
+### Contract 0.2.0-draft adopted by Track A (2026-11-18)
+
+Track B's 1c4e895 was pulled without conflicts. Track A now:
+- sets `outcome` on every RuleCheck;
+- accepts `new_ts` within `evidence_tolerance_min` of the `evidence_ref`, and stays strict without one;
+- sets `as_of` in CaseService and the resolution store, excluded from `evidence_version`;
+- uses `week_start` and `quarter_start_month` from the policy.
+
+Totals still go through `make_validator`. Quarters are settled as calendar quarters (`quarter_start_month: 1`).
+Open question for Track B: an evidence-backed clock-out later than `late_tolerance_min` introduces a
+SCHEDULE_DEVIATION violation (BLOCKED). Should a warning-severity deviation instead escalate for manager review?
+
+### New questions for Track B (2026-11-18, A-05/A-06/item 7)
+
+1. `adjust_punch`: Track A accepts it only with a `note` evidence_ref within `evidence_tolerance_min`;
+   schedule and history refs are refused for moving a recorded punch. Your time-evidence gate reads
+   `action.punch_type`, which adjust actions may leave empty. Can the gate use the target punch's type
+   (`case.punches` by `punch_id`) and attach only `note` refs for adjustments?
+2. Semantics needed before Track A validates them:
+   - `acknowledge`: close the exception with no timecard change; is a manager reason enough?
+   - `add_break`: two timestamps (start and end) do not fit one `new_ts`; two actions, or a `new_end_ts` field?
+   - `void_shift`: what does it target (shift_id, or the punch_ids of the duplicate session)?
+   - `flag_premium`: a pay flag, not a timecard change; does it resolve the exception?
+   - `suggest_schedule_swap`: advisory only, never approvable?
+3. Detected exceptions now come from imports (ids `EX-<employee>-<date>-<code>`, `detection_details.reason`).
+   Is that enough for your retrieval queries, or do you need structured detail keys per code?

@@ -23,7 +23,7 @@ class ExceptionSummary(BaseModel):
     code: ExceptionCode
     severity: Severity
     work_date: date
-    status: Literal["open"] = "open"
+    status: Literal["open", "resolved"] = "open"
     evidence_version: str
 
 
@@ -40,7 +40,7 @@ def list_exceptions(
     manager: Annotated[ManagerCredential, Depends(authenticated_manager)],
     exception_type: ExceptionCode | None = None,
     severity: Severity | None = None,
-    status: Literal["open", "escalated"] | None = None,
+    status: Literal["open", "escalated", "resolved"] | None = None,
     employee_id: str | None = Query(None, min_length=1, max_length=128),
     exception_id: str | None = Query(None, min_length=1, max_length=128),
     date_range: DateRange | None = None,
@@ -57,11 +57,12 @@ def list_exceptions(
     if date_from and date_to and date_from > date_to:
         raise HTTPException(422, "date_from must not follow date_to.")
     cases = request.app.state.attendance_repository.list_for_manager(manager.manager_id)
-    # Demo snapshots are open: decisions/escalations are not persisted in this adapter.
+    resolved = request.app.state.resolution_store.resolved_ids([c.exception_id for c in cases])
+    # Escalation state is not persisted yet, so "escalated" matches nothing.
     filtered = [
         c
         for c in cases
-        if (status in (None, "open"))
+        if (status is None or status == ("resolved" if c.exception_id in resolved else "open"))
         and (exception_type is None or c.code == exception_type)
         and (severity is None or c.severity == severity)
         and (employee_id is None or c.employee.employee_id == employee_id)
@@ -78,6 +79,7 @@ def list_exceptions(
                 code=c.code,
                 severity=c.severity,
                 work_date=c.work_date,
+                status="resolved" if c.exception_id in resolved else "open",
                 evidence_version=c.evidence_version,
             )
             for c in filtered[offset : offset + limit]
