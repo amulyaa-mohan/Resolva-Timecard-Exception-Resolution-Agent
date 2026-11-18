@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react';
-import { previewManualEditValidation } from '../lib/api';
+import { checkEditedTime } from '../lib/api';
 import { ExceptionItem, Role } from '../types/contracts';
 import { PunchTimeline } from './PunchTimeline';
 
@@ -72,8 +72,10 @@ export function ResolutionPanel({
 
   const canDecide = role === 'manager' || role === 'admin';
   const proposal = aiEnabled ? item.proposal : undefined;
-  const editCheck = mode === 'edit' ? previewManualEditValidation(item, editedTime) : null;
-  const activeRuleOutcomes = mode === 'edit' && editCheck ? editCheck.outcomes : proposal?.rule_outcomes ?? [];
+  // Syntax only. Whether a correction is allowed is decided by the backend on submit.
+  const editCheck = mode === 'edit' ? checkEditedTime(item, editedTime) : null;
+  // Rule outcomes always come from the backend validator; the browser never computes them.
+  const activeRuleOutcomes = proposal?.rule_outcomes ?? [];
 
   const handleSubmit = (
     decision: 'approved' | 'edited' | 'rejected',
@@ -105,15 +107,25 @@ export function ResolutionPanel({
           </p>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
-          {item.status !== 'resolved' && !item.stale_warning && (
-            <button
-              type="button"
-              className="btn-secondary small"
-              title="Simulate a new punch arriving while viewing this proposal"
-              onClick={() => onSimulateStale(item.id)}
-            >
-              Simulate Stale (409)
-            </button>
+          {item.status !== 'resolved' && (
+            <>
+              <button
+                type="button"
+                className="btn-primary small"
+                title="Ask the backend to draft a correction. It approves nothing."
+                onClick={() => onRepropose(item.id)}
+              >
+                {item.proposal || item.draft_status ? 'Draft again' : 'Draft with AI'}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary small"
+                title="Re-read this case from the server and check the draft is still current"
+                onClick={() => onSimulateStale(item.id)}
+              >
+                Re-check evidence
+              </button>
+            </>
           )}
           <button type="button" className="btn-ghost" onClick={onClose} aria-label="Close panel (Esc)">
             ✕
@@ -123,9 +135,9 @@ export function ResolutionPanel({
 
       {item.stale_warning && (
         <div className="banner banner-error" role="alert">
-          <strong>Stale Proposal Blocked (HTTP 409):</strong> Underlying punch evidence updated to v{item.evidence_version + 1} after this AI draft was generated. Approval is blocked until re-proposed.{' '}
+          <strong>Stale draft:</strong> the evidence changed after this draft was generated, so approving it would be refused by the server (HTTP 409). Draft again on the latest evidence.{' '}
           <button type="button" className="btn-primary" style={{ marginLeft: 8, padding: '4px 10px' }} onClick={() => onRepropose(item.id)}>
-            Re-Propose on Latest Evidence
+            Draft on latest evidence
           </button>
         </div>
       )}
@@ -228,12 +240,27 @@ export function ResolutionPanel({
       {activeRuleOutcomes.length > 0 && (
         <div className="card-block">
           <div className="section-label">
-            Deterministic Rules Validator ({activeRuleOutcomes.filter((r) => r.passed).length}/{activeRuleOutcomes.length} Passed)
+            Backend Rules Validator ({activeRuleOutcomes.filter((r) => r.passed).length}/{activeRuleOutcomes.length} Passed)
           </div>
           <div className="rules-grid">
             {activeRuleOutcomes.map((r) => (
-              <div key={r.rule} className={`rule-row ${r.passed ? 'rule-pass' : 'rule-fail'}`}>
-                <span className="rule-icon">{r.passed ? '✓ PASS' : '✕ FAIL'}</span>
+              <div
+                key={r.rule}
+                className={`rule-row ${
+                  r.passed
+                    ? 'rule-pass'
+                    : r.outcome === 'insufficient_evidence'
+                    ? 'rule-unknown'
+                    : 'rule-fail'
+                }`}
+              >
+                <span className="rule-icon">
+                  {r.passed
+                    ? '✓ PASS'
+                    : r.outcome === 'insufficient_evidence'
+                    ? '? NEEDS EVIDENCE'
+                    : '✕ FAIL'}
+                </span>
                 <span className="mono rule-code">{r.rule}</span>
                 <span className="small">{r.detail}</span>
               </div>
@@ -244,7 +271,7 @@ export function ResolutionPanel({
 
       {mode === 'edit' && (
         <div className="edit-box">
-          <div className="section-label">Manual Manager Correction (Live Validator Re-Check)</div>
+          <div className="section-label">Manual Manager Correction (the backend re-validates it on submit)</div>
           <label className="field-label">
             Corrected Out-Punch Time ({item.timezone}):
             <input type="time" value={editedTime} onChange={(e) => setEditedTime(e.target.value)} className="input-field mono" />

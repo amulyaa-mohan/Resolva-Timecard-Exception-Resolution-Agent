@@ -88,7 +88,7 @@ export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: Excep
       policy_pack_id: 'IN-KA@2025.1',
       work_date: '2026-11-17',
       status: 'proposed',
-      evidence_version: 1,
+      evidence_version: 'demo-v1',
       summary: `Live kiosk clock-in at ${punchTime} IST without matching clock-out punch.`,
       employee_note: note,
       schedule: {
@@ -123,7 +123,7 @@ export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: Excep
         missing_information: [],
         model_id: 'qwen2.5-7b-instruct',
         prompt_hash: 'sha256:9f82c1a4',
-        evidence_version: 1,
+        evidence_version: 'demo-v1',
         validator_passed: true,
         rule_outcomes: [
           { rule: 'MISSING_PUNCH', passed: true, detail: 'Paired with 18:00 IST proposed out-punch.' },
@@ -282,7 +282,7 @@ export function ImportPreviewView({ onImportValid }: { onImportValid: (items: Ex
       policy_pack_id: r.location.includes('Austin') ? 'US-FED+CA@2025.1' : 'IN-KA@2025.1',
       work_date: r.work_date,
       status: 'proposed',
-      evidence_version: 1,
+      evidence_version: 'demo-v1',
       summary: `Imported shift ${r.in_time} missing out-punch.`,
       punches: [
         { id: `PNC-IMP-${i}`, employee_id: r.employee_id, ts: `${r.work_date}T${r.in_time}:00+05:30`, type: 'in', source: 'badge', device_id: 'CSV-IMPORT' },
@@ -300,7 +300,7 @@ export function ImportPreviewView({ onImportValid }: { onImportValid: (items: Ex
         missing_information: [],
         model_id: 'qwen2.5-7b-instruct',
         prompt_hash: 'sha256:9f82c1a4',
-        evidence_version: 1,
+        evidence_version: 'demo-v1',
         validator_passed: true,
         rule_outcomes: [{ rule: 'MISSING_PUNCH', passed: true, detail: 'Paired with 18:00 out-punch.' }],
       },

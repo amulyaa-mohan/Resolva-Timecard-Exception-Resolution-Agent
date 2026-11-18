@@ -3,7 +3,19 @@ import { createRoot } from 'react-dom/client';
 import { LoginScreen } from './components/LoginScreen';
 import { ResolutionPanel } from './components/ResolutionPanel';
 import { AuditView, ImportPreviewView, KioskView, PolicySettingsView } from './features/SecondaryViews';
-import { buildAuditRecord, checkBackendHealth, loadInitialData, submitDecisionWithFallback } from './lib/api';
+import {
+  ApiError,
+  checkBackendHealth,
+  hasValidSession,
+  signOut,
+  editedTimestamp,
+  fetchAudit,
+  fetchCase,
+  fetchExceptions,
+  requestProposal,
+  submitDecision,
+} from './lib/api';
+import { INITIAL_POLICY_PACKS } from './lib/fixtures';
 import { AuditEvent, ExceptionItem, Role, UILang } from './types/contracts';
 import './styles.css';
 
@@ -33,13 +45,19 @@ const LABELS: Record<UILang, {
   },
 };
 
+function describeError(error: unknown): string {
+  if (error instanceof ApiError) return error.detail;
+  return error instanceof Error ? error.message : String(error);
+}
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
-  const initial = useMemo(() => loadInitialData(), []);
-  const [exceptions, setExceptions] = useState<ExceptionItem[]>(initial.exceptions);
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(initial.auditEvents);
-  const [selectedId, setSelectedId] = useState<string | null>(initial.exceptions[0]?.id ?? null);
+  const [exceptions, setExceptions] = useState<ExceptionItem[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('inbox');
   const [role, setRole] = useState<Role>('manager');
   const [lang, setLang] = useState<UILang>('en');
@@ -51,6 +69,54 @@ function App() {
   const [toast, setToast] = useState<{ msg: string; undoItem?: ExceptionItem } | null>(null);
 
   const t = LABELS[lang];
+
+  const reload = async (): Promise<void> => {
+    setLoading(true);
+    try {
+      const items = await fetchExceptions();
+      setExceptions((prev) =>
+        // keep any detail already fetched for a case, refresh its summary fields
+        items.map((item) => ({ ...prev.find((p) => p.id === item.id), ...item }))
+      );
+      setSelectedId((current) => (current && items.some((i) => i.id === current) ? current : items[0]?.id ?? null));
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(describeError(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // A refresh keeps the signed-in state only if the server still accepts the stored token.
+  useEffect(() => {
+    hasValidSession().then((valid) => valid && setIsAuthenticated(true));
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
+
+  // Load the selected case's evidence and its audit trail from the server.
+  useEffect(() => {
+    if (!isAuthenticated || !selectedId) return;
+    let cancelled = false;
+    const id = selectedId;
+    fetchCase(id)
+      .then((detail) => {
+        if (!cancelled) {
+          setExceptions((prev) => prev.map((ex) => (ex.id === id ? { ...ex, ...detail } : ex)));
+        }
+      })
+      .catch((error) => !cancelled && setToast({ msg: describeError(error) }));
+    fetchAudit(id)
+      .then((events) => !cancelled && setAuditEvents(events))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, selectedId]);
 
   useEffect(() => {
     checkBackendHealth().then((h) => setHealthMsg(h.message));
@@ -105,88 +171,88 @@ function App() {
     decision: 'approved' | 'edited' | 'rejected',
     details: { editedTime?: string; reasonCode?: string; comment?: string }
   ) => {
-    const result = await submitDecisionWithFallback({
-      item,
-      decision,
-      role,
-      editedTime: details.editedTime,
-      reasonCode: details.reasonCode,
-      comment: details.comment,
-    });
-
-    if (!result.ok) {
-      setToast({ msg: result.conflict ?? 'Decision blocked by server.' });
-      return;
+    // The server re-validates against fresh evidence and is the only thing that can approve.
+    // Anything other than a 2xx leaves the case untouched and is reported as a failure.
+    const actions =
+      decision === 'edited'
+        ? [
+            {
+              type: 'add_punch' as const,
+              punch_type: 'out' as const,
+              new_ts: editedTimestamp(item, details.editedTime ?? ''),
+              note: details.comment ?? '',
+            },
+          ]
+        : item.proposal?.actions ?? [];
+    const reason =
+      decision === 'rejected'
+        ? `${details.reasonCode ?? 'rejected'}: ${details.comment || 'no comment'}`
+        : details.comment ?? '';
+    try {
+      const result = await submitDecision({
+        item,
+        decision: decision === 'rejected' ? 'rejected' : 'approved',
+        actions,
+        reason,
+        edited: decision === 'edited',
+      });
+      setToast({ msg: `${item.id} ${result.status.toUpperCase()} — recorded by the server.` });
+      await reload();
+      const events = await fetchAudit(item.id).catch(() => []);
+      setAuditEvents(events);
+    } catch (error) {
+      // No state change: nothing was saved, so nothing may look saved.
+      setToast({ msg: describeError(error) });
     }
-
-    const snapshot = { ...item };
-    const summaryText =
-      decision === 'approved'
-        ? `Approved AI proposal (${item.proposal?.actions.map((a) => a.type).join(', ')})`
-        : decision === 'edited'
-        ? `Manager manual edit out-punch -> ${details.editedTime} (${details.comment || 're-validated'})`
-        : `Rejected (${details.reasonCode}): ${details.comment || 'No comment'}`;
-
-    const audit = buildAuditRecord({ role, item, decision, summary: summaryText });
-
-    setExceptions((prev) =>
-      prev.map((ex) =>
-        ex.id === item.id
-          ? {
-              ...ex,
-              status: decision === 'rejected' ? 'escalated' : 'resolved',
-              resolution: {
-                decision,
-                decided_by: `Priya Menon (${role})`,
-                reason_code: details.reasonCode,
-                comment: details.comment,
-                decided_at: audit.ts,
-                trace_id: audit.trace_id,
-              },
-            }
-          : ex
-      )
-    );
-    setAuditEvents((prev) => [audit, ...prev]);
-    setToast({ msg: `${item.id} ${decision.toUpperCase()} (Trace ${audit.trace_id})`, undoItem: snapshot });
   };
 
-  const handleSimulateStale = (itemId: string) => {
-    setExceptions((prev) => prev.map((ex) => (ex.id === itemId ? { ...ex, stale_warning: true } : ex)));
-    setToast({ msg: `${itemId}: New punch arrived — existing proposal marked STALE (409 guard active).` });
+  const handleCheckEvidence = async (itemId: string) => {
+    try {
+      const fresh = await fetchCase(itemId);
+      setExceptions((prev) =>
+        prev.map((ex) =>
+          ex.id === itemId
+            ? { ...ex, ...fresh, stale_warning: Boolean(ex.proposal && fresh.evidence_version !== ex.proposal.evidence_version) }
+            : ex
+        )
+      );
+      setToast({ msg: `${itemId}: evidence re-read from the server.` });
+    } catch (error) {
+      setToast({ msg: describeError(error) });
+    }
   };
 
-  const handleRepropose = (itemId: string) => {
-    setExceptions((prev) =>
-      prev.map((ex) =>
-        ex.id === itemId
-          ? {
-              ...ex,
-              stale_warning: false,
-              evidence_version: ex.evidence_version + 1,
-              proposal: ex.proposal
-                ? { ...ex.proposal, evidence_version: ex.evidence_version + 1, rationale: `[Re-proposed on v${ex.evidence_version + 1}] ${ex.proposal.rationale}` }
-                : undefined,
-            }
-          : ex
-      )
-    );
-    setToast({ msg: `${itemId}: Re-proposed and re-validated on latest evidence.` });
+  const handleRepropose = async (itemId: string) => {
+    const item = exceptions.find((e) => e.id === itemId);
+    if (!item) return;
+    setToast({ msg: `${itemId}: asking the model for a draft...` });
+    try {
+      const outcome = await requestProposal(itemId);
+      setExceptions((prev) =>
+        prev.map((ex) =>
+          ex.id === itemId
+            ? {
+                ...ex,
+                stale_warning: false,
+                status: outcome.status === 'escalated' ? 'escalated' : outcome.status === 'eligible' ? 'proposed' : ex.status,
+                proposal: outcome.proposal,
+                draft_status: outcome.status,
+                draft_reasons: outcome.reasons,
+              }
+            : ex
+        )
+      );
+      const detail = outcome.reasons.length ? ` — ${outcome.reasons[0]}` : '';
+      setToast({ msg: `${itemId}: ${outcome.status.toUpperCase()}${detail}` });
+      setAuditEvents(await fetchAudit(itemId).catch(() => []));
+    } catch (error) {
+      setToast({ msg: describeError(error) });
+    }
   };
 
-  const handleUndo = () => {
-    if (!toast?.undoItem) return;
-    const restored = toast.undoItem;
-    const reversalAudit = buildAuditRecord({
-      role,
-      item: restored,
-      decision: 'rejected',
-      summary: `Audited reversal of prior decision on ${restored.id}`,
-    });
-    setExceptions((prev) => prev.map((ex) => (ex.id === restored.id ? restored : ex)));
-    setAuditEvents((prev) => [reversalAudit, ...prev]);
-    setToast(null);
-  };
+  // A decision cannot be undone from the browser: corrections and audit events are append-only.
+  // Reversing one is a new, audited decision, which is not built yet.
+  const handleUndo = () => setToast(null);
 
   const eligibleForBulk = useMemo(
     () =>
@@ -201,16 +267,19 @@ function App() {
     [exceptions, aiEnabled, confidenceThreshold]
   );
 
-  const handleBulkApprove = () => {
+  const handleBulkApprove = async () => {
     if (role !== 'manager' && role !== 'admin') return;
-    eligibleForBulk.forEach((item) => handleDecide(item, 'approved', {}));
-    setToast({ msg: `Bulk approved ${eligibleForBulk.length} validator-passed proposals.` });
+    // Each one is submitted and judged on its own by the server, exactly as a single approval is.
+    for (const item of eligibleForBulk) {
+      await handleDecide(item, 'approved', {});
+    }
   };
 
   const openProblems = exceptions.filter((e) => e.status !== 'resolved' && e.severity === 'problem').length;
   const openWarnings = exceptions.filter((e) => e.status !== 'resolved' && e.severity === 'warning').length;
   const resolvedCount = exceptions.filter((e) => e.status === 'resolved').length;
-  const readinessPct = Math.round(((resolvedCount + 12) / (exceptions.length + 12)) * 100);
+  // Share of this manager's exceptions that are resolved; no padding, no invented baseline.
+  const readinessPct = exceptions.length ? Math.round((resolvedCount / exceptions.length) * 100) : 0;
 
   if (!isAuthenticated) {
     return (
@@ -228,7 +297,7 @@ function App() {
       <header className="topbar">
         <div className="brand">
           <span className="brand-title">Resolva</span>
-          <span className="fixture-pill">SYNTHETIC FIXTURES (FE-01..FE-05)</span>
+          <span className="fixture-pill">LIVE BACKEND</span>
         </div>
 
         <nav className="nav-tabs" aria-label="Primary views">
@@ -270,6 +339,10 @@ function App() {
             className="btn-secondary sign-out-btn"
             style={{ fontSize: '12px', padding: '5px 12px' }}
             onClick={() => {
+              signOut(); // forget the token, so a refresh does not sign back in
+              setExceptions([]);
+              setAuditEvents([]);
+              setSelectedId(null);
               setIsAuthenticated(false);
               setCurrentUserEmail(null);
             }}
@@ -320,9 +393,9 @@ function App() {
                   <div className="filter-group">
                     <select className="role-select" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} aria-label="Filter by location">
                       <option value="ALL">All Locations</option>
-                      <option value="Bengaluru (BLR-01)">Bengaluru (BLR-01)</option>
-                      <option value="Bengaluru (BLR-02)">Bengaluru (BLR-02)</option>
-                      <option value="Austin (AUS-01)">Austin (AUS-01)</option>
+                      {Array.from(new Set(exceptions.map((e) => e.location).filter(Boolean))).sort().map((site) => (
+                        <option key={site} value={site}>{site}</option>
+                      ))}
                     </select>
                     <select className="role-select" value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)} aria-label="Filter by severity">
                       <option value="ALL">All Severities</option>
@@ -374,7 +447,7 @@ function App() {
                                 <div className="small muted">{item.location} • {item.work_date}</div>
                               </td>
                               <td>
-                                <div className="mono small"><strong>{item.code}</strong> <span className="muted">({item.policy_pack_id})</span></div>
+                                <div className="mono small"><strong>{item.code}</strong> {item.policy_pack_id ? <span className="muted">({item.policy_pack_id})</span> : null}</div>
                                 <div className="small muted">{item.summary}</div>
                               </td>
                               <td>
@@ -384,8 +457,12 @@ function App() {
                                   <span className="badge-escalated">Stale (409)</span>
                                 ) : passed ? (
                                   <span className="badge-ai">AI Draft ({Math.round((item.proposal?.confidence ?? 0) * 100)}%)</span>
+                                ) : item.draft_status === 'escalated' ? (
+                                  <span className="badge-escalated" title={item.draft_reasons?.join(' ')}>Needs manager</span>
+                                ) : item.draft_status === 'blocked' ? (
+                                  <span className="badge-escalated" title={item.draft_reasons?.join(' ')}>Blocked by rules</span>
                                 ) : (
-                                  <span className="badge-escalated">Escalated / Blocked</span>
+                                  <span className="badge-neutral">No draft yet</span>
                                 )}
                               </td>
                               <td>
@@ -407,7 +484,7 @@ function App() {
                 role={role}
                 aiEnabled={aiEnabled}
                 onClose={() => setSelectedId(null)}
-                onSimulateStale={handleSimulateStale}
+                onSimulateStale={handleCheckEvidence}
                 onRepropose={handleRepropose}
                 onDecide={handleDecide}
               />
@@ -455,7 +532,7 @@ function App() {
 
         {tab === 'policies' && (
           <PolicySettingsView
-            policies={initial.policies}
+            policies={INITIAL_POLICY_PACKS}
             aiEnabled={aiEnabled}
             onToggleAi={setAiEnabled}
             confidenceThreshold={confidenceThreshold}

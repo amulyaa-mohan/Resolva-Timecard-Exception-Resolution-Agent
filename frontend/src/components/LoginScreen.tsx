@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { ApiError, signIn } from '../lib/api';
 import '../login.css';
 
 export interface LoginScreenProps {
@@ -28,6 +29,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [showForgotNotice, setShowForgotNotice] = useState(false);
+  const [signingIn, setSigningIn] = useState(false);
 
   // Initialize remembered email from localStorage
   useEffect(() => {
@@ -60,24 +62,36 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
       }
     }
 
-    if (!password) {
-      setPasswordError('Password is required.');
-      isValid = false;
-    } else if (password.length < 6) {
-      setPasswordError('Password must be at least 6 characters for demo access.');
+    if (!password.trim()) {
+      setPasswordError('The manager access token is required.');
       isValid = false;
     }
 
     return isValid;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) {
       return;
     }
 
     const trimmedEmail = email.trim();
+    // The token is the identity. The server decides whether it is valid and which employees
+    // it may see; nothing here grants access on its own.
+    setSigningIn(true);
+    try {
+      await signIn(password);
+    } catch (error) {
+      setPasswordError(
+        error instanceof ApiError
+          ? error.detail
+          : 'Could not reach the backend. Start it and try again.'
+      );
+      setSigningIn(false);
+      return;
+    }
+    setSigningIn(false);
 
     // Security requirement: Remember Me stores ONLY email, NEVER password
     try {
@@ -95,7 +109,6 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
   const handleSelectPreset = (preset: DemoAccount) => {
     setEmail(preset.email);
-    setPassword('DemoPass2026!');
     setEmailError(null);
     setPasswordError(null);
     setShowForgotNotice(false);
@@ -119,16 +132,18 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
           <div className="login-body">
             <div className="login-banner login-banner-info" role="note">
-              <strong>Evaluation Environment:</strong> Authentication is simulated for team demonstration.
-              You may use any valid email format and a 6+ character password, or click a demo profile below.
+              <strong>Demo environment:</strong> access is a bearer token issued by the server, which also decides
+              which employees you can see. Paste the manager token the seed script wrote to
+              backend/local/manager-token.json.
             </div>
 
             {showForgotNotice && (
               <div className="login-banner login-banner-alert" role="status">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                   <div>
-                    <strong>Demo Mode Notice:</strong> Self-service password recovery is disabled in this demonstration prototype.
-                    You can sign in with any valid email and any password (6+ characters), or choose one of the quick demo profiles below.
+                    <strong>Demo Mode Notice:</strong> There is no password recovery. Access is a
+                    bearer token the server issued; run the seed script to provision one. The name
+                    beside it is only a label shown in this interface.
                   </div>
                   <button
                     type="button"
@@ -170,20 +185,20 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
               <div className="login-form-group">
                 <label className="login-label" htmlFor="login-password">
-                  Password
+                  Manager access token
                 </label>
                 <div className="login-password-wrapper">
                   <input
                     id="login-password"
                     type={showPassword ? 'text' : 'password'}
                     className={`login-input ${passwordError ? 'has-error' : ''}`}
-                    placeholder="Enter demo password"
+                    placeholder="Paste the manager access token"
                     value={password}
                     onChange={(e) => {
                       setPassword(e.target.value);
                       if (passwordError) setPasswordError(null);
                     }}
-                    autoComplete="current-password"
+                    autoComplete="off"
                     aria-invalid={!!passwordError}
                     aria-describedby={passwordError ? 'password-error' : undefined}
                   />
@@ -222,8 +237,8 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 </button>
               </div>
 
-              <button type="submit" className="login-submit-btn">
-                Sign In to Resolva
+              <button type="submit" className="login-submit-btn" disabled={signingIn}>
+                {signingIn ? 'Checking with the server...' : 'Sign In to Resolva'}
               </button>
             </form>
 

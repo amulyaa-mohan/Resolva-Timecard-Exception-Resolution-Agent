@@ -68,3 +68,34 @@ Append entries; preserve other developers' history. Use repository-relative path
   - Verified that all existing dashboard tabs (Exception Inbox, Escalations, Import Preview, Audit Trail, Kiosk Simulator, Policies & Settings), KPI cards, and resolution actions remain fully intact.
 - Blockers and next step: Ready for teammate review; future task can wire production auth provider if live authentication backend is introduced.
 - Publication: local only.
+
+### 2026-11-18 — C V Jayanth — FE-07 — UI wired to the real backend
+
+- Branch and status: frontend (from main 40748d4); REVIEW; local until committed. Touches `src/lib/api.ts`,
+  `src/types/contracts.ts`, `src/main.tsx`, `src/components/ResolutionPanel.tsx`, `src/components/LoginScreen.tsx`,
+  `vite.config.ts`, `e2e/approve.spec.ts`. Components and styles are otherwise Chaithanya's and unchanged.
+- Fixed (all were found in the review of 54da613):
+  - Approval no longer fails open. Any request that does not reach the server, or returns a non-2xx,
+    throws and leaves the case untouched. Tested by stopping the backend and attempting a rejection:
+    the form stayed open, the inbox did not change and nothing was recorded.
+  - The browser no longer runs a rule checker. `previewManualEditValidation` (invented 2 h overtime cap,
+    always-passing break/overlap/schedule rules) is gone; the only local check is HH:MM syntax. Rule outcomes
+    shown are the backend validator's, including the totals and as-of time it used.
+  - No role header and no browser-built audit records. Identity is the server-issued bearer token; the audit
+    view shows the server's append-only events.
+  - The login now verifies the token with the server. Before, any email plus any 6-character password was accepted.
+  - The stale-evidence 409 is the server's, not a fixture flag; "Simulate Stale" became "Re-check evidence".
+  - Readiness was computed with an invented `+12`; it is now resolved / total. The location filter lists the
+    manager's real sites. Empty `()` and a misleading "Escalated / Blocked" on cases with no draft are gone.
+  - `evidence_version` is the backend's `sha256:` string, not a number.
+- New: "Draft with AI" calls `POST /exceptions/{id}/proposal`; escalated and blocked outcomes are shown with the
+  pipeline's own reasons; a refresh keeps the session only if the server still accepts the token; sign-out forgets it.
+- Validation: `tsc --noEmit` and `vite build` pass. Driven in the built-in browser against the seeded PostgreSQL
+  demo (mock provider): bad token refused; real token signs in; six real exceptions with names; draft returned
+  6/6 checks with KA-8 cited; approve recorded (database: resolved, revision 1, one decision, one correction,
+  3 raw punches unchanged, audit detected > proposed > approved, integrity check 0 problems); overtime case
+  escalated; Escalations tab updated. The Playwright spec was rewritten for this flow but has not been run.
+- Not wired yet: Import Preview (still the client-side CSV preview; `POST /imports` exists), Kiosk Simulator,
+  Policies & Settings (fixtures), bulk approve beyond per-item submission, Edit Fix for non-missing-punch cases,
+  the Audit Trail tab shows only the selected case's events, and hours before/after a fix are mostly "—".
+- Dev: `VITE_API_TARGET=http://127.0.0.1:8001 npm run dev` points the proxy at another backend port.

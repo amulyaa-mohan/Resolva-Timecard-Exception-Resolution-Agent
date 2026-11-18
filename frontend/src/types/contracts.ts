@@ -1,4 +1,6 @@
 ﻿export type Severity = 'problem' | 'warning';
+// 'proposed' is a UI-only state: the backend knows open | escalated | resolved, and the UI
+// marks an item 'proposed' once an eligible draft has been fetched for it.
 export type ExceptionStatus = 'open' | 'proposed' | 'escalated' | 'resolved';
 export type DecisionType = 'approved' | 'edited' | 'rejected';
 export type Role = 'employee' | 'manager' | 'payroll_admin' | 'compliance' | 'admin';
@@ -9,7 +11,7 @@ export interface PunchEvent {
   employee_id: string;
   ts: string;
   type: 'in' | 'out' | 'break_start' | 'break_end';
-  source: 'kiosk' | 'mobile' | 'badge' | 'web';
+  source: 'kiosk' | 'mobile' | 'badge' | 'web' | 'import';
   device_id: string;
 }
 
@@ -29,11 +31,31 @@ export interface HoursSummary {
   pay_status: string;
 }
 
+export interface EvidenceRef {
+  kind: 'schedule_start' | 'schedule_end' | 'note' | 'history_punch';
+  id: string;
+}
+
+/** Mirrors the backend ActionType. The older UI-only names are kept for the demo fixtures. */
 export interface ProposedAction {
-  type: 'add_punch' | 'edit_punch' | 'waive_warning' | 'escalate' | 'flag_premium' | 'suggest_schedule_swap';
+  type:
+    | 'add_punch'
+    | 'adjust_punch'
+    | 'void_shift'
+    | 'add_break'
+    | 'flag_premium'
+    | 'suggest_schedule_swap'
+    | 'acknowledge'
+    | 'edit_punch'
+    | 'waive_warning'
+    | 'escalate';
+  punch_id?: string;
+  punch_type?: 'in' | 'out' | 'break_start' | 'break_end';
   target_punch_id?: string;
   new_ts?: string;
   note: string;
+  /** Which evidence supports new_ts. Attached by the backend, never invented here. */
+  evidence_ref?: EvidenceRef | null;
 }
 
 export interface Citation {
@@ -45,6 +67,8 @@ export interface RuleOutcome {
   rule: string;
   passed: boolean;
   detail: string;
+  /** pass | violation | insufficient_evidence. Absent on demo fixtures. */
+  outcome?: string;
 }
 
 export interface LLMProposal {
@@ -58,7 +82,7 @@ export interface LLMProposal {
   missing_information: string[];
   model_id: string;
   prompt_hash: string;
-  evidence_version: number;
+  evidence_version: string;
   validator_passed: boolean;
   rule_outcomes: RuleOutcome[];
 }
@@ -84,7 +108,7 @@ export interface ExceptionItem {
   policy_pack_id: string;
   work_date: string;
   status: ExceptionStatus;
-  evidence_version: number;
+  evidence_version: string;
   stale_warning?: boolean;
   summary: string;
   employee_note?: string;
@@ -93,6 +117,9 @@ export interface ExceptionItem {
   before_hours: HoursSummary;
   after_hours?: HoursSummary;
   proposal?: LLMProposal;
+  /** What the backend pipeline returned for the last draft: eligible, blocked or escalated. */
+  draft_status?: 'eligible' | 'blocked' | 'escalated';
+  draft_reasons?: string[];
   resolution?: ResolutionRecord;
 }
 
