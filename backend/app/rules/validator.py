@@ -294,19 +294,23 @@ def _validate(
 def _warning_needs_review(
     checks: list[RuleCheck], actions: list[ProposedAction]
 ) -> list[RuleCheck]:
-    """An evidenced fix whose only remaining failure is a warning goes to the manager.
+    """An evidenced fix whose remaining failures are all warnings goes to the manager.
 
     Agreed with Track B (2026-11-18): the pipeline then ESCALATES instead of BLOCKING, so a
-    manager can approve or acknowledge it. Problem-severity rules keep blocking, and nothing
-    here makes a correction approvable on its own.
+    manager reviews it. Any problem-severity failure keeps blocking, and nothing here makes a
+    correction approvable on its own (approval re-validates and still refuses it).
     """
     failed = [c for c in checks if not c.passed]
+    # OVERTIME_RISK added, and several warnings allowed, 2026-11-18 (agreed Track A/B
+    # question): overtime that was really worked must be paid and reviewed, not used to block
+    # an evidenced fix of another rule. Live demo: a spread-over fixed to the stated 06:30
+    # still had 10 h worked of 9 and a 30-minute late start, both warnings.
     reviewable = {
         code for code, severity in DEFAULT_SEVERITY.items() if severity == Severity.WARNING
-    } & {ExceptionCode.SCHEDULE_DEVIATION}
-    if not all(a.evidence_ref is not None for a in actions) or len(failed) != 1:
+    } & {ExceptionCode.SCHEDULE_DEVIATION, ExceptionCode.OVERTIME_RISK}
+    if not failed or not all(a.evidence_ref is not None for a in actions):
         return checks
-    if failed[0].code not in reviewable or failed[0].outcome != RuleOutcome.VIOLATION:
+    if any(c.code not in reviewable or c.outcome != RuleOutcome.VIOLATION for c in failed):
         return checks
     return [
         RuleCheck(
@@ -315,7 +319,7 @@ def _warning_needs_review(
             reason=f"Fix is evidenced but leaves a warning: manager review. {c.reason}",
             outcome=RuleOutcome.INSUFFICIENT_EVIDENCE,
         )
-        if c is failed[0]
+        if c in failed
         else c
         for c in checks
     ]

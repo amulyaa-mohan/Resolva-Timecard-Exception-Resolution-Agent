@@ -86,7 +86,8 @@ Settings are unprefixed env vars or `backend/.env` (`AI_ENABLED`, `LLM_PROVIDER`
 - Latest live report (dcccc0c, real validator, 45 cases): all 6 live gates pass, proposal accuracy
   100% under real and stand-in, every category 100%, p50 4.78 s; real rules made 0/6 rules-only
   cases eligible vs 6/6 for the stand-in. Lexicon intents 100% en/hi/kn, paraphrases 10/12.
-- Tests: 585 with `TEST_DATABASE_URL` (PostgreSQL tests skip without it) (466 with `TEST_DATABASE_URL`; CI runs them on a
+- Tests: 590 with `TEST_DATABASE_URL` (PostgreSQL tests skip without it). If Windows Application
+  Control blocks the psycopg DLL, run them in `python:3.12-slim` on the compose network (see UPDATE.md). (466 with `TEST_DATABASE_URL`; CI runs them on a
   `postgres:15` service and fails if they skip). `docker compose --profile postgres` for local PG. `tzdata` is a runtime dependency (Windows/slim images). Local Ollama in Docker: `cd backend && docker compose -f docker-compose.yml
   -f docker-compose.gpu.yml --profile ollama up -d ollama` (models persist in the `ollama-models` volume).
 

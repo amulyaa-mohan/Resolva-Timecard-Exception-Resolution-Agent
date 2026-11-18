@@ -150,3 +150,116 @@ def test_a6_effective_to_is_exclusive_like_the_registry(policy):
     blocked = outcomes(punches, ending_today)
     assert set(blocked.values()) == {RuleOutcome.INSUFFICIENT_EVIDENCE}
     assert outcomes(punches, ending_tomorrow)[ExceptionCode.MISSING_PUNCH] == RuleOutcome.PASS
+
+
+# ------------------------------------------------------------------ overtime remainder (agreed)
+
+
+def test_evidenced_fix_leaving_only_overtime_is_reviewable(policy):
+    # A spread-over fixed to the stated 06:30 still has 10 h worked of 9 (live demo).
+    from app.core.contracts import EvidenceKind, EvidenceRef
+
+    base = make_case(notes=("I only started at 06:30 when the gate opened.",))
+    shift = base.schedule.model_copy(
+        update={
+            "start": datetime(2026, 11, 12, 6, 30, tzinfo=IST),
+            "end": datetime(2026, 11, 12, 18, 30, tzinfo=IST),
+            "planned_break_min": 120,
+        }
+    )
+    case = base.model_copy(
+        update={
+            "code": ExceptionCode.SPREAD_OVER_BREACH,
+            "severity": "problem",
+            "schedule": shift,
+            "as_of": datetime(2026, 11, 13, 12, tzinfo=IST),
+            "punches": [  # two proper rests, so only the 10 h of work remains (> 9 h)
+                _punch("P-1", IN, 6, 0),
+                _punch("x", BS, 11, 0),
+                _punch("y", BE, 12, 0),
+                _punch("x2", BS, 15, 30),
+                _punch("y2", BE, 16, 30),
+                _punch("P-2", OUT, 18, 30),
+            ],
+        }
+    )
+    fix = ProposedAction(
+        type="adjust_punch",
+        punch_id="P-1",
+        new_ts=datetime(2026, 11, 12, 6, 30, tzinfo=IST),
+        evidence_ref=EvidenceRef(kind=EvidenceKind.NOTE, id="N-0"),
+    )
+    result = make_validator(lambda c: TOTALS)(case, [fix], policy)
+    failed = {c.code: c for c in result.checks if not c.passed}
+    assert set(failed) == {ExceptionCode.OVERTIME_RISK}
+    assert failed[ExceptionCode.OVERTIME_RISK].outcome == RuleOutcome.INSUFFICIENT_EVIDENCE
+    assert "manager review" in failed[ExceptionCode.OVERTIME_RISK].reason
+
+
+def test_evidenced_fix_leaving_several_warnings_is_reviewable(policy):
+    # Live demo: the stated 06:30 start is also 30 min after the scheduled 06:00, so overtime
+    # AND a late start remain. Both are warnings, so the manager reviews it.
+    from app.core.contracts import EvidenceKind, EvidenceRef
+
+    base = make_case(notes=("I only started at 06:30 when the gate opened.",))
+    shift = base.schedule.model_copy(
+        update={
+            "start": datetime(2026, 11, 12, 6, 0, tzinfo=IST),
+            "end": datetime(2026, 11, 12, 18, 30, tzinfo=IST),
+            "planned_break_min": 120,
+        }
+    )
+    case = base.model_copy(
+        update={
+            "code": ExceptionCode.SPREAD_OVER_BREACH,
+            "severity": "problem",
+            "schedule": shift,
+            "as_of": datetime(2026, 11, 13, 12, tzinfo=IST),
+            "punches": [
+                _punch("P-1", IN, 6, 0),
+                _punch("x", BS, 11, 0),
+                _punch("y", BE, 12, 0),
+                _punch("x2", BS, 15, 30),
+                _punch("y2", BE, 16, 30),
+                _punch("P-2", OUT, 18, 30),
+            ],
+        }
+    )
+    fix = ProposedAction(
+        type="adjust_punch",
+        punch_id="P-1",
+        new_ts=datetime(2026, 11, 12, 6, 30, tzinfo=IST),
+        evidence_ref=EvidenceRef(kind=EvidenceKind.NOTE, id="N-0"),
+    )
+    result = make_validator(lambda c: TOTALS)(case, [fix], policy)
+    failed = {c.code: c.outcome for c in result.checks if not c.passed}
+    assert failed == {
+        ExceptionCode.OVERTIME_RISK: RuleOutcome.INSUFFICIENT_EVIDENCE,
+        ExceptionCode.SCHEDULE_DEVIATION: RuleOutcome.INSUFFICIENT_EVIDENCE,
+    }
+
+
+def test_a_problem_remainder_still_blocks_even_with_warnings(policy):
+    # The fix leaves a problem-severity failure (spread still 13.5 h): it must keep blocking.
+    from app.core.contracts import EvidenceKind, EvidenceRef
+
+    base = make_case(notes=("I only started at 06:30.",))
+    case = base.model_copy(
+        update={
+            "code": ExceptionCode.SPREAD_OVER_BREACH,
+            "severity": "problem",
+            "as_of": datetime(2026, 11, 13, 12, tzinfo=IST),
+            "punches": [_punch("P-1", IN, 6, 0), _punch("P-2", OUT, 20, 0)],  # 14 h spread
+        }
+    )
+    fix = ProposedAction(
+        type="adjust_punch",
+        punch_id="P-1",
+        new_ts=datetime(2026, 11, 12, 6, 30, tzinfo=IST),
+        evidence_ref=EvidenceRef(kind=EvidenceKind.NOTE, id="N-0"),
+    )
+    result = make_validator(lambda c: TOTALS)(case, [fix], policy)
+    outcomes = {c.code: c.outcome for c in result.checks if not c.passed}
+    # 06:30-20:00 is still 13.5 h of spread (problem): nothing becomes reviewable.
+    assert outcomes[ExceptionCode.SPREAD_OVER_BREACH] == RuleOutcome.VIOLATION
+    assert RuleOutcome.VIOLATION in set(outcomes.values())

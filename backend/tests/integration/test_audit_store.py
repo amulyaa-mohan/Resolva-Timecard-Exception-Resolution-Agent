@@ -178,3 +178,29 @@ def test_approving_an_adjustment_applies_it_once(env):  # noqa: F811
         ("E-001", "2026-11-12"),
     )[0]
     assert worked == pytest.approx(7 + 55 / 60)  # the day total uses the corrected hours
+
+
+def test_timecard_reports_every_time_in_the_employee_zone(env):  # noqa: F811
+    client, *_ = env
+    client.app.state.attendance_repository.seed_case(_late_arrival_case(), manager_id="M-1")
+    version = client.get("/exceptions/X-LATE", headers=auth()).json()["evidence_version"]
+    body = {
+        "decision": "approve",
+        "actions": [
+            {
+                "type": "adjust_punch",
+                "punch_id": "X-LATE-P0",
+                "new_ts": "2026-11-12T03:35:00+00:00",  # 09:05 IST submitted in UTC
+                "evidence_ref": {"kind": "note", "id": "N-LATE"},
+            }
+        ],
+        "evidence_version": version,
+        "idempotency_key": "tz-approve-1",
+    }
+    assert client.post("/exceptions/X-LATE/decisions", json=body, headers=auth()).status_code == 200
+    card = client.get("/exceptions/X-LATE/timecard", headers=auth()).json()
+    assert card["timezone"] == "Asia/Kolkata"
+    times = [p["ts"] for p in card["raw_punches"] + card["effective_punches"]]
+    times += [a["new_ts"] for a in card["corrections_applied"]]
+    assert times and all(t.endswith("+05:30") for t in times), times
+    assert card["corrections_applied"][0]["new_ts"].startswith("2026-11-12T09:05")

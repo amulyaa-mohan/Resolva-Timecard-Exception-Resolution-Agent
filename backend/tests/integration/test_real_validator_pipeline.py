@@ -131,13 +131,16 @@ def test_evidence_tolerance_boundary_with_real_validator(new_ts, status, policy,
         assert ref.kind == "schedule_end" and ref.id == "S-1"
 
 
-def test_fix_that_creates_overtime_is_blocked(policy, settings):
-    # 8 h today pushes the projected week to 49 h > 48 h
+def test_evidenced_fix_that_creates_overtime_goes_to_the_manager(policy, settings):
+    # 8 h today pushes the projected week to 49 h > 48 h. Agreed 2026-11-18: overtime is a
+    # warning that was really worked; an evidenced fix whose only remainder is overtime is
+    # escalated for manager review (and paid), never silently approved or blocked.
     over = replace(COMPLETE, week_other_worked_hours=41)
     result = run(evidenced_case(), policy, settings, make_validator(lambda _: over))
-    assert result.status == GateStatus.BLOCKED
+    assert result.status == GateStatus.ESCALATED
     reasons = " ".join(result.reasons)
-    assert "OVERTIME_RISK" in reasons and "MISSING_PUNCH" not in reasons
+    assert "OVERTIME_RISK" in reasons and "manager review" in reasons
+    assert "MISSING_PUNCH" not in reasons
 
 
 def test_fix_leaving_meal_break_violation_is_blocked(policy, settings):

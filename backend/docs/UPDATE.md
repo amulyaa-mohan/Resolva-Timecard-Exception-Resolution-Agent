@@ -568,3 +568,12 @@ Never include credentials, private employee data, or invented test results.
 - Validation: pytest 585 passed on PostgreSQL 15 (none skipped); ruff clean; eval 9/9; Docker stack with live Qwen: demo story end to end (missing punch approved, then the late arrival eligible and approved to the stated 09:05, net 7.92 h), HTTP walk-through 49/49, 0 server errors; full live eval 100% in every category, 0 unsafe, p50 4.58 s.
 - Answered in TRACK_A_CONTRACT_RESPONSE.md: unscheduled shift stays insufficient_evidence until a "roster final" signal exists (proposal for 0.3.0); two questions for Track A (overtime-only remainder after an evidenced fix; timecard time zone).
 - Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan — Settle open questions; verify end to end before merging to main
+
+- Branch: `backend`.
+- Status: REVIEW, then merge into `main`.
+- Changed (Track A modules at the owner's request): `app/rules/validator.py`, so an evidenced fix leaving only warning-severity violations (SCHEDULE_DEVIATION and/or OVERTIME_RISK) is escalated; `app/resolution/store.py` and `router.py`, so the timecard is in the employee's zone with a `timezone` field. Tests updated and added; eval e03 now expects ESCALATED.
+- Decided: an unscheduled shift stays `insufficient_evidence` until a roster-final signal (0.3.0).
+- Validation: the Windows host now blocks the psycopg DLL (Application Control; settings not changed), so tests ran in a Linux `python:3.12-slim` container on the compose network: 590 passed on PostgreSQL 15 (none skipped), ruff clean, eval 9/9. Docker stack (API image, PostgreSQL, Ollama on the GPU), fresh demo week seeded from a container: demo story end to end (missing punch approved, then the late arrival eligible and approved to the stated 09:05), and the spread-over now escalates for review; HTTP walk-through 49/49, 76 requests, 0 server errors; full live eval (in a container) 100% in every category, 0 unsafe, 0 repair retries, p50 4.44 s.
+- Publication: committed and pushed to `backend` (authorised by the owner).

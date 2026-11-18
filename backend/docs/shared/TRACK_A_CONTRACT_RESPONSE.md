@@ -252,3 +252,20 @@ escalates it.
 - *Timecard display:* `GET /exceptions/{id}/timecard` returns raw punches in UTC next to corrections
   in local time (`03:55` beside `09:05`). Same instants, but the frontend should get one zone; the
   employee's local zone would match the rest of the API.
+
+### Decisions settled (2026-11-18, Amulya, implemented by Track B at the owner's request)
+
+1. **Unscheduled shift:** stays `insufficient_evidence` (no change). It becomes a SCHEDULE_DEVIATION
+   warning only once a trusted "roster final" signal exists; that is part of contract 0.3.0.
+2. **Warnings left after an evidenced fix go to the manager.** `_warning_needs_review` in
+   `app/rules/validator.py` now covers OVERTIME_RISK as well as SCHEDULE_DEVIATION, and any number of
+   them, as long as every remaining failure is a warning-severity violation and every action carries
+   evidence. Any problem-severity failure still blocks. Escalation never approves: approval still
+   re-validates and refuses it. Live demo: the spread-over fix to the stated 06:30 (10 h worked, late
+   start) now escalates for review instead of blocking. Tests: `test_evidenced_fix_leaving_several_warnings_is_reviewable`,
+   `test_a_problem_remainder_still_blocks_even_with_warnings`, and your
+   `test_evidenced_fix_that_creates_overtime_goes_to_the_manager` (renamed; it asserted the old answer).
+   Eval case e03 now expects ESCALATED, matching its own description ("needs overtime review").
+3. **Timecard time zone:** `GET /exceptions/{id}/timecard` returns every time (raw punches, effective
+   punches, applied actions) in the employee's zone, and states it in a new `timezone` field.
+   Test: `test_timecard_reports_every_time_in_the_employee_zone`.

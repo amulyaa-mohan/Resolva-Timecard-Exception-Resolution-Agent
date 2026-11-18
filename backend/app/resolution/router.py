@@ -155,6 +155,7 @@ class EffectiveTimecard(BaseModel):
     exception_id: str
     employee_id: str
     work_date: date
+    timezone: str = Field(description="IANA zone of every time in this response (the employee's).")
     raw_punches: list[PunchRecord]
     corrections_applied: list[dict]
     effective_punches: list[PunchRecord]
