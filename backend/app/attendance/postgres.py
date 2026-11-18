@@ -32,6 +32,17 @@ def _psycopg():
     return psycopg
 
 
+def _local(value, zone: ZoneInfo):
+    """Express an instant as wall-clock time in the employee's zone.
+
+    PostgreSQL returns every timestamptz in the SESSION's timezone, so the same punch reads
+    03:30Z from a UTC server (a Docker default) and 09:00+05:30 from a Kolkata one. Clients draw
+    timelines from the wall-clock text, so the offset must not depend on how the database is
+    configured. The instant is unchanged, and evidence_version hashes instants, so it is too.
+    """
+    return value.astimezone(zone) if value is not None else None
+
+
 class PgConnection:
     """Accepts the `?` placeholders shared with the SQLite code."""
 
@@ -107,10 +118,13 @@ class PostgresBackend:
             )
         )
         punch_cols = "p.punch_id, p.employee_id, p.ts, p.type, p.source, p.device_id"
+        zone = ZoneInfo(employee["timezone"])
 
         def punch(r):
             keys = ("punch_id", "employee_id", "ts", "type", "source", "device_id")
-            return dict(zip(keys, r, strict=True))
+            record = dict(zip(keys, r, strict=True))
+            record["ts"] = _local(record["ts"], zone)
+            return record
 
         punches = [
             punch(r)
@@ -120,7 +134,6 @@ class PostgresBackend:
                 (exc_id,),
             )
         ]
-        zone = ZoneInfo(employee["timezone"])
         day_start = datetime.combine(work_date, time(0), tzinfo=zone)
         history = [
             punch(r)
@@ -132,7 +145,10 @@ class PostgresBackend:
             )
         ]
         notes = [
-            dict(zip(("note_id", "text", "submitted_at"), r, strict=True))
+            {
+                **dict(zip(("note_id", "text", "submitted_at"), r, strict=True)),
+                "submitted_at": _local(r[2], zone),
+            }
             for r in connection.execute(
                 "SELECT n.note_id, n.text, n.submitted_at FROM exception_notes en "
                 "JOIN employee_notes n ON n.note_id = en.note_id WHERE en.exception_id = ? "
@@ -149,6 +165,10 @@ class PostgresBackend:
             ).fetchone()
             keys = ("shift_id", "employee_id", "start", "end", "planned_break_min")
             schedule = dict(zip(keys, shift, strict=True))
+            schedule["start"], schedule["end"] = (
+                _local(schedule["start"], zone),
+                _local(schedule["end"], zone),
+            )
         case = CaseContext.model_validate(
             {
                 "exception_id": exc_id,

@@ -267,3 +267,35 @@ def _version(dsn):
 
     case, revision = PostgresCaseRepository(dsn).load_for_manager("X-1", "M-1")
     return build_verified_case(case, correction_revision=revision).evidence_version
+
+
+# ---- audit: times must not depend on the database session's timezone
+
+
+def test_case_times_are_in_the_employees_timezone_whatever_the_database_session_uses(
+    dsn, seeded, monkeypatch
+):
+    """A Docker PostgreSQL runs in UTC and returns every timestamptz as 'Z'. The API must still
+    return the employee's local offset, because clients draw timelines from the wall-clock text."""
+    from app.attendance.context import build_verified_case
+    from app.attendance.postgres import PostgresCaseRepository
+
+    repo, _ = seeded
+    results, versions = {}, set()
+    for session_tz in ("Asia/Kolkata", "UTC", "Pacific/Auckland"):
+        monkeypatch.setenv("PGTZ", session_tz)
+        case, revision = PostgresCaseRepository(dsn).load_for_manager("X-1", "M-1")
+        data = case.model_dump(mode="json")
+        results[session_tz] = (
+            data["punches"][0]["ts"],
+            data["schedule"]["start"],
+            data["schedule"]["end"],
+        )
+        versions.add(build_verified_case(case, correction_revision=revision).evidence_version)
+    # 09:00 and 18:00 Kolkata, identical text for every session timezone.
+    assert set(results.values()) == {
+        ("2026-11-12T09:00:00+05:30", "2026-11-12T09:00:00+05:30", "2026-11-12T18:00:00+05:30")
+    }, results
+    # Only the text changed. The instants, and so the evidence hash an approval is checked against,
+    # are identical, so reconfiguring the database never makes a proposal look stale.
+    assert len(versions) == 1

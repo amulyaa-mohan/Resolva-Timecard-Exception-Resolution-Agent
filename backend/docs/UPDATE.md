@@ -572,3 +572,6 @@ Never include credentials, private employee data, or invented test results.
   format pass.
 - Found while writing the fix, not yet fixed: the frontend audit CSV export has formula injection (separate commit, branch
   `frontend`).
+- Added to the audit above (found when checking how the UI reads times): the API's timestamps depended on the database
+  session's timezone (`03:30Z` from a UTC server vs `09:00+05:30` locally), which would have broken the Docker demo's
+  timeline. Case times are now always in the employee's timezone; `evidence_version` is unchanged. 615 passed with Postgres.
