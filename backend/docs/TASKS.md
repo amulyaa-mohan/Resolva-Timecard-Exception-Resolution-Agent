@@ -38,3 +38,5 @@ Record new backend-only tasks below; use a unique ID, owner, status, dependencie
 | A-DETECT-01 | C V Jayanth | REVIEW | Detection job: work-date sessions, same rule functions as validator, corrections applied, deterministic exception ids, week totals |
 
 | A-PROPOSE-01 | C V Jayanth | REVIEW | POST /exceptions/{id}/proposal with proposal and llm_trace persistence, escalation state and the effective-timecard view |
+
+| A-AUDIT-01 | C V Jayanth | REVIEW | Review of Track B audit fixes A1-A6; structured detection_details keys; employee notes import and attach (depends on A-05, A-DETECT-01) |

@@ -55,6 +55,20 @@ def existing_keys(backend: PostgresBackend, preview: ImportPreview) -> frozenset
         )
 
 
+def existing_note_ids(backend: PostgresBackend, preview: ImportPreview) -> frozenset[str]:
+    ids = [r.note.note_id for r in preview.rows if r.note is not None]
+    if not ids:
+        return frozenset()
+    with backend.transaction(immediate=False) as c:
+        marks = ",".join("?" * len(ids))
+        return frozenset(
+            r[0]
+            for r in c.execute(
+                f"SELECT note_id FROM employee_notes WHERE note_id IN ({marks})", ids
+            ).fetchall()
+        )
+
+
 def commit_import(backend: PostgresBackend, preview: ImportPreview, *, batch_id: str) -> int:
     """Insert valid rows; returns how many were new. Caller authorized every employee."""
     inserted = 0
@@ -87,6 +101,87 @@ def commit_import(backend: PostgresBackend, preview: ImportPreview, *, batch_id:
                     (s.shift_id, s.employee_id, s.start, s.end, s.planned_break_min),
                 ).rowcount
     return inserted
+
+
+# A note belongs to an exception when its employee submitted it on the exception's work date
+# or the day after (local time). A note carries no date of its own, so this window is the whole
+# rule. It must be tight: a note about Friday is not evidence for Tuesday's missing punch, and
+# attaching it would hand the model a time that has nothing to do with that day. The cost is a
+# note written three days late is not attached; the manager still sees it on the employee.
+NOTE_WINDOW_DAYS = 2
+
+
+def attach_notes(c, employee_ids: set[str], *, as_of: datetime) -> dict[str, list[str]]:
+    """Link each employee's notes to their open or escalated exceptions. Idempotent.
+
+    Notes are part of an exception's evidence, so a new link changes `evidence_version`, which
+    correctly makes any earlier draft stale. Resolved exceptions are never touched. Returns
+    exception id -> the note ids newly linked, and audits each change.
+    """
+    attached: dict[str, list[str]] = {}
+    for employee_id in sorted(employee_ids):
+        zone = ZoneInfo(
+            c.execute(
+                "SELECT timezone FROM employees WHERE employee_id = ?", (employee_id,)
+            ).fetchone()[0]
+        )
+        notes = c.execute(
+            "SELECT note_id, submitted_at FROM employee_notes WHERE employee_id = ? "
+            "ORDER BY submitted_at, note_id",
+            (employee_id,),
+        ).fetchall()
+        exceptions = c.execute(
+            "SELECT exception_id, work_date FROM exceptions WHERE employee_id = ? "
+            "AND status IN ('open', 'escalated') ORDER BY exception_id",
+            (employee_id,),
+        ).fetchall()
+        for exception_id, work_date in exceptions:
+            start = datetime.combine(work_date, time(0), tzinfo=zone)
+            end = start + timedelta(days=NOTE_WINDOW_DAYS)
+            linked = []
+            for note_id, submitted_at in notes:
+                if (
+                    start <= submitted_at < end
+                    and c.execute(
+                        "INSERT INTO exception_notes VALUES (?, ?) ON CONFLICT DO NOTHING",
+                        (exception_id, note_id),
+                    ).rowcount
+                ):
+                    linked.append(note_id)
+            if linked:
+                attached[exception_id] = linked
+                audit.append_event(
+                    c,
+                    actor_type="system",
+                    actor_id="import",
+                    event_type="EVIDENCE_ATTACHED",
+                    exception_id=exception_id,
+                    payload={"note_ids": linked, "window_days": NOTE_WINDOW_DAYS},
+                    occurred_at=as_of,
+                )
+    return attached
+
+
+def import_notes(
+    backend: PostgresBackend, preview: ImportPreview, *, as_of: datetime
+) -> tuple[int, dict[str, list[str]]]:
+    """Store valid notes and attach them to exceptions in ONE transaction.
+
+    Atomic on purpose: a retry after a failure must not find a note imported but unattached,
+    because a re-import reports it as a duplicate and would never attach it.
+    """
+    with backend.transaction() as c:
+        inserted = 0
+        for row in preview.rows:
+            if row.status == "valid" and row.note is not None:
+                n = row.note
+                inserted += c.execute(
+                    "INSERT INTO employee_notes (note_id, employee_id, text, submitted_at) "
+                    "VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                    (n.note_id, n.employee_id, n.text, n.submitted_at),
+                ).rowcount
+        employees = {r.note.employee_id for r in preview.rows if r.note is not None}
+        return inserted, attach_notes(c, employees, as_of=as_of)
 
 
 def run_detection(
@@ -184,7 +279,7 @@ def run_detection(
                             DEFAULT_SEVERITY[finding.code].value,
                             work_date,
                             RULE_VERSION,
-                            Jsonb({"reason": finding.reason}),
+                            Jsonb({**finding.details, "reason": finding.reason}),
                         ),
                     ).rowcount
                     if not new:
@@ -210,6 +305,8 @@ def run_detection(
                         occurred_at=as_of,
                     )
                     created.append(exception_id)
+        # Notes already on file belong to the exceptions detection has just raised.
+        attach_notes(c, set(touched), as_of=as_of)
     return created
 
 

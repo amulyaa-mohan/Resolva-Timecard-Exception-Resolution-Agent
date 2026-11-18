@@ -224,3 +224,107 @@ def test_display_fields_are_optional_and_never_affect_rules(flow):
         sql(dsn, "DELETE FROM organizations WHERE org_id = 'ORG-1'")
     with pytest.raises(psycopg.errors.IntegrityError, match="pay_type"):
         sql(dsn, "UPDATE employees SET pay_type = 'contractor' WHERE employee_id = 'E-001'")
+
+
+# ---- employee notes: import, attach window, evidence
+
+NOTE_TUESDAY = "I left at 6:00 pm on Thursday but forgot to punch out."
+
+
+def notes_csv(*rows):
+    import csv
+    import io
+
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(["employee_id", "submitted_at", "text"])
+    writer.writerows(rows)
+    return out.getvalue()
+
+
+def thursday_exception(client):
+    assert post_import(client, shifts_csv(), "shifts").status_code == 200
+    assert post_import(client, punches_csv()).status_code == 200
+    return "EX-E-001-2026-11-12-MISSING_PUNCH"
+
+
+def test_note_attaches_only_inside_the_window_and_changes_the_evidence(flow):
+    client, _, dsn = flow
+    exception = thursday_exception(client)
+    before = client.get(f"/exceptions/{exception}", headers=AUTH).json()
+    assert before["notes"] == []
+    content = notes_csv(
+        ("E-001", "2026-11-12 19:10", NOTE_TUESDAY),  # the work date: attached
+        ("E-001", "2026-11-13 08:00", "Written the next morning"),  # the day after: attached
+        ("E-001", "2026-11-14 09:00", "Two days later"),  # outside the window
+        ("E-001", "2026-11-11 19:00", "The evening before"),  # before the work date
+    )
+    result = post_import(client, content, "notes")
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert body["inserted"] == 4 and len(body["notes_attached"][exception]) == 2
+    after = client.get(f"/exceptions/{exception}", headers=AUTH).json()
+    assert [n["text"] for n in after["notes"]] == [NOTE_TUESDAY, "Written the next morning"]
+    # Notes are evidence, so a draft made before them is correctly stale.
+    assert after["evidence_version"] != before["evidence_version"]
+    events = client.get(f"/exceptions/{exception}/audit", headers=AUTH).json()
+    assert [e["event_type"] for e in events][-1] == "EVIDENCE_ATTACHED"
+    assert sql(dsn, "SELECT count(*) FROM employee_notes") == [(4,)]
+
+
+def test_note_import_is_idempotent_and_atomic(flow):
+    client, _, dsn = flow
+    exception = thursday_exception(client)
+    content = notes_csv(("E-001", "2026-11-12 19:10", NOTE_TUESDAY))
+    first = post_import(client, content, "notes").json()
+    again = post_import(client, content, "notes").json()
+    assert first["inserted"] == 1 and again["inserted"] == 0 and again["duplicates"] == 1
+    assert again["notes_attached"] == {}  # nothing new to link, no second audit event
+    events = client.get(f"/exceptions/{exception}/audit", headers=AUTH).json()
+    assert [e["event_type"] for e in events].count("EVIDENCE_ATTACHED") == 1
+    assert sql(dsn, "SELECT count(*) FROM exception_notes") == [(1,)]
+
+
+def test_note_before_the_exception_is_attached_when_detection_runs(flow):
+    client, _, dsn = flow
+    content = notes_csv(("E-001", "2026-11-12 19:10", NOTE_TUESDAY))
+    assert post_import(client, content, "notes").json()["notes_attached"] == {}
+    assert sql(dsn, "SELECT count(*) FROM exception_notes") == [(0,)]
+    exception = thursday_exception(client)  # detection now raises it and links the waiting note
+    case = client.get(f"/exceptions/{exception}", headers=AUTH).json()
+    assert [n["text"] for n in case["notes"]] == [NOTE_TUESDAY]
+
+
+def test_notes_are_scoped_and_never_touch_resolved_exceptions(flow):
+    client, app, dsn = flow
+    exception = thursday_exception(client)
+    other = notes_csv(("E-002", "2026-11-12 19:10", "Not my employee"))
+    refused = post_import(client, other, "notes")
+    assert refused.status_code == 422 and refused.json()["title"] == "Import has invalid rows"
+    assert sql(dsn, "SELECT count(*) FROM employee_notes") == [(0,)]
+    case = client.get(f"/exceptions/{exception}", headers=AUTH).json()
+    approve = {
+        "decision": "approve",
+        "actions": [
+            {"type": "add_punch", "punch_type": "out", "new_ts": "2026-11-12T18:00:00+05:30"}
+        ],
+        "evidence_version": case["evidence_version"],
+        "idempotency_key": "notes-approve-key",
+    }
+    assert (
+        client.post(f"/exceptions/{exception}/decisions", json=approve, headers=AUTH).status_code
+        == 200
+    )
+    late = post_import(client, notes_csv(("E-001", "2026-11-12 20:00", "Afterwards")), "notes")
+    assert late.json()["notes_attached"] == {}  # a resolved exception's evidence is frozen
+    assert sql(dsn, "SELECT count(*) FROM exception_notes") == [(0,)]
+
+
+def test_detection_details_are_stored_with_the_exception(flow):
+    client, _, dsn = flow
+    thursday_exception(client)
+    details = sql(dsn, "SELECT detection_details FROM exceptions")[0][0]
+    assert details["missing_type"] == "out" and details["unmatched_punch_id"].startswith("PI-")
+    assert details["reason"]  # the human-readable sentence is kept alongside the facts
+    case = client.get("/exceptions/EX-E-001-2026-11-12-MISSING_PUNCH", headers=AUTH).json()
+    assert case["detection_details"]["missing_type"] == "out"

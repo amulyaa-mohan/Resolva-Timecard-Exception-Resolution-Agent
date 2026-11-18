@@ -16,10 +16,10 @@ Version: `attendance-rules@0.4-draft` (contract 0.2.0). Uses simplified demo pol
 | --- | --- |
 | Missing punch | FIFO work pairing; no unmatched in/out events; no empty attendance evidence |
 | Overlap | Paired work intervals must not overlap; incomplete pairing blocks |
-| Meal break | Observed paired breaks inside exactly one shift, meeting configured duration before the work threshold |
+| Meal break | Observed paired breaks inside exactly one shift, meeting configured duration before the work threshold. A clock-out/clock-in gap counts as a rest only if it lasts `rest_minutes` (audit A1: a one-minute split is no meal break) |
 | Overtime | Net observed hours versus daily limit; other-day worked plus remaining scheduled hours versus weekly limit; quarterly aggregate versus configured cap |
 | Spread | Elapsed UTC time from first clock-in to last clock-out versus configured maximum |
-| Schedule | First/last work boundary versus scheduled boundaries and minute tolerance |
+| Schedule | A late arrival or an early departure beyond `late_tolerance_min` (KA-9 / US-6). Arriving early or leaving late is extra time, judged by OVERTIME_RISK, not a deviation (audit A5; this check was two-sided before, which the policy text does not support) |
 
 A failed RuleCheck can mean a detected violation or insufficient/ambiguous evidence. The reason states which.
 Do not persist every failed check as a confirmed exception: a richer detection outcome contract remains to be agreed.
@@ -137,3 +137,13 @@ Until 0.2.0 adds week_start and quarter_start_month to the policy, the period ch
   that check becomes `insufficient_evidence` ("manager review") so the pipeline escalates rather
   than blocking. Problem-severity remainders still block, and the correction is never approvable
   on its own.
+
+## Audit changes confirmed by Track A (2026-11-18)
+
+- A1 meal break, A4 unsupported fix types (insufficient evidence, so they escalate), A5 schedule deviation
+  and A6 policy `effective_to` (exclusive, as in the registry) were reviewed against the code and the
+  policy text. A5 follows KA-9 and US-6 exactly; the earlier two-sided check was a Track A error.
+- Open design point: the contract README lists "an unscheduled shift" as a schedule deviation. With no
+  schedule the engine reports `insufficient_evidence` ("no schedule to compare against"), because it cannot
+  tell a missing schedule import from a genuinely unscheduled shift. Treating it as a violation needs an
+  agreed signal that schedules are complete for the day.

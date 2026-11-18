@@ -31,6 +31,8 @@ PUNCH_FIELDS = (
     "source_event_id",
 )
 SHIFT_FIELDS = ("employee_id", "shift_id", "start", "end", "planned_break_min")
+NOTE_FIELDS = ("employee_id", "text", "submitted_at", "note_id")
+MAX_NOTE_CHARS = 1000  # matches the employee_notes CHECK and the EmployeeNote contract
 
 TYPE_ALIASES = {
     "in": PunchType.IN,
@@ -54,6 +56,16 @@ class ImportFileError(ValueError):
     """The file itself is unreadable (not one bad row)."""
 
 
+class NoteRecord(BaseModel):
+    """An employee's own words about a work day. Untrusted text: it is stored and shown,
+    and only ever read by the model as quoted evidence, never as an instruction."""
+
+    note_id: str
+    employee_id: str
+    text: str
+    submitted_at: datetime
+
+
 class PreviewRow(BaseModel):
     row_number: int = Field(description="1-based data row (CSV header excluded).")
     status: Literal["valid", "invalid", "duplicate"]
@@ -62,10 +74,11 @@ class PreviewRow(BaseModel):
     punch: PunchRecord | None = None
     source_event_id: str | None = Field(default=None, description="Given or derived dedupe id.")
     shift: ScheduledShift | None = None
+    note: NoteRecord | None = None
 
 
 class ImportPreview(BaseModel):
-    kind: Literal["punches", "shifts"]
+    kind: Literal["punches", "shifts", "notes"]
     rows: list[PreviewRow]
     valid: int
     invalid: int
@@ -229,6 +242,63 @@ def preview_shifts(
     return _summary("shifts", out)
 
 
+def preview_notes(
+    rows: list[dict[str, str]],
+    *,
+    employee_timezones: dict[str, str],
+    mapping: dict[str, str] | None = None,
+    existing_ids: frozenset[str] = frozenset(),
+) -> ImportPreview:
+    """Employee notes. The id is derived from the employee and content, so re-importing the same
+    file is a no-op, and one employee's id can never collide with another employee's note."""
+    mapping = mapping or {}
+    seen: dict[str, int] = {}
+    out: list[PreviewRow] = []
+    for number, row in enumerate(rows, 1):
+
+        def get(field: str, row=row) -> str:
+            return row.get(mapping.get(field, field), "")
+
+        try:
+            employee = get("employee_id")
+            if employee not in employee_timezones:
+                raise ValueError("unknown employee, or not assigned to you")
+            text = get("text")
+            if not text:
+                raise ValueError("note text is required")
+            if len(text) > MAX_NOTE_CHARS:
+                raise ValueError(f"note is longer than {MAX_NOTE_CHARS} characters")
+            if not get("submitted_at"):
+                raise ValueError("submitted_at is required")
+            submitted = _instant(get("submitted_at"), ZoneInfo(employee_timezones[employee]))
+            key = get("note_id") or submitted.astimezone(ZoneInfo("UTC")).isoformat() + "|" + text
+            note = NoteRecord(
+                note_id="NI-" + _digest(employee, key),
+                employee_id=employee,
+                text=text,
+                submitted_at=submitted,
+            )
+        except ValueError as exc:
+            out.append(PreviewRow(row_number=number, status="invalid", error=str(exc)))
+            continue
+        if note.note_id in seen:
+            out.append(
+                PreviewRow(
+                    row_number=number,
+                    status="duplicate",
+                    duplicate_of=seen[note.note_id],
+                    error="same note earlier in this file",
+                )
+            )
+            continue
+        if note.note_id in existing_ids:
+            out.append(PreviewRow(row_number=number, status="duplicate", error="already imported"))
+            continue
+        seen[note.note_id] = number
+        out.append(PreviewRow(row_number=number, status="valid", note=note))
+    return _summary("notes", out)
+
+
 def _summary(kind, rows: list[PreviewRow]) -> ImportPreview:
     count = {s: sum(r.status == s for r in rows) for s in ("valid", "invalid", "duplicate")}
     return ImportPreview(
@@ -246,7 +316,7 @@ def local_dates(preview: ImportPreview, employee_timezones: dict[str, str]) -> d
     for row in preview.rows:
         record = row.punch or row.shift
         if row.status != "valid" or record is None:
-            continue
+            continue  # notes do not change which rules fire, so they touch no dates
         zone = ZoneInfo(employee_timezones[record.employee_id])
         at = record.ts if row.punch else record.start
         touched.setdefault(record.employee_id, set()).add(at.astimezone(zone).date())

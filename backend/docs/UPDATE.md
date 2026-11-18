@@ -538,3 +538,20 @@ Never include credentials, private employee data, or invented test results.
 - Track B: prompt v3 rule 5 scoped to recorded punches (a live regression on c10 found during verification); eval cases d02 and d11 replaced and d13 added for the corrected rules.
 - Validation: pytest 550 passed on PostgreSQL 15 (none skipped); ruff clean; eval 9/9; Docker stack with live Qwen: HTTP walk-through 49/49, 0 server errors, audit chain valid; a decision during model calls took 0.57 s; full live eval 100% in every category, 0 unsafe.
 - Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — C V Jayanth — A-AUDIT-01 — Review of Track B's audit fixes; structured details; employee notes
+
+- Branch: backend (fast-forwarded to b2c7a86 first). Status REVIEW. Local until committed.
+- Reviewed audit changes A1-A6 in engine.py, validator.py and store.py against the code and the policy text.
+  All agreed. A5 follows KA-9 / US-6; the earlier two-sided schedule check was a Track A error.
+- Structured `detection_details` (app/rules/explain.py): every exception stores scalar facts next to `reason`,
+  using the keys Track B listed plus `limit_kind` for OVERTIME_RISK.
+- Employee notes: `POST /imports` accepts `kind: "notes"`; notes attach to an open or escalated exception when
+  written on its work date or the day after; attaching changes evidence_version and is audited as EVIDENCE_ATTACHED;
+  import plus attach is one transaction; a note imported early is attached when detection runs. A first 7-day window
+  attached Friday's note to Tuesday's exception (seen in the seed output) and was tightened to 2 days.
+- `seed_demo_week.py` imports four notes through that path; each lands on exactly one exception.
+- Validation: 580 passed with TEST_DATABASE_URL on local PostgreSQL 15, 527 passed / 53 skipped without it; Ruff
+  lint and format pass; `evals.run --gates ci` 9/9 PASS (the mock provider; this proves the harness, not model quality).
+  The AI flows that read the notes were not run against a live model here.
+- Open: "unscheduled shift" as a schedule deviation needs a signal that schedules are complete; contract 0.3.0 review.

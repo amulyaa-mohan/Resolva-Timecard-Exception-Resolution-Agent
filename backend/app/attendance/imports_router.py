@@ -8,11 +8,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.attendance.access import ManagerCredential, authenticated_manager
 from app.attendance.importer import (
+    NOTE_FIELDS,
     PUNCH_FIELDS,
     SHIFT_FIELDS,
     ImportFileError,
     ImportPreview,
     local_dates,
+    preview_notes,
     preview_punches,
     preview_shifts,
     read_rows,
@@ -25,7 +27,7 @@ router = APIRouter(prefix="/imports", tags=["imports"])
 class ImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["punches", "shifts"] = "punches"
+    kind: Literal["punches", "shifts", "notes"] = "punches"
     format: Literal["csv", "json"]
     content: str = Field(min_length=1)
     mapping: dict[str, str] = Field(
@@ -42,6 +44,10 @@ class ImportResult(BaseModel):
     invalid: int
     duplicates: int
     detected_exception_ids: list[str]
+    notes_attached: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Exception id -> note ids newly attached as evidence.",
+    )
 
 
 def _postgres(request: Request):
@@ -54,15 +60,29 @@ def _postgres(request: Request):
 
 
 def _preview(request: Request, body: ImportRequest, manager_id: str):
-    from app.attendance.ingest import assigned_employees, existing_keys
+    from app.attendance.ingest import assigned_employees, existing_keys, existing_note_ids
 
     backend = _postgres(request)
-    allowed = set(PUNCH_FIELDS if body.kind == "punches" else SHIFT_FIELDS)
+    allowed = set(
+        {"punches": PUNCH_FIELDS, "shifts": SHIFT_FIELDS, "notes": NOTE_FIELDS}[body.kind]
+    )
     unknown = sorted(set(body.mapping) - allowed)
     if unknown:
         raise HTTPException(422, f"Unknown mapping fields: {', '.join(unknown)}")
     rows = read_rows(body.content, body.format)
     employees = assigned_employees(backend, manager_id)
+    if body.kind == "notes":
+        first = preview_notes(rows, employee_timezones=employees, mapping=body.mapping)
+        known = existing_note_ids(backend, first)
+        if not known:
+            return backend, employees, first
+        return (
+            backend,
+            employees,
+            preview_notes(
+                rows, employee_timezones=employees, mapping=body.mapping, existing_ids=known
+            ),
+        )
     if body.kind == "shifts":
         return (
             backend,
@@ -100,7 +120,7 @@ def commit(
     request: Request,
     manager: Annotated[ManagerCredential, Depends(authenticated_manager)],
 ):
-    from app.attendance.ingest import commit_import, new_batch_id, run_detection
+    from app.attendance.ingest import commit_import, import_notes, new_batch_id, run_detection
 
     try:
         backend, employees, preview = _preview(request, body, manager.manager_id)
@@ -114,6 +134,17 @@ def commit(
             errors=[r.model_dump(mode="json") for r in preview.rows if r.status == "invalid"],
         )
     batch_id = new_batch_id()
+    as_of = request.app.state.resolution_store.clock().astimezone(UTC)
+    if preview.kind == "notes":
+        inserted, attached = import_notes(backend, preview, as_of=as_of)
+        return ImportResult(
+            batch_id=batch_id,
+            inserted=inserted,
+            invalid=preview.invalid,
+            duplicates=preview.duplicates,
+            detected_exception_ids=[],
+            notes_attached=attached,
+        )
     inserted = commit_import(backend, preview, batch_id=batch_id)
     detected = run_detection(
         backend,
