@@ -133,12 +133,20 @@ store; query it in the application.
 | `trace_id` | text PK | |
 | `proposal_id` | text FK | RESTRICT |
 | `provider`, `model_id`, `prompt_version`, `prompt_hash` | text | which model and prompt ran |
-| `retrieved_chunk_ids`, `raw_outputs`, `parse_errors` | text | JSON arrays |
+| `retrieved_chunk_ids` | text | JSON array of clause ids |
 | `attempts`, `latency_ms` | integer | |
 | `error` | text | null on success |
 
-`raw_outputs` holds model text and is evidence for an audit. Retention is a policy decision still
-open with Track B.
+### 2.12a `llm_raw_outputs`
+| Column | Type | Notes |
+| --- | --- | --- |
+| `trace_id` | text PK FK -> llm_traces | RESTRICT |
+| `raw_outputs`, `parse_errors` | text | JSON arrays |
+| `created_at` | timestamptz | drives retention |
+
+The one table that is **not** append-only, on purpose: model text may quote whatever an employee
+wrote in a note, so retention has to be able to remove it. The trace stays, so a purged decision is
+still provable. Purge with `backend/scripts/db_maintenance.py purge-traces`.
 
 ### 2.13 `decisions` (append-only)
 | Column | Type | Notes |

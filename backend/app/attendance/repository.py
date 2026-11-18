@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from app.attendance.context import build_verified_case
+from app.attendance.queries import ExceptionFilter, sort_key, status_expression
 from app.core.contracts import CaseContext
 
 
@@ -91,6 +92,39 @@ class DemoCaseRepository:
         if row is None:
             raise CaseAccessDenied("case unavailable for this manager")
         return CaseContext.model_validate_json(row[0]), row[1]
+
+    def search_exceptions(
+        self, manager_id: str, filters: ExceptionFilter
+    ) -> tuple[list[tuple[CaseContext, str]], int]:
+        """Demo snapshots are few, so they are filtered in Python after one status query."""
+        cases = self.list_for_manager(manager_id)
+        status_by_id = {}
+        if cases:
+            with self._connect() as connection:
+                marks = ",".join("?" * len(cases))
+                status_by_id = dict(
+                    connection.execute(
+                        f"SELECT exception_id, {status_expression('e')} FROM demo_case_snapshots e "
+                        f"WHERE exception_id IN ({marks})",
+                        [c.exception_id for c in cases],
+                    ).fetchall()
+                )
+        matched = [
+            (case, status_by_id.get(case.exception_id, "open"))
+            for case in cases
+            if filters.matches(
+                code=case.code,
+                severity=case.severity,
+                status=status_by_id.get(case.exception_id, "open"),
+                employee_id=case.employee.employee_id,
+                exception_id=case.exception_id,
+                work_date=case.work_date,
+            )
+        ]
+        matched.sort(
+            key=lambda pair: sort_key(pair[0].severity, pair[0].work_date, pair[0].exception_id)
+        )
+        return matched[filters.offset : filters.offset + filters.limit], len(matched)
 
     def display_names(self, employee_ids: list[str]) -> dict[str, str]:
         """The demo snapshot store keeps no personal data, so names are never shown."""

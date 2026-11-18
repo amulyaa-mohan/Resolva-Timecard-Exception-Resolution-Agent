@@ -84,9 +84,13 @@ CREATE TABLE IF NOT EXISTS llm_traces (
     trace_id TEXT PRIMARY KEY,
     proposal_id TEXT NOT NULL REFERENCES proposals(proposal_id),
     provider TEXT NOT NULL, model_id TEXT, prompt_version TEXT NOT NULL, prompt_hash TEXT,
-    retrieved_chunk_ids TEXT NOT NULL, raw_outputs TEXT NOT NULL, parse_errors TEXT NOT NULL,
+    retrieved_chunk_ids TEXT NOT NULL,
     attempts INTEGER NOT NULL, latency_ms INTEGER NOT NULL, error TEXT,
     created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS llm_raw_outputs (
+    trace_id TEXT PRIMARY KEY REFERENCES llm_traces(trace_id),
+    raw_outputs TEXT NOT NULL, parse_errors TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS escalations (
     exception_id TEXT PRIMARY KEY,
@@ -362,8 +366,12 @@ class ResolutionStore:
                 ),
             )
             trace = result.trace
+            # The trace is immutable audit evidence; the model's own text lives in its own
+            # table so a retention job can purge it without touching the trace.
             connection.execute(
-                "INSERT INTO llm_traces VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO llm_traces (trace_id, proposal_id, provider, model_id, "
+                "prompt_version, prompt_hash, retrieved_chunk_ids, attempts, latency_ms, error, "
+                "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     trace.trace_id,
                     proposal_id,
@@ -372,11 +380,18 @@ class ResolutionStore:
                     trace.prompt_version,
                     trace.prompt_hash,
                     json.dumps(trace.retrieved_chunk_ids),
-                    json.dumps(trace.raw_outputs),
-                    json.dumps(trace.parse_errors),
                     trace.attempts,
                     trace.latency_ms,
                     trace.error,
+                    now.astimezone(UTC).isoformat(),
+                ),
+            )
+            connection.execute(
+                "INSERT INTO llm_raw_outputs VALUES (?, ?, ?, ?)",
+                (
+                    trace.trace_id,
+                    json.dumps(trace.raw_outputs),
+                    json.dumps(trace.parse_errors),
                     now.astimezone(UTC).isoformat(),
                 ),
             )

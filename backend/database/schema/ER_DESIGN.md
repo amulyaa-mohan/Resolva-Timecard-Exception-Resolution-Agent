@@ -46,12 +46,15 @@ Not modelled yet: the policy pack table (packs stay versioned YAML, referenced b
 | `0001_initial.sql` | People, raw attendance, exceptions, decisions, corrections, audit, day totals |
 | `0002_proposals_escalations.sql` | `proposals`, `llm_traces`, `escalations`; manager `escalate` decisions |
 | `0003_organization_and_display_fields.sql` | `organizations`, `locations`, employee `full_name` / `job_title` / `pay_type` |
+| `0004_indexes_and_trace_retention.sql` | List and timecard indexes; `llm_raw_outputs` retention boundary |
 
 Migration 0003 comes from the database branch's design (`48b2a1a`): the rules need only ids, but a
 manager reviewing an exception needs to see who and where. These columns are **display only**. No
 rule, validator or authorization check reads them, and detection works with every one of them null
-(tested). `employees.location_id` already held these ids; the foreign key to `locations` waits for a
-later migration, once deployments have backfilled their sites.
+(tested). `employees.location_id` is deliberately **not** a foreign key. A site code arrives with the employee
+from the source system, and `locations` is optional enrichment we may not have yet; a foreign key
+would reject a valid import for a site nobody has described. The integrity check reports employees
+whose site has no `locations` row as a notice, so the gap stays visible without blocking ingestion.
 
 The database branch (`origin/database`, `48b2a1a`) is not merged. It targets SQLite via SQLModel,
 is based on the pre-reorganisation layout, uses naive timestamps, enforces no immutability triggers

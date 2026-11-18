@@ -90,10 +90,20 @@ a past decision can be reconstructed: the same evidence, the same policy text an
 Model output is never trusted on its own. A proposal only becomes approvable if the deterministic
 validator passes it, and approving re-runs that validator against freshly read evidence.
 
-## 5. What is deliberately mutable
+## 5. The retention boundary
+
+Immutability and retention pull in opposite directions. Model text can quote an employee's note, so
+a retention policy must be able to remove it; audit evidence must not be removable at all. They are
+therefore split: `llm_traces` (append-only) keeps provider, model, prompt version and hash,
+retrieved clauses, attempts, latency and error; `llm_raw_outputs` (not append-only) keeps the raw
+replies. Purging leaves the trace, proposal, validation and audit event intact, so a past decision
+stays provable.
+
+## 6. What is deliberately mutable
 
 | Table | Why |
 | --- | --- |
 | `exceptions.status`, `correction_revision` | lifecycle state; every transition is audited |
 | `day_totals` | derived, recomputed by detection and after an approval |
+| `llm_raw_outputs` | retention, as above |
 | reference tables | people and sites change; history is not kept here |

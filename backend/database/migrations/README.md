@@ -9,6 +9,7 @@ Ordered PostgreSQL DDL for the **Resolva — Timecard Exception Resolution Agent
 | `0001_initial.sql` | People and access, raw attendance, exceptions and their evidence, decisions, corrections, the audit ledger, day totals, and the append-only triggers |
 | `0002_proposals_escalations.sql` | `proposals`, `llm_traces`, `escalations`; allows manager `escalate` decisions |
 | `0003_organization_and_display_fields.sql` | `organizations`, `locations`, and employee `full_name` / `job_title` / `pay_type` |
+| `0004_indexes_and_trace_retention.sql` | Indexes for the exception list and the effective timecard; moves model raw text into `llm_raw_outputs` so it can be purged |
 
 The runner is `backend/scripts/migrate_postgres.py`.
 

@@ -115,3 +115,28 @@ Append entries; preserve other developers' history. Use repository-relative path
 - Next step for whoever owns the database area: DB-04 integrity checks, a retention policy for
   `llm_traces.raw_outputs`, indexes for the exception list, and the `employees.location_id` foreign
   key once sites are backfilled.
+
+### 2026-11-18 — C V Jayanth — DB-04/DB-05 — Query performance, retention, integrity checks and runbook
+
+- Branch: backend (database fast-forwarded to match). Status REVIEW.
+- The exception list filtered in Python after rebuilding every case. It now filters, counts,
+  orders and paginates in SQL, and loads evidence only for the page (`app/attendance/queries.py`
+  holds the one definition of the filter, order and derived status, so both stores agree).
+- Migration 0004: indexes for the list (`exceptions_employee_work_date`, `exceptions_list_order`),
+  the assignment lookup (`manager_assignments_employee`) and the effective timecard
+  (`corrections_employee`); and `llm_raw_outputs`, which carries the model's raw text out of the
+  append-only `llm_traces` so a retention job can purge it while the trace stays immutable.
+- `backend/scripts/db_maintenance.py`: `verify` reports what constraints cannot (audit chain,
+  status mirror drift, corrections without an approval, cross-employee evidence, resolved without a
+  correction, unknown sites, incomplete days) and exits 1 on a problem; `purge-traces` reports
+  before it deletes unless given `--apply`.
+- `employees.location_id` is now documented as deliberately not a foreign key: site codes arrive
+  with the employee, and the integrity check reports missing `locations` rows as a notice instead.
+- Docs: `docs/operations.md` (install, upgrade, backup and restore, verify, retention, never-do
+  list, routine cadence); data dictionary gains the index list and the "deliberately absent"
+  section; immutability spec gains the retention boundary.
+- Validation: 498 passed with TEST_DATABASE_URL on PostgreSQL 15, 454 passed / 44 skipped without
+  it; Ruff lint and format pass; fresh migrate 0001-0004 and both maintenance commands run against
+  a seeded database.
+- Next step: agree the retention window with Track B (30 days is a placeholder), and schedule
+  `verify` daily.

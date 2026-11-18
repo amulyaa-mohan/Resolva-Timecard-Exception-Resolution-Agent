@@ -45,6 +45,7 @@ organizations
 | exceptions -> exception_notes -> employee_notes | N : M | RESTRICT | |
 | exceptions -> proposals | 1 : N | RESTRICT | every draft is kept, not just the last |
 | proposals -> llm_traces | 1 : N | RESTRICT | one per model call |
+| llm_traces -> llm_raw_outputs | 1 : 0..1 | RESTRICT | the model's text; absent once purged |
 | exceptions -> decisions | 1 : N | RESTRICT | at most one `approve` (partial unique index) |
 | decisions -> corrections | 1 : 0..1 | RESTRICT | a rejection or escalation has none |
 | exceptions -> escalations | 1 : 0..1 | RESTRICT | first escalation wins |

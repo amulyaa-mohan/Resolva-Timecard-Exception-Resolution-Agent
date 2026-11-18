@@ -13,10 +13,13 @@ Document set adapted from the database branch's structure (48b2a1a) and rewritte
 | --- | --- |
 | `migrations/` | Ordered `NNNN_name.sql` files, applied once and recorded with a checksum |
 | `schema/ER_DESIGN.md` | Entity design, invariants and how each is enforced |
-| `docs/` | Architecture, ERD, data dictionary, immutability spec, seed guide |
+| `docs/` | Architecture, ERD, data dictionary, immutability spec, seed guide, operations runbook |
 | `seeds/` | Reserved; the runnable seeds live in `backend/scripts/` |
 
-Related code: `backend/scripts/migrate_postgres.py` (runner), `backend/scripts/seed_demo_week.py`
+Day-to-day operations (backup, migrate, verify, retention): `docs/operations.md`.
+
+Related code: `backend/scripts/migrate_postgres.py` (runner), `backend/scripts/db_maintenance.py`
+(integrity checks and retention), `backend/scripts/seed_demo_week.py`
 (synthetic demo data), `backend/app/resolution/` (decisions, totals), `backend/app/audit/events.py`
 (hash-chained ledger).
 
@@ -24,8 +27,8 @@ Related code: `backend/scripts/migrate_postgres.py` (runner), `backend/scripts/s
 
 | Item | Count |
 | --- | --- |
-| Tables | 18 (plus `schema_migrations`) |
-| Migrations | 3 |
+| Tables | 19 (plus `schema_migrations`) |
+| Migrations | 4 |
 | Append-only tables | 6: punches, decisions, corrections, audit_events, proposals, llm_traces |
 | Enforcement | Foreign keys (all RESTRICT), CHECK constraints, partial unique indexes, triggers |
 
