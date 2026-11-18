@@ -214,3 +214,41 @@ unscheduled shift. Treating it as a violation needs an agreed signal that schedu
 
 **Still to do together:** review contract 0.3.0-draft once you post it. Nothing in the notes or details work
 depends on it.
+
+### Track B reply (2026-11-18, Amulya): verified 090bbdd live; two fixes; your question
+
+Pulled 090bbdd: 585 tests pass on PostgreSQL (none skipped), CI green. With your notes in the demo week,
+I ran every exception through the Docker stack with live Qwen2.5-7B. The demo story now works end to end:
+approve Tuesday's missing punch, then Friday's late arrival becomes eligible (it escalated before,
+because Tuesday's hours were unknown), and approving it moves the clock-in to the stated 09:05.
+
+**Two bugs found by the live run, both fixed:**
+1. *Track B:* the model saw PostgreSQL's UTC timestamps (`09:25+00:00`), copied that offset as told,
+   and wrote the stated 09:05 as `09:05+00:00` (14:35 IST), so every adjustment was blocked. The case
+   JSON now shows the employee's local time (`_localised` in `app/ai/pipeline.py`).
+2. *Track A (`store.decide`):* approving an `adjust_punch` returned 500. Approval built the corrected
+   timecard by adding every action as a new punch, which crashed on the empty `punch_type`, and would
+   have double-counted the hours written to `day_totals`. Approval and the timecard read now share
+   `apply_actions` (add adds, adjust moves). Test: `test_approving_an_adjustment_applies_it_once` on
+   SQLite and PostgreSQL; it fails on the old code.
+
+Also on Track B: the pre-model gate now ignores a stated time that *equals* a recorded punch. Your
+overlap note "my real shift was 9:00 to 6:00 pm" restates the existing punches, so the double tap now
+escalates cleanly (voiding the duplicate needs 0.3.0's `target_punch_ids`).
+
+**Your question: should an unscheduled shift be a deviation?** Keep `insufficient_evidence` by default,
+as you have it. KA-9 and US-6 define deviations against a schedule, and with no schedule we cannot tell a
+missing import from a real unscheduled shift. Proposal for 0.3.0: a trusted "roster final" signal per
+employee and date (written by the shift import, like `evidence_final` for punches). With the roster final,
+no shift and recorded work, it becomes a SCHEDULE_DEVIATION violation ("unscheduled shift", warning).
+The fix is `acknowledge` with a manager reason, never an invented schedule, so the AI only explains and
+escalates it.
+
+**Two points for you:**
+- *Spread-over demo:* the evidenced fix (06:30) cures the spread, but the day still has 10 h worked
+  against a 9 h daily limit, so OVERTIME_RISK blocks it. Should your "evidenced fix that only leaves a
+  warning → manager review" rule cover warning-severity OVERTIME_RISK as well as SCHEDULE_DEVIATION?
+  The overtime was really worked and must be paid, so escalating seems right to me.
+- *Timecard display:* `GET /exceptions/{id}/timecard` returns raw punches in UTC next to corrections
+  in local time (`03:55` beside `09:05`). Same instants, but the frontend should get one zone; the
+  employee's local zone would match the rest of the API.

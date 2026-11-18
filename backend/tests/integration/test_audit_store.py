@@ -105,3 +105,76 @@ def test_a3_reused_trace_id_does_not_crash(env):  # noqa: F811
         "SELECT count(*) FROM llm_raw_outputs WHERE trace_id LIKE ?", ("sametrace01:%",)
     )[0]
     assert raw == 2
+
+
+def _late_arrival_case():
+    """SCHEDULE_DEVIATION for E-001 (totals seeded): in 09:25, break 13-14, out 18:00."""
+    from datetime import datetime
+
+    from app.core.contracts import (
+        DEFAULT_SEVERITY,
+        CaseContext,
+        EmployeeNote,
+        ExceptionCode,
+        PunchRecord,
+        PunchSource,
+    )
+    from tests.factories import IST
+    from tests.integration.test_resolution_api import evidenced
+
+    data = evidenced("X-LATE").model_dump()
+    data["code"] = ExceptionCode.SCHEDULE_DEVIATION
+    data["severity"] = DEFAULT_SEVERITY[ExceptionCode.SCHEDULE_DEVIATION]
+    data["punches"] = [
+        PunchRecord(
+            punch_id=f"X-LATE-P{i}",
+            employee_id="E-001",
+            ts=datetime(2026, 11, 12, h, m, tzinfo=IST),
+            type=kind,
+            source=PunchSource.KIOSK,
+        ).model_dump()
+        for i, (kind, h, m) in enumerate(
+            [("in", 9, 25), ("break_start", 13, 0), ("break_end", 14, 0), ("out", 18, 0)]
+        )
+    ]
+    data["notes"] = [
+        EmployeeNote(
+            note_id="N-LATE",
+            text="The kiosk was down. I arrived at 09:05.",
+            submitted_at=datetime(2026, 11, 12, 20, 0, tzinfo=IST),
+        ).model_dump()
+    ]
+    data["detection_details"] = {"reason": "late arrival"}
+    return CaseContext.model_validate(data)
+
+
+def test_approving_an_adjustment_applies_it_once(env):  # noqa: F811
+    # Found in the live demo: approval treated adjust_punch as an added punch and crashed.
+    client, store, database = env
+    client.app.state.attendance_repository.seed_case(_late_arrival_case(), manager_id="M-1")
+    version = client.get("/exceptions/X-LATE", headers=auth()).json()["evidence_version"]
+    body = {
+        "decision": "approve",
+        "actions": [
+            {
+                "type": "adjust_punch",
+                "punch_id": "X-LATE-P0",
+                "new_ts": "2026-11-12T09:05:00+05:30",
+                "evidence_ref": {"kind": "note", "id": "N-LATE"},
+            }
+        ],
+        "evidence_version": version,
+        "idempotency_key": "adjust-approve-1",
+    }
+    response = client.post("/exceptions/X-LATE/decisions", json=body, headers=auth())
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "resolved"
+    card = client.get("/exceptions/X-LATE/timecard", headers=auth()).json()
+    effective_in = [p["ts"] for p in card["effective_punches"] if p["type"] == "in"]
+    assert len(effective_in) == 1 and "09:05" in effective_in[0]  # moved, not duplicated
+    assert card["net_worked_hours"] == pytest.approx(7 + 55 / 60)  # 09:05-18:00 minus 1 h
+    worked = database.scalar(
+        "SELECT worked_hours FROM day_totals WHERE employee_id=? AND work_date=?",
+        ("E-001", "2026-11-12"),
+    )[0]
+    assert worked == pytest.approx(7 + 55 / 60)  # the day total uses the corrected hours

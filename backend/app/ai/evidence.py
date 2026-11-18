@@ -121,11 +121,18 @@ def _stated_time_gaps(case: CaseContext, policy: PolicySnapshot | None) -> list[
     zone = local_zone(case)
     window = timedelta(minutes=policy.rules.missing_punch_window_min if policy else 30)
     work = [p.ts.astimezone(zone) for p in case.punches if p.type in WORK_PUNCHES]
-    if not any(_near(ts, h, m, window) for ts in work for _, h, m in stated):
+    # A stated time describes a punching error only if it differs from a recorded punch, by at
+    # most the window. One that equals a recorded punch confirms it (found in the live demo:
+    # "my real shift was 9:00 to 6:00 pm" for a double tap at 09:00 and 10:00).
+    if not any(
+        _near(ts, h, m, window) and not _near(ts, h, m, timedelta(0))
+        for ts in work
+        for _, h, m in stated
+    ):
         times = ", ".join(sorted({f"{h:02d}:{m:02d}" for _, h, m in stated}))
         return [
-            f"Stated time(s) {times} are more than {window.seconds // 60} min from every "
-            "recorded punch, so they do not describe a punching error",
+            f"Stated time(s) {times} do not correct any recorded punch (each equals a punch "
+            f"or is more than {window.seconds // 60} min away), so no punching error is described",
             "Manager review",
         ]
     return []

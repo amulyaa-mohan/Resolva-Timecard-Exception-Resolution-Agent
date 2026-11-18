@@ -156,6 +156,34 @@ class ValidationRejected(Exception):
         self.checks = checks
 
 
+def apply_actions(
+    punches: dict[str, PunchRecord], actions: list[dict], employee_id: str, key_prefix: str
+) -> dict[str, PunchRecord]:
+    """Apply correction actions to punches keyed by id: add_punch adds, adjust_punch moves.
+
+    Shared by approval (the hours written to day totals) and the effective timecard, so both
+    agree. Found in the live demo (2026-11-18): approval treated every action as an added
+    punch, so approving an adjust_punch crashed on its empty punch_type (HTTP 500).
+    """
+    result = dict(punches)
+    for index, action in enumerate(actions):
+        ts = action["new_ts"]
+        if isinstance(ts, str):
+            ts = datetime.fromisoformat(ts)
+        if action["type"] == "add_punch":
+            key = f"{key_prefix}:{index}"
+            result[key] = PunchRecord(
+                punch_id=key,
+                employee_id=employee_id,
+                ts=ts,
+                type=action["punch_type"],
+                source=PunchSource.IMPORT,
+            )
+        elif action["type"] == "adjust_punch" and action.get("punch_id") in result:
+            result[action["punch_id"]] = result[action["punch_id"]].model_copy(update={"ts": ts})
+    return result
+
+
 class SqliteBackend:
     """Demo SQLite file shared with DemoCaseRepository (tests and offline demo)."""
 
@@ -290,21 +318,10 @@ class ResolutionStore:
         applied = []
         for correction_id, actions_json in rows:
             parsed = actions_json if isinstance(actions_json, list) else json.loads(actions_json)
-            for index, action in enumerate(parsed):
-                applied.append({"correction_id": correction_id, **action})
-                ts = datetime.fromisoformat(action["new_ts"]) if action.get("new_ts") else None
-                if action["type"] == "add_punch":
-                    key = f"correction:{correction_id}:{index}"
-                    punches[key] = PunchRecord(
-                        punch_id=key,
-                        employee_id=case.employee.employee_id,
-                        ts=ts,
-                        type=action["punch_type"],
-                        source=PunchSource.IMPORT,
-                    )
-                elif action["type"] == "adjust_punch" and action.get("punch_id") in punches:
-                    target = punches[action["punch_id"]]
-                    punches[action["punch_id"]] = target.model_copy(update={"ts": ts})
+            applied += [{"correction_id": correction_id, **action} for action in parsed]
+            punches = apply_actions(
+                punches, parsed, case.employee.employee_id, f"correction:{correction_id}"
+            )
         effective = sorted(punches.values(), key=lambda p: p.ts)
         return {
             "exception_id": exception_id,
@@ -568,19 +585,14 @@ class ResolutionStore:
             else:
                 new_revision = revision + 1
                 after = build_verified_case(case, correction_revision=new_revision)
-                corrected = [
-                    *case.punches,
-                    *(
-                        PunchRecord(
-                            punch_id=f"correction-{i}",
-                            employee_id=case.employee.employee_id,
-                            ts=a.new_ts,
-                            type=a.punch_type,
-                            source=PunchSource.IMPORT,
-                        )
-                        for i, a in enumerate(request.actions)
-                    ),
-                ]
+                corrected = list(
+                    apply_actions(
+                        {p.punch_id: p for p in case.punches},
+                        [a.model_dump() for a in request.actions],
+                        case.employee.employee_id,
+                        "correction",
+                    ).values()
+                )
                 event = audit.append_event(
                     connection,
                     actor_type="manager",
