@@ -1,0 +1,30 @@
+[
+  {
+    "id": "p01",
+    "expected": {"intent": "LIST_EXCEPTIONS", "exception_type": "MISSING_PUNCH", "date_range": "TODAY"},
+    "en": "Anyone who didn't punch out today?",
+    "hi": "आज किसने पंच आउट नहीं किया?",
+    "kn": "ಇಂದು ಯಾರು ಪಂಚ್ ಔಟ್ ಮಾಡಿಲ್ಲ?"
+  },
+  {
+    "id": "p02",
+    "expected": {"intent": "COUNT_EXCEPTIONS", "exception_type": "OVERTIME_RISK", "date_range": "THIS_WEEK"},
+    "en": "How many people are working beyond their limit this week?",
+    "hi": "इस हफ्ते कितने लोग तय सीमा से ज़्यादा घंटे काम कर रहे हैं?",
+    "kn": "ಈ ವಾರ ಎಷ್ಟು ಜನ ಮಿತಿಗಿಂತ ಹೆಚ್ಚು ಗಂಟೆ ಕೆಲಸ ಮಾಡುತ್ತಿದ್ದಾರೆ?"
+  },
+  {
+    "id": "p03",
+    "expected": {"intent": "LIST_EXCEPTIONS", "exception_type": "MEAL_BREAK_BREACH"},
+    "en": "Who skipped lunch?",
+    "hi": "किसने दोपहर का खाना नहीं खाया?",
+    "kn": "ಯಾರು ಮಧ್ಯಾಹ್ನದ ಊಟ ಮಾಡಿಲ್ಲ?"
+  },
+  {
+    "id": "p04",
+    "expected": {"intent": "UNSUPPORTED"},
+    "en": "What's the weather in Bengaluru?",
+    "hi": "बेंगलुरु में मौसम कैसा है?",
+    "kn": "ಬೆಂಗಳೂರಿನಲ್ಲಿ ಹವಾಮಾನ ಹೇಗಿದೆ?"
+  }
+]

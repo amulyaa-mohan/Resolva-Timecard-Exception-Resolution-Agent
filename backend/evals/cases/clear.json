@@ -1,0 +1,397 @@
+[
+  {
+    "id": "c01",
+    "category": "clear",
+    "description": "Day shift, clock-out missing",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:02"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "18:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "KA-8"
+      ]
+    }
+  },
+  {
+    "id": "c02",
+    "category": "clear",
+    "description": "Early shift, clock-out missing",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "06:58"
+        }
+      ],
+      "schedule": {
+        "start": "07:00",
+        "end": "15:00"
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "15:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "KA-8"
+      ]
+    }
+  },
+  {
+    "id": "c03",
+    "category": "clear",
+    "description": "Late shift, clock-out missing",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "14:05"
+        }
+      ],
+      "schedule": {
+        "start": "14:00",
+        "end": "22:00"
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "22:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "KA-8"
+      ]
+    }
+  },
+  {
+    "id": "c04",
+    "category": "clear",
+    "description": "Overnight shift, clock-out on the next day missing",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "21:57"
+        }
+      ],
+      "schedule": {
+        "start": "22:00",
+        "end": "06:00",
+        "end_day": 1
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "06:00",
+          "tolerance_min": 15,
+          "day": 1
+        }
+      ],
+      "clause_ids": [
+        "KA-8"
+      ]
+    }
+  },
+  {
+    "id": "c05",
+    "category": "clear",
+    "description": "Clock-in missing",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "out",
+          "time": "18:04"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "in",
+          "time": "09:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "KA-8"
+      ]
+    }
+  },
+  {
+    "id": "c06",
+    "category": "clear",
+    "description": "Clock-in missing, 10:00 start",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "out",
+          "time": "19:01"
+        }
+      ],
+      "schedule": {
+        "start": "10:00",
+        "end": "19:00"
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "in",
+          "time": "10:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "KA-8"
+      ]
+    }
+  },
+  {
+    "id": "c07",
+    "category": "clear",
+    "description": "Clock-out missing; schedule and matching history agree",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:01"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      },
+      "history_days_ago": [
+        7,
+        14
+      ]
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "18:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "KA-8"
+      ]
+    }
+  },
+  {
+    "id": "c08",
+    "category": "clear",
+    "description": "US day shift, clock-out missing",
+    "input": {
+      "jurisdiction": "US-FED",
+      "punches": [
+        {
+          "type": "in",
+          "time": "08:59"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "17:00"
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "17:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "US-5"
+      ]
+    }
+  },
+  {
+    "id": "c09",
+    "category": "clear",
+    "description": "US early shift ending at half past",
+    "input": {
+      "jurisdiction": "US-FED",
+      "punches": [
+        {
+          "type": "in",
+          "time": "06:03"
+        }
+      ],
+      "schedule": {
+        "start": "06:00",
+        "end": "14:30"
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "14:30",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "US-5"
+      ]
+    }
+  },
+  {
+    "id": "c10",
+    "category": "clear",
+    "description": "US clock-in missing",
+    "input": {
+      "jurisdiction": "US-FED",
+      "punches": [
+        {
+          "type": "out",
+          "time": "20:02"
+        }
+      ],
+      "schedule": {
+        "start": "12:00",
+        "end": "20:00"
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "in",
+          "time": "12:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "US-5"
+      ]
+    }
+  },
+  {
+    "id": "c11",
+    "category": "clear",
+    "description": "US overnight shift, clock-out missing",
+    "input": {
+      "jurisdiction": "US-FED",
+      "punches": [
+        {
+          "type": "in",
+          "time": "22:55"
+        }
+      ],
+      "schedule": {
+        "start": "23:00",
+        "end": "07:00",
+        "end_day": 1
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "07:00",
+          "tolerance_min": 15,
+          "day": 1
+        }
+      ],
+      "clause_ids": [
+        "US-5"
+      ]
+    }
+  },
+  {
+    "id": "c12",
+    "category": "clear",
+    "description": "Honest employee note within the inference window",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:02"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      },
+      "notes": [
+        "I forgot to punch out. I left at 18:05."
+      ]
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "18:05",
+          "tolerance_min": 10
+        }
+      ],
+      "clause_ids": [
+        "KA-8"
+      ]
+    }
+  }
+]

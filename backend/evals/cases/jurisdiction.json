@@ -1,0 +1,232 @@
+[
+  {
+    "id": "j01",
+    "category": "jurisdiction",
+    "description": "Day shift clock-out missing (IN-KA)",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:03"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "18:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "KA-8"
+      ]
+    }
+  },
+  {
+    "id": "j02",
+    "category": "jurisdiction",
+    "description": "Day shift clock-out missing (US-FED)",
+    "input": {
+      "jurisdiction": "US-FED",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:03"
+        }
+      ],
+      "schedule": {
+        "start": "09:00",
+        "end": "18:00"
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "18:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "US-5"
+      ]
+    }
+  },
+  {
+    "id": "j03",
+    "category": "jurisdiction",
+    "description": "Clock-in missing (IN-KA)",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "out",
+          "time": "16:02"
+        }
+      ],
+      "schedule": {
+        "start": "08:00",
+        "end": "16:00"
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "in",
+          "time": "08:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "KA-8"
+      ]
+    }
+  },
+  {
+    "id": "j04",
+    "category": "jurisdiction",
+    "description": "Clock-in missing (US-FED)",
+    "input": {
+      "jurisdiction": "US-FED",
+      "punches": [
+        {
+          "type": "out",
+          "time": "16:02"
+        }
+      ],
+      "schedule": {
+        "start": "08:00",
+        "end": "16:00"
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "in",
+          "time": "08:00",
+          "tolerance_min": 15
+        }
+      ],
+      "clause_ids": [
+        "US-5"
+      ]
+    }
+  },
+  {
+    "id": "j05",
+    "category": "jurisdiction",
+    "description": "Overnight clock-out missing (IN-KA)",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "20:58"
+        }
+      ],
+      "schedule": {
+        "start": "21:00",
+        "end": "05:00",
+        "end_day": 1
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "05:00",
+          "tolerance_min": 15,
+          "day": 1
+        }
+      ],
+      "clause_ids": [
+        "KA-8"
+      ]
+    }
+  },
+  {
+    "id": "j06",
+    "category": "jurisdiction",
+    "description": "Overnight clock-out missing (US-FED)",
+    "input": {
+      "jurisdiction": "US-FED",
+      "punches": [
+        {
+          "type": "in",
+          "time": "20:58"
+        }
+      ],
+      "schedule": {
+        "start": "21:00",
+        "end": "05:00",
+        "end_day": 1
+      }
+    },
+    "expected": {
+      "outcome": "eligible",
+      "actions": [
+        {
+          "type": "add_punch",
+          "punch_type": "out",
+          "time": "05:00",
+          "tolerance_min": 15,
+          "day": 1
+        }
+      ],
+      "clause_ids": [
+        "US-5"
+      ]
+    }
+  },
+  {
+    "id": "j07",
+    "category": "jurisdiction",
+    "description": "No schedule (IN-KA)",
+    "input": {
+      "jurisdiction": "IN-KA",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:00"
+        }
+      ]
+    },
+    "expected": {
+      "outcome": "not_eligible"
+    }
+  },
+  {
+    "id": "j08",
+    "category": "jurisdiction",
+    "description": "No schedule (US-FED)",
+    "input": {
+      "jurisdiction": "US-FED",
+      "punches": [
+        {
+          "type": "in",
+          "time": "09:00"
+        }
+      ]
+    },
+    "expected": {
+      "outcome": "not_eligible"
+    }
+  }
+]
