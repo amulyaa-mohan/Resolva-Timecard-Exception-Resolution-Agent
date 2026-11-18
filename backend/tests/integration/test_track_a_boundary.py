@@ -68,7 +68,7 @@ def test_real_track_a_validator_blocks_mock_until_complete(policy, settings):
     )
     assert result.status == GateStatus.BLOCKED
     assert result.validation is not None and not result.validation.passed
-    assert any("pending" in check.reason for check in result.validation.checks)
+    assert any("incomplete" in check.reason for check in result.validation.checks)
 
 
 def test_hash_is_stable_for_note_order_and_equivalent_offsets():

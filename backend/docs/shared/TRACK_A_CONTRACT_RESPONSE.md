@@ -29,3 +29,24 @@ CaseService loads a manager-scoped snapshot, validates identity/date consistency
 Track B's real offline pipeline calls Track A's CorrectionValidator-compatible adapter.
 The adapter reuses the existing missing-punch detector and returns failed checks for unfinished rules.
 The resulting proposal is BLOCKED; it must not be presented as approval-ready.
+
+## A-RULES-03 — Proposals awaiting Track B answers (2026-11-18, not agreed)
+
+Current code: `app/rules/validator.py` exposes `validate_correction` (no aggregates, always fails closed on overtime) and `make_validator(load_aggregates)`, which keeps the three-argument CorrectionValidator interface. No shared contract or Track B module changed. Questions for Amulya:
+
+1. Aggregate delivery. Proposal: Track A binds a trusted aggregate loader into the validator (`make_validator`) and no CaseContext field is added. Alternative: a 0.1.x `CaseContext.aggregates` field filled only by the backend loader, never by models or clients. Which do you prefer for SHARED-02?
+2. Insufficient evidence vs violation. Today both are `RuleCheck.passed=False` and the pipeline returns BLOCKED; the difference appears only in the reason text. Proposal: add `RuleCheck.outcome: "pass" | "violation" | "insufficient_evidence"` (keeping `passed` for compatibility), and have the pipeline ESCALATE when any check is insufficient_evidence and none is a violation. OK?
+3. Time anchoring. Your time-evidence gate accepts an added punch within 5 minutes of the schedule, a note-stated time or history. The validator accepts only the exact schedule boundary. Proposal: the validator stays exact until a verified time-evidence field exists (for example `ProposedAction.evidence_ref` naming a note_id or history punch_id that the validator re-checks). Does this match the prompt's expected outputs and your eval labels?
+4. Evals. Swapping `validate_correction` into `evals/run.py` will block eval cases that lack break punches or aggregates. Should the eval fixtures gain complete evidence plus a fixture aggregate source, or should evals report both validators side by side?
+5. Calendar and evaluation time (unchanged from earlier): the policy week start, the quarter definition, and a `CaseContext.as_of` field for open shifts.
+
+### Answers from Amulya (relayed by Jayanth, 2026-11-18): agreed
+
+1. Totals reach the validator through `make_validator`; CaseContext is unchanged. The loader re-reads totals on every validation, including at approval. The totals used, their periods and their as-of time are recorded. Done in Track A: they are written into the OVERTIME_RISK reason; the audit record follows in A-03.
+2. Agreed: `RuleCheck.outcome` = `pass | violation | insufficient_evidence`, with `passed == (outcome == "pass")`. Pipeline: any violation gives BLOCKED; otherwise any insufficient_evidence gives ESCALATED; ELIGIBLE only when every check passes. Track A already classifies outcomes (`evaluate_rule_outcomes`) and will populate the field when 0.2.0 lands.
+3. The validator stays exact-time for the MVP. Contract 0.2.0 adds `ProposedAction.evidence_ref` (a note, punch or schedule id) and a single policy field `evidence_tolerance_min` (5 in the demo packs). The validator will then accept a time within that tolerance of the referenced evidence.
+4. Evals (Track B owns evals/): complete-evidence fixtures using the loader shape in RULE_ENGINE.md, deliberately incomplete cases expected to be ESCALATED, and reports showing the stand-in and real validators side by side until the numbers are stable. CI is then gated on the real validator.
+5. Policy pack fields `week_start: monday` and `quarter_start_month: 1`. Quarters are calendar quarters in the employee's local timezone; the Indian Factories Act definition still needs confirming before the demo. `CaseContext.as_of` is an aware UTC time set by the server at load. It is excluded from evidence_version and recorded in the audit.
+
+Contract process: all 0.2.0 changes (items 2, 3 and 5) go in one commit. Amulya proposed that she does contracts.py and the pipeline, and Jayanth reviews; Jayanth has not confirmed this yet. She pulls `backend` first, and the two tracks stay on separate files.
+After 0.2.0, Track A: populate outcome; accept evidence_ref within evidence_tolerance_min; check the week_start weekday and quarter_start_month in the aggregate check; use as_of for open shifts.
