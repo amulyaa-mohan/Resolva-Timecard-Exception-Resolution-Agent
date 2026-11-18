@@ -395,7 +395,7 @@ function App() {
               <div className="kpi-card kpi-violet">
                 <div className="kpi-label">{t.kpiReady}</div>
                 <div className="kpi-value">{eligibleForBulk.length}</div>
-                <div className="kpi-subtext small muted">6/6 rule checks passed &amp; confidence verified</div>
+                <div className="kpi-subtext small muted">{tr("6/6 rule checks passed & confidence verified")}</div>
               </div>
               <div className="kpi-card kpi-green" title="Measures % of pay-period exceptions resolved to unblock payroll cutoff">
                 <div className="kpi-label">{t.kpiReadiness}</div>

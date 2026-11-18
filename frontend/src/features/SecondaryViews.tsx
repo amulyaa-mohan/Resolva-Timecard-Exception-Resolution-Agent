@@ -237,15 +237,15 @@ export function AuditView({
             {scope === 'case' && selectedCase ? (
               <p className="audit-scope-line">
                 <strong>{selectedCase.employee_name}</strong>
-                <span aria-hidden="true"> Â· </span>
+                <span aria-hidden="true"> · </span>
                 <span>{caseReasonLabel}</span>
-                <span aria-hidden="true"> Â· </span>
+                <span aria-hidden="true"> · </span>
                 <span>Work date: {caseWorkDateLabel}</span>
                 <span className="audit-scope-code">({selectedCase.id})</span>
               </p>
             ) : (
               <p className="audit-scope-line">
-                All workspace activity ({events.length} {events.length === 1 ? 'event' : 'events'}) Â· Times shown in {tzInfo.shortLabel}
+                All workspace activity ({events.length} {events.length === 1 ? 'event' : 'events'}) · Times shown in {tzInfo.shortLabel}
               </p>
             )}
           </div>
@@ -334,7 +334,7 @@ export function AuditView({
                           onClick={() => toggleDetails(ev.id)}
                         >
                           <span>{tr("Technical details")}</span>
-                          <span aria-hidden="true">{isOpen ? 'â–¾' : 'â–¸'}</span>
+                          <span aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
                         </button>
                       </div>
                     </div>
@@ -785,9 +785,9 @@ export function ImportPreviewView({
               <h2 className="card-heading">Preview summary</h2>
               <p className="import-counts-line tnum">
                 <span className="count-valid">{preview.valid} valid</span>
-                <span aria-hidden="true"> Â· </span>
+                <span aria-hidden="true"> · </span>
                 <span className="count-dup">{preview.duplicates} {preview.duplicates === 1 ? 'duplicate' : 'duplicates'}</span>
-                <span aria-hidden="true"> Â· </span>
+                <span aria-hidden="true"> · </span>
                 <span className="count-invalid">{preview.invalid} invalid</span>
               </p>
             </div>
@@ -852,7 +852,7 @@ export function ImportPreviewView({
                             onClick={() => toggleRowDetails(row.row_number)}
                           >
                             <span>Details</span>
-                            <span aria-hidden="true">{isExpanded ? 'â–¾' : 'â–¸'}</span>
+                            <span aria-hidden="true">{isExpanded ? '▾' : '▸'}</span>
                           </button>
                         </td>
                       </tr>
@@ -960,10 +960,10 @@ export function ImportPreviewView({
             </strong>
             <span>
               {' '}
-              Â· Skipped {commitResult.skipped} ({commitResult.duplicates}{' '}
+              · Skipped {commitResult.skipped} ({commitResult.duplicates}{' '}
               {commitResult.duplicates === 1 ? 'duplicate' : 'duplicates'}, {commitResult.invalid} invalid)
             </span>
-            <span className="muted"> Â· Batch </span>
+            <span className="muted"> · Batch </span>
             <code className="mono">{commitResult.batch_id}</code>
           </div>
 
@@ -1038,8 +1038,8 @@ export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: Excep
         exception_id: id,
         decision: 'propose',
         actions: [{ type: 'add_punch', new_ts: '2026-11-17T18:00:00+05:30', note: 'Infer scheduled shift end 18:00 IST.' }],
-        rationale: `Detected unpaired clock-in at ${punchTime} IST on scheduled 09:00Ã”Ã‡Ã´18:00 IST shift. Proposed 18:00 IST out-punch passes all 6 deterministic rules.`,
-        citations: [{ chunk_id: 'IN-KA@2025.1#sec-4.2', quote: 'Missing out-punches may be inferred within â”¬â–’30 minutes of scheduled shift end.' }],
+        rationale: `Detected unpaired clock-in at ${punchTime} IST on scheduled 09:00–18:00 IST shift. Proposed 18:00 IST out-punch passes all 6 deterministic rules.`,
+        citations: [{ chunk_id: 'IN-KA@2025.1#sec-4.2', quote: 'Missing out-punches may be inferred within ±30 minutes of scheduled shift end.' }],
         confidence: 0.91,
         missing_information: [],
         model_id: 'qwen2.5-7b-instruct',
@@ -1134,7 +1134,7 @@ export function PolicySettingsView({
                   <td className="mono"><strong>{p.id}@{p.version}</strong></td>
                   <td>{tr(p.jurisdiction)}</td>
                   <td>{p.daily_regular_hours}{tr(" hours")} / {p.weekly_regular_hours}{tr(" hours")}</td>
-                  <td>{p.overtime_rate}â”œÃ¹ ({p.quarterly_ot_cap ? `${p.quarterly_ot_cap}${tr(" hours per quarter")}` : tr("no cap")})</td>
+                  <td>{p.overtime_rate}× ({p.quarterly_ot_cap ? `${p.quarterly_ot_cap}${tr(" hours per quarter")}` : tr("no cap")})</td>
                   <td>{p.rest_minutes}{tr(" min after ")}{p.rest_after_hours}{tr(" hours")}</td>
                   <td>{p.max_spread_hours ? `${p.max_spread_hours}${tr(" hours")}` : tr('N/A')}</td>
                 </tr>
