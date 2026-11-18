@@ -485,3 +485,152 @@ Never include credentials, private employee data, or invented test results.
   pass; `evals.run --gates ci` 9/9 PASS. Demo seed re-run: six exceptions, now listed with names.
 - Next step: Soumya reworks her branch onto this schema (DB-06); Track A adds structured
   `detection_details` keys.
+
+### 2026-11-18 — Amulya Mohan — B-05 — Committed live report on Track A's real validator
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed: `backend/evals/reports/ollama-qwen2.5-7b-instruct-propose_v2-real-validator.{md,json}` generated from a clean checkout of dcccc0c; results added to `docs/MODEL_CARD.md` and CLAUDE.md. `scripts/live_check.py` now validates with Track A's `make_validator` (complete evidence: observed break, as_of, trusted in-limit totals with policy periods). The stand-in's report label now reads "comparison only".
+- Results: all six live gates pass; 45 cases, proposal accuracy 100% under both validators, every category 100%, citation validity 100%, no repair retries, p50 4.78 s, p95 5.17 s. On the 6 rules-only cases the real rules made 0 eligible and the stand-in would have made 6. Live smoke check 6/6 (p50 5.0 s).
+- Contracts: none.
+- Validation: report run above (clean tree); live smoke check above; `live_check.py --provider mock` 6/6; ruff clean; pytest and CI eval unchanged.
+- Next step: extend proposals beyond MISSING_PUNCH (SCHEDULE_DEVIATION adjust_punch, OVERLAPPING_SHIFT, SPREAD_OVER_BREACH).
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan — B-02 / B-05 — AI proposals beyond missing punches (step 2)
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed:
+  - `app/ai/evidence.py`: pre-model gate for SCHEDULE_DEVIATION, SPREAD_OVER_BREACH and OVERLAPPING_SHIFT (escalate when no note states a time, or every stated time is more than `missing_punch_window_min` from all recorded work punches); stated (note) and habitual (history) times round one way only, so no paid time is added; schedule stays two-sided.
+  - `app/ai/pipeline.py`: per-code `<facts>` (stated times as claims, deviation minutes, spread vs limit, overlapping sessions paired FIFO like Track A's engine, an "Allowed fix" rule); citation-id normalisation for mangled ids that unambiguously name a retrieved active clause, recorded as `citation_ids_normalised`.
+  - `prompts/propose_v3.md` (new default; v2 and v1 kept); config, `.env.example` and eval CLI updated.
+  - Mock provider drafts stated-time adjustments (overlaps move the earlier session's clock-out).
+  - Evals: `evals/cases/adjustment.json` (12 cases, `rules_only`), expected `punch_id` checked, category `adjustment`, `detection_details` = `{"reason": ...}` for non-missing-punch codes as Track A writes it.
+  - Tests: `tests/unit/test_adjustments.py` (gate, rounding, facts, prompt, end to end, citation normalisation).
+- Found and fixed during the work: FIFO pairing in the overlap facts (first version dropped the second session); the mock first moved the wrong punch in an overlap, which the real validator blocked and the expected `punch_id` caught.
+- Results: mock/CI 9/9 gates; live Qwen2.5-7B, 57 cases, v2 and v3 both 100% proposal accuracy with every category 100%, all six live gates, 0 repair retries (p50 5.95 s / 6.12 s). Five repeats: spread-over fix v2 4/5 vs v3 5/5, so v3 is the default. KA-11's id was mangled in 9/10 live runs before normalisation.
+- Contracts: none (uses `adjust_punch` and `EvidenceRef` from 0.2.0). Answer on one-sided history rounding added to TRACK_A_CONTRACT_RESPONSE.md.
+- Validation: ruff check and format clean; pytest 474 passed (44 PostgreSQL tests skip locally without `TEST_DATABASE_URL`; CI runs them); `python -m evals.run` 9/9 gates; live runs and repeats above.
+- Next step: commit, then the committed live report from a clean tree.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan — Backend audit (both tracks)
+
+- Branch: `backend`.
+- Status: REVIEW. Report: `backend/docs/shared/AUDIT_2026-11-18.md`.
+- Method: clean venv from the lock file (`pip check`, ruff, bandit rules); 518 tests on PostgreSQL 15 with none skipped; CI eval 9/9; a migrated and seeded PostgreSQL demo week (all six exception types detected through the real import path) driven over HTTP with 49 scripted checks, with the mock and with live Qwen2.5-7B; append-only triggers, audit hash chain and `db_maintenance verify` tested in the database; line-by-line review of auth, routers, SQL, store transactions, rule engine and totals.
+- Track A findings (reported, not changed): A1 High, a 1-minute clock-out/clock-in passes the meal-break rule; A2 High, `propose` holds the global write lock (advisory lock / BEGIN IMMEDIATE) during the LLM call, and three concurrent proposals took 8.9/15.8/22.3 s; A3 Medium, `llm_traces` is keyed by the client-suppliable trace id, so reusing `X-Trace-Id` gives 500; A4 Medium, unsupported fix types block instead of escalating; A5 Medium, early arrival and late departure are flagged as deviations, contrary to KA-9/US-6; A6 Low, `effective_to` is inclusive in the engine but exclusive in the registry; A7 Low, stale API docs.
+- Track B fixes: B1, the assistant requires a manager token when the attendance store is enabled; B2, HTTP providers and the Ollama embedder are shared per configuration (connection reuse, which also covers Track A's proposal route); B3, identical validator reasons are grouped. Tests: `tests/unit/test_audit_fixes.py`.
+- Validation after the fixes: ruff clean; pytest 481 passed (44 PostgreSQL tests skip locally without `TEST_DATABASE_URL`; 518 earlier with it); eval 9/9; HTTP walk-through 47/49, where the two failures are A3 and a harness typo (the import check passed with the correct column in a separate probe).
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan (Track B, at the owner's request) — Track A audit fixes A1-A7
+
+- Branch: `backend`.
+- Status: REVIEW (Track A to review; A5 to confirm intent).
+- Changed (Track A modules, edited at the repository owner's request; each change carries its audit id):
+  - `app/rules/engine.py`: A1, a gap between work sessions counts as rest only when it lasts `rest_minutes`; A5, only a late arrival or an early departure is a schedule deviation; A6, `effective_to` is exclusive.
+  - `app/rules/validator.py`: A4, unsupported fix types are `insufficient_evidence` (escalate).
+  - `app/resolution/store.py`: A2, `propose` reads, runs the pipeline with no transaction or lock held, then re-checks the evidence in a short write (409 if it changed); A3, trace rows are keyed `<trace id>:<proposal id>`.
+  - `docs/RESOLUTION_API.md`, `docs/ATTENDANCE_API.md`: A7.
+  - Tests: new `tests/unit/test_audit_track_a.py` and `tests/integration/test_audit_store.py` (the A2/A3 tests fail on the old code, confirmed); two Track A tests updated for A5.
+- Track B: prompt v3 rule 5 scoped to recorded punches (a live regression on c10 found during verification); eval cases d02 and d11 replaced and d13 added for the corrected rules.
+- Validation: pytest 550 passed on PostgreSQL 15 (none skipped); ruff clean; eval 9/9; Docker stack with live Qwen: HTTP walk-through 49/49, 0 server errors, audit chain valid; a decision during model calls took 0.57 s; full live eval 100% in every category, 0 unsafe.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — C V Jayanth — A-AUDIT-01 — Review of Track B's audit fixes; structured details; employee notes
+
+- Branch: backend (fast-forwarded to b2c7a86 first). Status REVIEW. Local until committed.
+- Reviewed audit changes A1-A6 in engine.py, validator.py and store.py against the code and the policy text.
+  All agreed. A5 follows KA-9 / US-6; the earlier two-sided schedule check was a Track A error.
+- Structured `detection_details` (app/rules/explain.py): every exception stores scalar facts next to `reason`,
+  using the keys Track B listed plus `limit_kind` for OVERTIME_RISK.
+- Employee notes: `POST /imports` accepts `kind: "notes"`; notes attach to an open or escalated exception when
+  written on its work date or the day after; attaching changes evidence_version and is audited as EVIDENCE_ATTACHED;
+  import plus attach is one transaction; a note imported early is attached when detection runs. A first 7-day window
+  attached Friday's note to Tuesday's exception (seen in the seed output) and was tightened to 2 days.
+- `seed_demo_week.py` imports four notes through that path; each lands on exactly one exception.
+- Validation: 580 passed with TEST_DATABASE_URL on local PostgreSQL 15, 527 passed / 53 skipped without it; Ruff
+  lint and format pass; `evals.run --gates ci` 9/9 PASS (the mock provider; this proves the harness, not model quality).
+  The AI flows that read the notes were not run against a live model here.
+- Open: "unscheduled shift" as a schedule deviation needs a signal that schedules are complete; contract 0.3.0 review.
+
+### 2026-11-18 — Amulya Mohan — Live verification of Track A 090bbdd; two fixes
+
+- Branch: `backend` (pulled 090bbdd: structured detection details, note import, demo notes).
+- Status: REVIEW.
+- Changed:
+  - `app/ai/pipeline.py` (Track B): the case JSON shows timestamps in the employee's local zone. On PostgreSQL (UTC) the model copied `+00:00` onto local wall times, so every adjustment was blocked live.
+  - `app/ai/evidence.py` (Track B): a stated time equal to a recorded punch does not count as a correction (the double-tap note now escalates before the model).
+  - `app/resolution/store.py` (Track A, at the owner's request): approval and the timecard read share `apply_actions`; approving an `adjust_punch` returned 500 and would have double-counted day totals.
+  - Tests: `test_case_json_shows_local_times_when_storage_is_utc`, `test_utc_stored_case_end_to_end_with_mock`, `test_stated_times_that_equal_recorded_punches_escalate`, `test_approving_an_adjustment_applies_it_once` (SQLite and PostgreSQL; fails on the old code).
+- Validation: pytest 585 passed on PostgreSQL 15 (none skipped); ruff clean; eval 9/9; Docker stack with live Qwen: demo story end to end (missing punch approved, then the late arrival eligible and approved to the stated 09:05, net 7.92 h), HTTP walk-through 49/49, 0 server errors; full live eval 100% in every category, 0 unsafe, p50 4.58 s.
+- Answered in TRACK_A_CONTRACT_RESPONSE.md: unscheduled shift stays insufficient_evidence until a "roster final" signal exists (proposal for 0.3.0); two questions for Track A (overtime-only remainder after an evidenced fix; timecard time zone).
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan — Settle open questions; verify end to end before merging to main
+
+- Branch: `backend`.
+- Status: REVIEW, then merge into `main`.
+- Changed (Track A modules at the owner's request): `app/rules/validator.py`, so an evidenced fix leaving only warning-severity violations (SCHEDULE_DEVIATION and/or OVERTIME_RISK) is escalated; `app/resolution/store.py` and `router.py`, so the timecard is in the employee's zone with a `timezone` field. Tests updated and added; eval e03 now expects ESCALATED.
+- Decided: an unscheduled shift stays `insufficient_evidence` until a roster-final signal (0.3.0).
+- Validation: the Windows host now blocks the psycopg DLL (Application Control; settings not changed), so tests ran in a Linux `python:3.12-slim` container on the compose network: 590 passed on PostgreSQL 15 (none skipped), ruff clean, eval 9/9. Docker stack (API image, PostgreSQL, Ollama on the GPU), fresh demo week seeded from a container: demo story end to end (missing punch approved, then the late arrival eligible and approved to the stated 09:05), and the spread-over now escalates for review; HTTP walk-through 49/49, 76 requests, 0 server errors; full live eval (in a container) 100% in every category, 0 unsafe, 0 repair retries, p50 4.44 s.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — C V Jayanth — A-AUDIT-02 — Self-audit of the code written after Track B's audit
+
+- Branch: backend. Status REVIEW. Full findings, reproductions and what was checked and fine:
+  `backend/docs/AUDIT_TRACK_A_2026-11-18.md`.
+- Fixed (each reproduced by a failing test first): approving an `adjust_punch` returned 500 (three places re-implemented
+  "apply corrections"; now one shared `app/resolution/apply.py`); exceptions never cleared and a cleared one could never
+  return (now dismissed/reopened, audited); a retry after a failed detection detected nothing; hostile CSV/JSON caused
+  500s (cell size, nesting depth, huge integers, year overflow, NUL bytes including the JSON escape, break length
+  overflowing a 32-bit column); one write transaction per import stalled every approval (now one per employee).
+- Measured, not assumed: detection costs about 5 ms per employee (120 employees, 0.58 s).
+- Checked and fine: 6,000-day fuzz of detect/explain/grouping/apply (no crash, no stray detail key); the concurrent
+  approval race; cross-employee evidence; no HTML or eval sinks in the frontend.
+- Validation: 614 passed with TEST_DATABASE_URL on local PostgreSQL 15, 551 passed / 63 skipped without it; Ruff lint and
+  format pass.
+- Found while writing the fix, not yet fixed: the frontend audit CSV export has formula injection (separate commit, branch
+  `frontend`).
+- Added to the audit above (found when checking how the UI reads times): the API's timestamps depended on the database
+  session's timezone (`03:30Z` from a UTC server vs `09:00+05:30` locally), which would have broken the Docker demo's
+  timeline. Case times are now always in the employee's timezone; `evidence_version` is unchanged. 615 passed with Postgres.
+
+### 2026-11-18 — Audit follow-up — Effective workday consistency
+
+- PostgreSQL timecards and approval totals now reuse detection's corrected employee punches and work-date grouping, including adjustments that bring in unlinked punches.
+- Approval returns a conflict if the effective workday differs from the exception's linked punch IDs or timestamps. The manager must review the updated timecard before a correction can proceed.
+- Timecard raw evidence and correction history retain their exception scope. The effective punches and net hours describe the employee's workday. SQLite retains its snapshot behavior.
+- Added a PostgreSQL regression for a punch adjusted into the workday from outside the exception's evidence.
+- Publication: local changes in the audit fix worktree.
+
+### 2026-11-18 — Audit follow-up — Multiple exceptions on one workday
+
+- PostgreSQL open and escalated cases now use the effective workday for evidence snapshots, proposal validation and approval. A correction on a sibling exception changes that snapshot's evidence version, even when its exception revision stays the same.
+- Replaced the linked-punch equality guard. An outdated request still conflicts, and a refreshed request reaches the deterministic rules. Historical case and timecard raw evidence remain scoped to the exception.
+- Added a PostgreSQL regression for a clock-out added by a correction on another exception.
+
+### 2026-11-18 — Amulya Mohan — Hand-in: merged to main, final docs
+
+- Branch: `backend`, fast-forwarded to `main` 34c2506 (PR #12 from Track A, then PR #13 from `backend`).
+- Status: DONE for the deadline; future work listed in CLAUDE.md, shared TASKS.md and MODEL_CARD.md.
+- Validation on the merged code: CI on `main` green (639 tests on PostgreSQL, none skipped); Docker stack with live Qwen2.5-7B: demo story end to end, HTTP walk-through 49/49, 0 server errors; full live eval 100% in every category, 0 unsafe, p50 4.45 s.
+- Decision: contract 0.3.0 is out of scope for the deadline. Unsupported fix types escalate to the manager.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Overtime warning carry-over regression
+
+- Reproduced an approval that increased projected weekly hours from 49 to 50 against a 48-hour limit.
+- The validator keeps an existing overtime warning blocking if a correction increases net worked hours. Corrections that leave hours unchanged or reduce them retain the existing carry-over behavior.
+
+### 2026-11-18 — Amulya Mohan — Database check against the backend
+
+- Branch: `backend` (merged `main` with Track A's PR #14 first, so the check ran against current code).
+- Status: REVIEW.
+- Checked (PostgreSQL 15, in a Linux container because Windows blocks the psycopg DLL): fresh migrate of 0001-0004, re-run applies nothing, edited migration refused by checksum; enums match `contracts.py`; all 14 positional INSERTs match their table's column count and every named column exists; all 25 foreign keys RESTRICT; append-only triggers on punches, decisions, corrections, proposals, llm_traces and audit_events. After a seeded demo week went through the API (demo story and 49/49 HTTP checks, 0 server errors): `db_maintenance verify` 0 problems, audit chain valid, stored exception status equals derived status, row counts consistent, and the timecard's corrections query uses indexes.
+- Changed: `backend/database/docs/data_dictionary.md` documents `proposals.created_at`, `llm_traces.created_at` and the `<request trace id>:<proposal id>` trace key. All 19 tables now match the live schema.
+- Left for later: TRUNCATE guards exist only on punches and audit_events (decisions, corrections, proposals and llm_traces block row UPDATE/DELETE but not TRUNCATE), so a later migration can add them. The migrations run as savepoints in one outer transaction, not one transaction each as the comment says; harmless.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+

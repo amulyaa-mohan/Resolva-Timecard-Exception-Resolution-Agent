@@ -13,12 +13,18 @@ from app.core.contracts import ExceptionCode, Severity
 MAX_PAGE = 100
 
 
-def status_expression(table: str = "e") -> str:
-    """SQL giving resolved / escalated / open for one exception row."""
+def status_expression(table: str = "e", *, dismissible: bool = True) -> str:
+    """SQL giving resolved / escalated / dismissed / open for one exception row.
+
+    An approval wins, then a dismissal (detection found the problem gone), then an escalation.
+    `dismissible=False` is for the demo snapshot store, which has no status column and never
+    dismisses."""
+    dismissed = f"WHEN {table}.status = 'dismissed' THEN 'dismissed' " if dismissible else ""
     return (
         "CASE WHEN EXISTS (SELECT 1 FROM decisions d "
         f"WHERE d.exception_id = {table}.exception_id AND d.decision = 'approve') THEN 'resolved' "
-        "WHEN EXISTS (SELECT 1 FROM escalations s "
+        + dismissed
+        + "WHEN EXISTS (SELECT 1 FROM escalations s "
         f"WHERE s.exception_id = {table}.exception_id) THEN 'escalated' ELSE 'open' END"
     )
 
@@ -40,7 +46,8 @@ class ExceptionFilter:
     def matches(self, *, code, severity, status, employee_id, exception_id, work_date) -> bool:
         """The same predicate as the SQL below, for stores that cannot filter in SQL."""
         return (
-            (self.code is None or code == self.code)
+            (self.status is not None or status != "dismissed")
+            and (self.code is None or code == self.code)
             and (self.severity is None or severity == self.severity)
             and (self.status is None or status == self.status)
             and (self.employee_id is None or employee_id == self.employee_id)
@@ -58,6 +65,9 @@ def sort_key(severity, work_date, exception_id) -> tuple:
 def where_clauses(filters: ExceptionFilter) -> tuple[list[str], list]:
     """SQL conditions and their parameters, against the derived view `q`."""
     conditions, params = [], []
+    if filters.status is None:
+        # A dismissed exception cleared itself; it is history, not work. Ask for it by status.
+        conditions.append("q.status <> 'dismissed'")
     for column, value in (
         ("code", filters.code.value if filters.code else None),
         ("severity", filters.severity.value if filters.severity else None),

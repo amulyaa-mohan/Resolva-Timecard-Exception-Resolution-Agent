@@ -159,3 +159,113 @@ SCHEDULE_DEVIATION violation (BLOCKED). Should a warning-severity deviation inst
    `insufficient_evidence` with "Fix is evidenced but leaves a warning: manager review", so the
    pipeline escalates instead of blocking. Problem-severity remainders still block.
 5. **CI: thank you.** Track A's PostgreSQL tests now run on every build.
+
+### Track B reply (2026-11-18, Amulya): history rounding and step 2
+
+- **History refs: yes, one-sided.** Track B's gate now rounds `history_punch` times one way only
+  (a habit is not a record), as it does for notes; schedule refs stay two-sided. Your validator can
+  make history one-sided too; until then the gate is the stricter of the two, so nothing it accepts
+  can be refused by your rule for adding paid time.
+- **Step 2 is live on Track B's side:** the pipeline now drafts `adjust_punch` fixes for
+  SCHEDULE_DEVIATION, SPREAD_OVER_BREACH and OVERLAPPING_SHIFT, escalating without the model when no
+  usable stated time exists. Prompt `propose_v3` adds the adjustment rules. Eval category
+  `adjustment` (12 cases, `evals/cases/adjustment.json`) runs against your real validator.
+- **0.3.0-draft** (`new_end_ts`, `target_punch_ids`, swap never approvable) is next on Track B's list.
+
+### Track A reply to the code audit (2026-11-18, Jayanth): reviewed, confirmed, and three of your asks done
+
+I pulled `b2c7a86`, read the diff, and ran the full suite with `TEST_DATABASE_URL`: **550 passed** before my
+changes and **580** after. Thank you for the audit. No need to apologise for touching these files.
+
+**Reviewed and agreed**
+- **A1 (meal break):** correct. The walk now resets the count only after a rest of `rest_minutes`, so 13:00 out and
+  13:01 in no longer passes. The detection details I added use the same walk.
+- **A2 (propose):** correct, and a real improvement. Reading the totals once before the model call is fine
+  because a proposal is only a draft: approval re-reads totals and re-validates, and the short write re-checks the
+  revision and evidence hash. I checked that a stale result returns 409 and that nothing is persisted in that case.
+- **A3 (trace keys):** agreed; retention and the integrity check both join on the key, and the audit payload keeps
+  the raw id for display.
+- **A4 (unsupported types escalate):** agreed.
+- **A6 (`effective_to` exclusive):** agreed, now consistent with the registry.
+
+**A5 confirmed, and it was my bug.** KA-9 and US-6 define a deviation as a clock-in more than 7 minutes *after* the
+scheduled start or a clock-out more than 7 minutes *before* the scheduled end. My check was two-sided, so it also
+flagged arriving early or leaving late, which the policy text does not call a deviation. Early arrival and late
+departure are extra paid time, and OVERTIME_RISK is the right place for them. No change requested.
+One open point (also in RULE_ENGINE.md): the design README lists "an unscheduled shift" as a deviation. With no
+schedule we return `insufficient_evidence`, because we cannot tell a missing schedule import from a genuinely
+unscheduled shift. Treating it as a violation needs an agreed signal that schedules are complete for the day. Your view?
+
+**Done, as you asked**
+1. **Structured `detection_details`.** Every exception now stores the keys you listed, next to `reason`:
+   `unmatched_punch_id` / `missing_type`, `overlapping_punch_ids`, `worked_min_before_break` / `break_min`,
+   `day_hours` / `projected_week_hours` / `limit_hours`, `spread_hours`, `boundary` / `minutes_off`.
+   I added `limit_kind` (`daily`, `weekly`, `quarterly`) to OVERTIME_RISK, because three limits make `limit_hours`
+   ambiguous. They are scalars only, and an undecided finding gets none. Source: `app/rules/explain.py`.
+2. **Employee notes.** `POST /imports` now takes `kind: "notes"`. A note attaches to an open or escalated exception
+   when it was written on the work date or the day after; attaching changes `evidence_version` (so earlier drafts go
+   stale) and is audited as `EVIDENCE_ATTACHED`. A note imported before its exception exists is attached when
+   detection raises it. The demo seed imports four notes, each stating a time, one per late-arrival, spread-over,
+   overlap and forgotten-punch case. Details: `backend/docs/IMPORT_DETECTION.md`.
+   While building this I made the window too wide first (7 days), saw Friday's note attach to Tuesday's exception in
+   the seed output, and tightened it to two days. A note has no date of its own, so please keep in mind that it may
+   still be about the other day inside the window; the model should treat a note's time as a claim, as it does now.
+3. Tests: `test_explain.py` (15), the notes cases in `test_import_detection.py` and `test_import_flow_pg.py`.
+
+**Still to do together:** review contract 0.3.0-draft once you post it. Nothing in the notes or details work
+depends on it.
+
+### Track B reply (2026-11-18, Amulya): verified 090bbdd live; two fixes; your question
+
+Pulled 090bbdd: 585 tests pass on PostgreSQL (none skipped), CI green. With your notes in the demo week,
+I ran every exception through the Docker stack with live Qwen2.5-7B. The demo story now works end to end:
+approve Tuesday's missing punch, then Friday's late arrival becomes eligible (it escalated before,
+because Tuesday's hours were unknown), and approving it moves the clock-in to the stated 09:05.
+
+**Two bugs found by the live run, both fixed:**
+1. *Track B:* the model saw PostgreSQL's UTC timestamps (`09:25+00:00`), copied that offset as told,
+   and wrote the stated 09:05 as `09:05+00:00` (14:35 IST), so every adjustment was blocked. The case
+   JSON now shows the employee's local time (`_localised` in `app/ai/pipeline.py`).
+2. *Track A (`store.decide`):* approving an `adjust_punch` returned 500. Approval built the corrected
+   timecard by adding every action as a new punch, which crashed on the empty `punch_type`, and would
+   have double-counted the hours written to `day_totals`. Approval and the timecard read now share
+   `apply_actions` (add adds, adjust moves). Test: `test_approving_an_adjustment_applies_it_once` on
+   SQLite and PostgreSQL; it fails on the old code.
+
+Also on Track B: the pre-model gate now ignores a stated time that *equals* a recorded punch. Your
+overlap note "my real shift was 9:00 to 6:00 pm" restates the existing punches, so the double tap now
+escalates cleanly (voiding the duplicate needs 0.3.0's `target_punch_ids`).
+
+**Your question: should an unscheduled shift be a deviation?** Keep `insufficient_evidence` by default,
+as you have it. KA-9 and US-6 define deviations against a schedule, and with no schedule we cannot tell a
+missing import from a real unscheduled shift. Proposal for 0.3.0: a trusted "roster final" signal per
+employee and date (written by the shift import, like `evidence_final` for punches). With the roster final,
+no shift and recorded work, it becomes a SCHEDULE_DEVIATION violation ("unscheduled shift", warning).
+The fix is `acknowledge` with a manager reason, never an invented schedule, so the AI only explains and
+escalates it.
+
+**Two points for you:**
+- *Spread-over demo:* the evidenced fix (06:30) cures the spread, but the day still has 10 h worked
+  against a 9 h daily limit, so OVERTIME_RISK blocks it. Should your "evidenced fix that only leaves a
+  warning → manager review" rule cover warning-severity OVERTIME_RISK as well as SCHEDULE_DEVIATION?
+  The overtime was really worked and must be paid, so escalating seems right to me.
+- *Timecard display:* `GET /exceptions/{id}/timecard` returns raw punches in UTC next to corrections
+  in local time (`03:55` beside `09:05`). Same instants, but the frontend should get one zone; the
+  employee's local zone would match the rest of the API.
+
+### Decisions settled (2026-11-18, Amulya, implemented by Track B at the owner's request)
+
+1. **Unscheduled shift:** stays `insufficient_evidence` (no change). It becomes a SCHEDULE_DEVIATION
+   warning only once a trusted "roster final" signal exists; that is part of contract 0.3.0.
+2. **Warnings left after an evidenced fix go to the manager.** `_warning_needs_review` in
+   `app/rules/validator.py` now covers OVERTIME_RISK as well as SCHEDULE_DEVIATION, and any number of
+   them, as long as every remaining failure is a warning-severity violation and every action carries
+   evidence. Any problem-severity failure still blocks. Escalation never approves: approval still
+   re-validates and refuses it. Live demo: the spread-over fix to the stated 06:30 (10 h worked, late
+   start) now escalates for review instead of blocking. Tests: `test_evidenced_fix_leaving_several_warnings_is_reviewable`,
+   `test_a_problem_remainder_still_blocks_even_with_warnings`, and your
+   `test_evidenced_fix_that_creates_overtime_goes_to_the_manager` (renamed; it asserted the old answer).
+   Eval case e03 now expects ESCALATED, matching its own description ("needs overtime review").
+3. **Timecard time zone:** `GET /exceptions/{id}/timecard` returns every time (raw punches, effective
+   punches, applied actions) in the employee's zone, and states it in a new `timezone` field.
+   Test: `test_timecard_reports_every_time_in_the_employee_zone`.

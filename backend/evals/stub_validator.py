@@ -23,7 +23,7 @@ from app.core.contracts import (
     ValidationResult,
 )
 
-NAME = "stub-window-v1 (stand-in until A-02)"
+NAME = "stub-window-v1 (stand-in, comparison only)"
 
 
 def window_validator(

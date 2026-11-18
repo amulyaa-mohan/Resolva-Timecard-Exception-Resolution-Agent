@@ -19,6 +19,11 @@ from app.core.contracts import PunchRecord, PunchSource, PunchType, ScheduledShi
 
 MAX_ROWS = 5000
 MAX_BYTES = 2_000_000
+MAX_CELL_CHARS = 4000  # no real field is longer; a note is capped lower, at MAX_NOTE_CHARS
+MAX_BREAK_MIN = 24 * 60  # also keeps the value inside PostgreSQL's 32-bit integer
+# Timestamps outside these years are data-entry errors, and the extremes overflow the timezone
+# arithmetic the rest of the pipeline depends on.
+MIN_YEAR, MAX_YEAR = 2000, 2100
 
 PUNCH_FIELDS = (
     "employee_id",
@@ -31,6 +36,8 @@ PUNCH_FIELDS = (
     "source_event_id",
 )
 SHIFT_FIELDS = ("employee_id", "shift_id", "start", "end", "planned_break_min")
+NOTE_FIELDS = ("employee_id", "text", "submitted_at", "note_id")
+MAX_NOTE_CHARS = 1000  # matches the employee_notes CHECK and the EmployeeNote contract
 
 TYPE_ALIASES = {
     "in": PunchType.IN,
@@ -54,6 +61,16 @@ class ImportFileError(ValueError):
     """The file itself is unreadable (not one bad row)."""
 
 
+class NoteRecord(BaseModel):
+    """An employee's own words about a work day. Untrusted text: it is stored and shown,
+    and only ever read by the model as quoted evidence, never as an instruction."""
+
+    note_id: str
+    employee_id: str
+    text: str
+    submitted_at: datetime
+
+
 class PreviewRow(BaseModel):
     row_number: int = Field(description="1-based data row (CSV header excluded).")
     status: Literal["valid", "invalid", "duplicate"]
@@ -62,10 +79,11 @@ class PreviewRow(BaseModel):
     punch: PunchRecord | None = None
     source_event_id: str | None = Field(default=None, description="Given or derived dedupe id.")
     shift: ScheduledShift | None = None
+    note: NoteRecord | None = None
 
 
 class ImportPreview(BaseModel):
-    kind: Literal["punches", "shifts"]
+    kind: Literal["punches", "shifts", "notes"]
     rows: list[PreviewRow]
     valid: int
     invalid: int
@@ -73,18 +91,30 @@ class ImportPreview(BaseModel):
 
 
 def read_rows(content: str, fmt: Literal["csv", "json"]) -> list[dict[str, str]]:
+    """Parse untrusted text into rows. Every way the text can be malformed, including ways the
+    standard library reports as an unrelated exception type, becomes an ImportFileError."""
     if len(content.encode()) > MAX_BYTES:
         raise ImportFileError(f"file larger than {MAX_BYTES} bytes")
+    if "\x00" in content:
+        # PostgreSQL text cannot hold a NUL byte, so it would fail later, at insert time.
+        raise ImportFileError("file contains a NUL byte")
     if fmt == "csv":
-        reader = csv.DictReader(io.StringIO(content.lstrip("﻿")))
-        if not reader.fieldnames:
-            raise ImportFileError("CSV has no header row")
-        rows = list(reader)
+        try:
+            reader = csv.DictReader(io.StringIO(content.lstrip("\ufeff")))
+            if not reader.fieldnames:
+                raise ImportFileError("CSV has no header row")
+            rows = list(reader)
+        except csv.Error as exc:
+            raise ImportFileError(f"invalid CSV: {exc}") from exc
     else:
         try:
             data = json.loads(content)
         except json.JSONDecodeError as exc:
             raise ImportFileError(f"invalid JSON: {exc.msg}") from exc
+        except RecursionError as exc:
+            raise ImportFileError("JSON is nested too deeply") from exc
+        except ValueError as exc:  # e.g. an integer with thousands of digits
+            raise ImportFileError("JSON contains a number that is too large") from exc
         if isinstance(data, dict) and isinstance(data.get("rows"), list):
             data = data["rows"]
         if not isinstance(data, list) or not all(isinstance(r, dict) for r in data):
@@ -92,21 +122,36 @@ def read_rows(content: str, fmt: Literal["csv", "json"]) -> list[dict[str, str]]
         rows = data
     if len(rows) > MAX_ROWS:
         raise ImportFileError(f"more than {MAX_ROWS} rows")
-    return [
+    cleaned = [
         {str(k).strip(): "" if v is None else str(v).strip() for k, v in row.items() if k}
         for row in rows
     ]
+    # JSON can spell a NUL as an escape, which only exists after decoding.
+    if any("\x00" in k or "\x00" in v for row in cleaned for k, v in row.items()):
+        raise ImportFileError("file contains a NUL byte")
+    if any(len(v) > MAX_CELL_CHARS for row in cleaned for v in row.values()):
+        raise ImportFileError(f"a cell is longer than {MAX_CELL_CHARS} characters")
+    return cleaned
 
 
 def _instant(value: str, zone: ZoneInfo) -> datetime:
     """Aware instant. Naive local times use the employee's zone; DST gaps/overlaps refused."""
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if not MIN_YEAR <= parsed.year <= MAX_YEAR:
+        raise ValueError(f"timestamp year must be between {MIN_YEAR} and {MAX_YEAR}")
     if parsed.tzinfo is not None:
         return parsed
     first, second = parsed.replace(tzinfo=zone, fold=0), parsed.replace(tzinfo=zone, fold=1)
     if first.utcoffset() != second.utcoffset():
         raise ValueError(f"local time {value} is ambiguous or does not exist (DST change)")
     return first
+
+
+def _break_minutes(value: str) -> int:
+    minutes = int(value or 0)
+    if not 0 <= minutes <= MAX_BREAK_MIN:
+        raise ValueError(f"planned_break_min must be between 0 and {MAX_BREAK_MIN}")
+    return minutes
 
 
 def _digest(*parts: str) -> str:
@@ -171,7 +216,16 @@ def preview_punches(
             )
             continue
         if (source.value, event_id) in existing_keys:
-            out.append(PreviewRow(row_number=number, status="duplicate", error="already imported"))
+            # Keep the record: a retry after a failed detection must still re-check its date.
+            out.append(
+                PreviewRow(
+                    row_number=number,
+                    status="duplicate",
+                    error="already imported",
+                    punch=punch,
+                    source_event_id=event_id,
+                )
+            )
             continue
         for key in keys:
             seen[key] = number
@@ -208,7 +262,7 @@ def preview_shifts(
                 employee_id=employee,
                 start=start,
                 end=end,
-                planned_break_min=int(get("planned_break_min") or 0),
+                planned_break_min=_break_minutes(get("planned_break_min")),
             )
         except ValueError as exc:
             out.append(PreviewRow(row_number=number, status="invalid", error=str(exc)))
@@ -229,6 +283,67 @@ def preview_shifts(
     return _summary("shifts", out)
 
 
+def preview_notes(
+    rows: list[dict[str, str]],
+    *,
+    employee_timezones: dict[str, str],
+    mapping: dict[str, str] | None = None,
+    existing_ids: frozenset[str] = frozenset(),
+) -> ImportPreview:
+    """Employee notes. The id is derived from the employee and content, so re-importing the same
+    file is a no-op, and one employee's id can never collide with another employee's note."""
+    mapping = mapping or {}
+    seen: dict[str, int] = {}
+    out: list[PreviewRow] = []
+    for number, row in enumerate(rows, 1):
+
+        def get(field: str, row=row) -> str:
+            return row.get(mapping.get(field, field), "")
+
+        try:
+            employee = get("employee_id")
+            if employee not in employee_timezones:
+                raise ValueError("unknown employee, or not assigned to you")
+            text = get("text")
+            if not text:
+                raise ValueError("note text is required")
+            if len(text) > MAX_NOTE_CHARS:
+                raise ValueError(f"note is longer than {MAX_NOTE_CHARS} characters")
+            if not get("submitted_at"):
+                raise ValueError("submitted_at is required")
+            submitted = _instant(get("submitted_at"), ZoneInfo(employee_timezones[employee]))
+            key = get("note_id") or submitted.astimezone(ZoneInfo("UTC")).isoformat() + "|" + text
+            note = NoteRecord(
+                note_id="NI-" + _digest(employee, key),
+                employee_id=employee,
+                text=text,
+                submitted_at=submitted,
+            )
+        except ValueError as exc:
+            out.append(PreviewRow(row_number=number, status="invalid", error=str(exc)))
+            continue
+        if note.note_id in seen:
+            out.append(
+                PreviewRow(
+                    row_number=number,
+                    status="duplicate",
+                    duplicate_of=seen[note.note_id],
+                    error="same note earlier in this file",
+                )
+            )
+            continue
+        if note.note_id in existing_ids:
+            out.append(
+                PreviewRow(
+                    row_number=number, status="duplicate", error="already imported", note=note
+                )
+            )
+            continue
+        seen[note.note_id] = number
+        out.append(PreviewRow(row_number=number, status="valid", note=note))
+    return _summary("notes", out)
+
+
 def _summary(kind, rows: list[PreviewRow]) -> ImportPreview:
     count = {s: sum(r.status == s for r in rows) for s in ("valid", "invalid", "duplicate")}
     return ImportPreview(
@@ -241,12 +356,18 @@ def _summary(kind, rows: list[PreviewRow]) -> ImportPreview:
 
 
 def local_dates(preview: ImportPreview, employee_timezones: dict[str, str]) -> dict[str, set[date]]:
-    """Employee -> local dates touched by valid rows (detection must re-run for these)."""
+    """Employee -> local dates whose detection must re-run.
+
+    Rows already in the database count too: the import commits before detection runs, so if
+    detection failed the first time, a retry sees every row as already imported and would
+    otherwise never re-check those dates. Re-detecting is idempotent, so the cost is only time.
+    """
     touched: dict[str, set[date]] = {}
     for row in preview.rows:
         record = row.punch or row.shift
-        if row.status != "valid" or record is None:
-            continue
+        counts = row.status == "valid" or (row.status == "duplicate" and record is not None)
+        if not counts or record is None:
+            continue  # notes do not change which rules fire, so they touch no dates
         zone = ZoneInfo(employee_timezones[record.employee_id])
         at = record.ts if row.punch else record.start
         touched.setdefault(record.employee_id, set()).add(at.astimezone(zone).date())

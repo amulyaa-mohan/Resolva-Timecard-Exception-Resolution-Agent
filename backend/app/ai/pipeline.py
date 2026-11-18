@@ -18,7 +18,14 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from app.ai.evidence import anchor_times, local_zone, missing_evidence
+from app.ai.evidence import (
+    STATED_TIME_CODES,
+    WORK_PUNCHES,
+    anchor_times,
+    local_zone,
+    missing_evidence,
+    stated_times,
+)
 from app.ai.providers.base import (
     ChatMessage,
     LLMProvider,
@@ -45,7 +52,7 @@ from app.retrieval.hybrid import RetrievedClause, retrieve
 from app.retrieval.vector import Embedder, build_embedder
 
 # v1: case JSON + clauses. v2 adds a trusted <facts> block (local times with dates); see evals.
-DEFAULT_PROMPT_VERSION = "propose_v2"
+DEFAULT_PROMPT_VERSION = "propose_v3"
 
 
 # ---------------------------------------------------------------------------- prompt
@@ -90,12 +97,106 @@ def case_facts(case: CaseContext, policy: PolicySnapshot | None) -> str:
                 lines.append(f"Scheduled clock-in to infer from: {local(case.schedule.start)}")
         else:
             lines.append("Missing punch type: unclear (punches already pair up)")
-    if policy is not None:
+    if policy is not None and case.code.value == "MISSING_PUNCH":
         lines.append(
             f"Inference window: within {policy.rules.missing_punch_window_min} minutes of the "
             "scheduled time"
         )
+    if case.code in STATED_TIME_CODES:
+        lines += _adjustment_facts(case, policy, local)
     return "\n".join(lines)
+
+
+def _minutes(delta) -> int:
+    return round(delta.total_seconds() / 60)
+
+
+def _adjustment_facts(case: CaseContext, policy: PolicySnapshot | None, local) -> list[str]:
+    """Facts for codes fixed only by moving a recorded punch to a stated time (step 2)."""
+    lines = []
+    stated = stated_times(case)
+    lines.append(
+        "Times stated in employee notes (claims, not proof): "
+        + (", ".join(f"{h:02d}:{m:02d} (note {nid})" for nid, h, m in stated) or "none")
+    )
+    work = sorted((p for p in case.punches if p.type in WORK_PUNCHES), key=lambda p: p.ts)
+    ins = [p for p in work if p.type.value == "in"]
+    outs = [p for p in work if p.type.value == "out"]
+    tolerance = policy.rules.late_tolerance_min if policy else None
+    if case.code.value == "SCHEDULE_DEVIATION" and case.schedule:
+        if ins:
+            late = _minutes(ins[0].ts - case.schedule.start)
+            lines.append(
+                f"First clock-in {ins[0].punch_id} is {abs(late)} min "
+                f"{'after' if late >= 0 else 'before'} the scheduled start"
+                + (f" (tolerance {tolerance} min)" if tolerance is not None else "")
+            )
+        if outs:
+            off = _minutes(outs[-1].ts - case.schedule.end)
+            lines.append(
+                f"Last clock-out {outs[-1].punch_id} is {abs(off)} min "
+                f"{'after' if off >= 0 else 'before'} the scheduled end"
+            )
+    if case.code.value == "SPREAD_OVER_BREACH" and ins and outs:
+        spread = _minutes(outs[-1].ts - ins[0].ts)
+        limit = policy.rules.max_spread_hours if policy else None
+        lines.append(
+            f"Spread from first clock-in {ins[0].punch_id} to last clock-out {outs[-1].punch_id}: "
+            f"{spread // 60} h {spread % 60} min" + (f" (limit {limit:g} h)" if limit else "")
+        )
+    if case.code.value == "OVERLAPPING_SHIFT":
+        # FIFO pairing, as Track A's engine pairs work punches.
+        sessions, pending = [], []
+        for p in work:
+            if p.type.value == "in":
+                pending.append(p)
+            elif pending:
+                sessions.append((pending.pop(0), p))
+        for i, (a_in, a_out) in enumerate(sessions):
+            for b_in, b_out in sessions[i + 1 :]:
+                overlap = _minutes(min(a_out.ts, b_out.ts) - max(a_in.ts, b_in.ts))
+                if overlap > 0:
+                    lines.append(
+                        f"Session {a_in.punch_id}-{a_out.punch_id} overlaps session "
+                        f"{b_in.punch_id}-{b_out.punch_id} by {overlap} min"
+                    )
+    if policy is not None:
+        lines.append(
+            "Allowed fix: adjust_punch on one recorded punch (punch_id) to a time the employee "
+            f"stated, moving it at most {policy.rules.missing_punch_window_min} min. Round only so "
+            "no paid time is added: a clock-in at or after the stated time, a clock-out at or "
+            f"before it, within {policy.rules.evidence_tolerance_min} min. Never move a punch to "
+            "the scheduled time unless the employee stated that time. If no stated time describes "
+            "a punching error, escalate."
+        )
+    return lines
+
+
+def _localised(case: CaseContext) -> CaseContext:
+    """The case with every timestamp in the employee's local time zone.
+
+    Found in the live demo on PostgreSQL (2026-11-18): the database returns UTC, so the model
+    saw 09:25+00:00, copied that offset as instructed, and wrote the stated 09:05 as 09:05+00:00
+    (14:35 local), which the time-evidence gate rightly refused. Same instants, local offsets.
+    """
+    zone = local_zone(case)
+
+    def local(ts):
+        return ts.astimezone(zone) if ts is not None else None
+
+    def punches(items):
+        return [p.model_copy(update={"ts": local(p.ts)}) for p in items]
+
+    update = {
+        "punches": punches(case.punches),
+        "punch_history": punches(case.punch_history),
+        "as_of": local(case.as_of),
+    }
+    if case.schedule is not None:
+        update["schedule"] = case.schedule.model_copy(
+            update={"start": local(case.schedule.start), "end": local(case.schedule.end)}
+        )
+    return case.model_copy(update=update)
 
 
 def build_messages(
@@ -109,7 +210,7 @@ def build_messages(
     allowed = ", ".join(sorted(a.value for a in ALLOWED_ACTIONS[case.code]))
     system = template.format(allowed_actions=allowed)
 
-    case_data = case.model_dump(mode="json", exclude={"notes"})
+    case_data = _localised(case).model_dump(mode="json", exclude={"notes"})
     clauses = [
         {
             "chunk_id": r.clause.chunk_id,
@@ -162,6 +263,33 @@ def _strip_code_fence(text: str) -> str:
 def _quote_is_verbatim(quote: str, clause_text: str) -> bool:
     normalised = _normalise(quote)
     return len(normalised.split()) >= MIN_QUOTE_WORDS and normalised in _normalise(clause_text)
+
+
+def canonical_citation_ids(
+    proposal: LLMProposal, clauses_by_id: dict, policy: PolicySnapshot
+) -> tuple[LLMProposal, list[str]]:
+    """Repair a mangled chunk_id that unambiguously names a retrieved, active-version clause.
+
+    Found in the step 2 live eval: Qwen2.5-7B cited KA-11 as "IN-KA@2025.1#KA-2025.1#KA-11" in 9 of
+    10 runs while its decision and verbatim quote were right. Repair only when the id starts with
+    the active "<pack>@<version>#" and its last "#" segment is the clause id of exactly one
+    retrieved clause. Anything else (unknown clause, proposed version, other pack) is left as
+    cited, so the citation gates still block it; the quote must still be verbatim from the clause.
+    """
+    prefix = f"{policy.pack_id}@{policy.version}#"
+    repaired: list[str] = []
+    citations = []
+    for c in proposal.citations:
+        if c.chunk_id not in clauses_by_id and c.chunk_id.startswith(prefix):
+            tail = c.chunk_id.rsplit("#", 1)[-1]
+            matches = [cid for cid, clause in clauses_by_id.items() if clause.clause_id == tail]
+            if len(matches) == 1:
+                repaired.append(f"{c.chunk_id} -> {matches[0]}")
+                c = c.model_copy(update={"chunk_id": matches[0]})
+        citations.append(c)
+    if repaired:
+        proposal = proposal.model_copy(update={"citations": citations})
+    return proposal, repaired
 
 
 def call_with_deadline(provider: LLMProvider, request: ProviderRequest) -> ProviderResponse:
@@ -343,6 +471,10 @@ def generate_proposal(
     ):
         blocked.append("Proposal refers to a different exception.")
 
+    proposal, repaired = canonical_citation_ids(proposal, clauses_by_id, policy)
+    if repaired:  # informational: the trace shows exactly what was normalised
+        run.check("citation_ids_normalised", True, "; ".join(repaired))
+
     if proposal.decision == "escalate":
         # An escalation must never show fabricated citations (found in the live eval: an
         # injected note made the model cite a non-existent clause while escalating).
@@ -403,9 +535,13 @@ def generate_proposal(
         else:
 
             def describe(outcome: RuleOutcome) -> list[str]:
-                return [
-                    f"{c.code.value}: {c.reason}" for c in validation.checks if c.outcome == outcome
-                ]
+                # Group identical reasons (audit 2026-11-18: an unsupported action repeated the
+                # same sentence for all six rules).
+                grouped: dict[str, list[str]] = {}
+                for c in validation.checks:
+                    if c.outcome == outcome:
+                        grouped.setdefault(c.reason, []).append(c.code.value)
+                return [f"{', '.join(codes)}: {reason}" for reason, codes in grouped.items()]
 
             violations = describe(RuleOutcome.VIOLATION)
             undecided = describe(RuleOutcome.INSUFFICIENT_EVIDENCE)

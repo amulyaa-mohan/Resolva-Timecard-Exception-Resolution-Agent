@@ -14,7 +14,7 @@ def test_cases_load_and_cover_every_category():
     cases = load_cases()
     assert len(cases) >= 30
     cats = {c.category for c in cases}
-    assert cats == {"clear", "ambiguous", "adversarial", "jurisdiction", "evidence"}
+    assert cats == {"clear", "ambiguous", "adversarial", "jurisdiction", "evidence", "adjustment"}
     for case in cases:
         build_case_context(case)  # every case is a valid shared-contract CaseContext
 

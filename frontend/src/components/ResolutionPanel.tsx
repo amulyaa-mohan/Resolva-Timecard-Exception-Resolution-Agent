@@ -1,15 +1,156 @@
+
 ﻿import { useEffect, useState } from 'react';
 import { checkEditedTime } from '../lib/api';
 import { ExceptionItem, Role } from '../types/contracts';
-import { PunchTimeline } from './PunchTimeline';
 
-interface ResolutionPanelProps {
+import { useEffect, useState } from 'react';
+import { previewManualEditValidation } from '../lib/api';
+import { ExceptionItem, Role, UILang } from '../types/contracts';
+import { RecordedPunchesCard } from './RecordedPunchesCard';
+
+import { PunchTimeline } from './PunchTimeline';
+import { useTranslation } from '../lib/locale';
+
+export const EXCEPTION_TYPE_TITLES: Record<string, string> = {
+  MISSING_PUNCH: 'Missing clock-out',
+  SPREAD_OVER_BREACH: 'Spread-over limit exceeded',
+  MEAL_BREAK_BREACH: 'Meal break compliance breach',
+  OVERTIME_RISK: 'Overtime limit risk',
+  OVERLAPPING_SHIFT: 'Overlapping shift schedule',
+  SCHEDULE_DEVIATION: 'Schedule deviation',
+};
+
+export function getHumanExceptionTitle(code: string): string {
+  return EXCEPTION_TYPE_TITLES[code] || code.replace(/_/g, ' ');
+}
+
+export type ProposalState =
+  | 'resolved'
+  | 'stale'
+  | 'escalated'
+  | 'blocked'
+  | 'eligible'
+  | 'generating'
+  | 'no_draft';
+
+export interface ProposalStateDetails {
+  state: ProposalState;
+  label: string;
+  badgeClass: string;
+  description: string;
+  canApprove: boolean;
+  approvalDisabledReason?: string;
+}
+
+export function computeProposalState(
+  item: ExceptionItem,
+  aiEnabled: boolean,
+  confidenceThreshold: number,
+  isGenerating: boolean
+): ProposalStateDetails {
+  if (isGenerating) {
+    return {
+      state: 'generating',
+      label: 'Generating AI Draft...',
+      badgeClass: 'badge-generating',
+      description: 'Generating policy-grounded recommendation and running deterministic rule checks.',
+      canApprove: false,
+      approvalDisabledReason: 'Draft generation is currently in progress.',
+    };
+  }
+
+  if (item.status === 'resolved') {
+    return {
+      state: 'resolved',
+      label: `Resolved (${item.resolution?.decision.toUpperCase() ?? 'APPROVED'})`,
+      badgeClass: 'badge-pass',
+      description: `Decided by ${item.resolution?.decided_by ?? 'Manager'} (Trace ${item.resolution?.trace_id ?? 'N/A'}).`,
+      canApprove: false,
+      approvalDisabledReason: 'This exception has already been resolved.',
+    };
+  }
+
+  if (item.stale_warning) {
+    return {
+      state: 'stale',
+      label: 'Stale Proposal (HTTP 409)',
+      badgeClass: 'badge-escalated',
+      description: 'Underlying punch evidence was updated after this draft was generated.',
+      canApprove: false,
+      approvalDisabledReason: 'Approval is blocked by concurrency guard (HTTP 409). Click "Re-check evidence" to refresh.',
+    };
+  }
+
+  if (!aiEnabled) {
+    return {
+      state: 'blocked',
+      label: 'Rules-Only (AI Disabled)',
+      badgeClass: 'badge-neutral',
+      description: 'AI draft generation is disabled via kill-switch. Manual manager resolution required.',
+      canApprove: false,
+      approvalDisabledReason: 'AI is disabled. Please resolve via "Edit Fix" or "Reject".',
+    };
+  }
+
+  if (!item.proposal) {
+    return {
+      state: 'no_draft',
+      label: 'No proposal yet',
+      badgeClass: 'badge-neutral',
+      description: 'No AI proposal has been generated for this exception yet.',
+      canApprove: false,
+      approvalDisabledReason: 'No proposal exists yet. Click "Draft with AI" or use "Edit Fix" to resolve manually.',
+    };
+  }
+
+  const { proposal } = item;
+
+  if (proposal.decision === 'escalate' || item.status === 'escalated') {
+    return {
+      state: 'escalated',
+      label: 'Escalated for Review',
+      badgeClass: 'badge-escalated',
+      description: 'Statutory policy prohibits automated correction. Requires human manager attestation.',
+      canApprove: false,
+      approvalDisabledReason: 'Proposal is escalated for compliance/manager review; cannot be automated.',
+    };
+  }
+
+  if (!proposal.validator_passed || proposal.confidence < confidenceThreshold) {
+    const reason = !proposal.validator_passed
+      ? 'Deterministic validator checks failed.'
+      : `AI confidence (${Math.round(proposal.confidence * 100)}%) is below threshold (${Math.round(confidenceThreshold * 100)}%).`;
+    return {
+      state: 'blocked',
+      label: 'Validation Blocked',
+      badgeClass: 'badge-problem',
+      description: reason,
+      canApprove: false,
+      approvalDisabledReason: reason,
+    };
+  }
+
+  return {
+    state: 'eligible',
+    label: `AI-Ready (${Math.round(proposal.confidence * 100)}%)`,
+    badgeClass: 'badge-ai',
+    description: 'Passed all deterministic rule validations and meets confidence threshold.',
+    canApprove: true,
+  };
+}
+
+export interface ResolutionPanelProps {
   item: ExceptionItem | null;
   role: Role;
+  lang?: UILang;
   aiEnabled: boolean;
+  confidenceThreshold?: number;
+  activeTab?: string;
+  totalEscalations?: number;
   onClose: () => void;
-  onSimulateStale: (itemId: string) => void;
-  onRepropose: (itemId: string) => void;
+  onSimulateStale: (id: string) => void;
+  onRepropose: (id: string) => void;
+  onDraftWithAi?: (id: string) => void;
   onDecide: (
     item: ExceptionItem,
     decision: 'approved' | 'edited' | 'rejected',
@@ -20,22 +161,31 @@ interface ResolutionPanelProps {
 export function ResolutionPanel({
   item,
   role,
+  lang = 'en',
   aiEnabled,
+  confidenceThreshold = 0.75,
+  activeTab = 'inbox',
+  totalEscalations = 0,
   onClose,
   onSimulateStale,
   onRepropose,
+  onDraftWithAi,
   onDecide,
 }: ResolutionPanelProps) {
+  const { tr } = useTranslation();
   const [mode, setMode] = useState<'review' | 'edit' | 'reject'>('review');
   const [editedTime, setEditedTime] = useState('18:00');
   const [rejectReason, setRejectReason] = useState('INSUFFICIENT_EVIDENCE');
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
     setMode('review');
     setComment('');
     setSubmitting(false);
+    setIsGenerating(false);
     const proposedTs = item?.proposal?.actions.find((a) => a.new_ts)?.new_ts;
     setEditedTime(proposedTs ? proposedTs.slice(11, 16) : '18:00');
   }, [item?.id]);
@@ -59,18 +209,62 @@ export function ResolutionPanel({
     return () => window.removeEventListener('keydown', onKey);
   }, [item, role, mode, onClose]);
 
+  const copyToClipboard = (key: string, text: string) => {
+    navigator.clipboard?.writeText(text).then(() => {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2000);
+    });
+  };
+
+  const handleDraftClick = () => {
+    if (!item || isGenerating) return;
+    setIsGenerating(true);
+    setTimeout(() => {
+      setIsGenerating(false);
+      if (onDraftWithAi) {
+        onDraftWithAi(item.id);
+      } else {
+        onRepropose(item.id);
+      }
+    }, 450);
+  };
+
+  const handleRecheckClick = () => {
+    if (!item || isGenerating) return;
+    setIsGenerating(true);
+    setTimeout(() => {
+      setIsGenerating(false);
+      onRepropose(item.id);
+    }, 400);
+  };
+
+  // Empty state handling
   if (!item) {
     return (
-      <aside className="resolution-panel empty-panel" aria-label="Exception detail">
+      <aside className="resolution-panel empty-panel" aria-label={tr("Exception detail")}>
         <div className="empty-state">
-          <h3>Select an exception</h3>
-          <p>Click any row or press <strong>J / K</strong> to inspect evidence, citations, and rule checks.</p>
+          {activeTab === 'escalations' ? (
+            <>
+              <h3>{tr("No Escalation Selected")}</h3>
+              <p className="muted">
+                {totalEscalations === 0
+                  ? tr("There are no active escalations requiring attention in the system.")
+                  : tr("No escalation is currently selected. Adjust filters or pick an escalation from the list.")}
+              </p>
+            </>
+          ) : (
+            <>
+              <h3>{tr("Select an exception")}</h3>
+              <p className="muted">{tr("Click any row or press")} <strong>J / K</strong> {tr("to inspect evidence, citations, and rule checks.")}</p>
+            </>
+          )}
         </div>
       </aside>
     );
   }
 
   const canDecide = role === 'manager' || role === 'admin';
+  const proposalStateInfo = computeProposalState(item, aiEnabled, confidenceThreshold, isGenerating);
   const proposal = aiEnabled ? item.proposal : undefined;
   // Syntax only. Whether a correction is allowed is decided by the backend on submit.
   const editCheck = mode === 'edit' ? checkEditedTime(item, editedTime) : null;
@@ -88,24 +282,33 @@ export function ResolutionPanel({
   };
 
   return (
-    <aside className="resolution-panel" aria-label={`Resolution details for ${item.id}`}>
+    <aside className="resolution-panel" aria-label={`${tr("Exception detail")} · ${item.id}`}>
+      {/* 1. Header with clear human hierarchy and responsive wrapping actions */}
       <div className="panel-header">
-        <div>
+        <div className="panel-header-main">
           <div className="panel-badges">
-            <span className={`badge badge-${item.severity}`}>
-              {item.severity === 'problem' ? 'PROBLEM (Blocks Pay)' : 'WARNING'}
+            <span className={`badge ${proposalStateInfo.badgeClass}`}>
+              {tr(proposalStateInfo.label)}
             </span>
-            <span className="mono badge-neutral">{item.code}</span>
-            <span className="mono badge-neutral">{item.policy_pack_id}</span>
-            <span className="mono badge-neutral">v{item.evidence_version}</span>
+            <span className={`badge badge-${item.severity}`}>
+              {tr(item.severity === 'problem' ? 'PROBLEM (Blocks Pay)' : 'WARNING')}
+            </span>
+            <span className="badge-neutral mono">{item.policy_pack_id}</span>
           </div>
-          <h2>
-            {item.employee_name} <span className="mono muted">({item.employee_id})</span>
-          </h2>
-          <p className="muted small">
-            {item.job} • {item.location} • Work Date: <span className="mono">{item.work_date}</span> ({item.timezone})
-          </p>
+
+          <div className="panel-title-block">
+            <div className="human-exception-type">
+              {tr(getHumanExceptionTitle(item.code))}
+            </div>
+            <h2 className="panel-employee-heading">
+              {item.employee_name} <span className="mono muted" style={{ fontSize: '13px', fontWeight: 400 }}>({item.employee_id})</span>
+            </h2>
+            <div className="panel-meta-line muted small">
+              <span>{tr(item.job)}</span> • <span>{tr(item.location)}</span> • <span>{tr("Work Date:")} <strong className="tnum">{item.work_date}</strong> ({item.timezone})</span>
+            </div>
+          </div>
         </div>
+
         <div style={{ display: 'flex', gap: 6 }}>
           {item.status !== 'resolved' && (
             <>
@@ -126,117 +329,179 @@ export function ResolutionPanel({
                 Re-check evidence
               </button>
             </>
+
+
+        <div className="panel-header-actions">
+          {(!item.proposal || item.status === 'open') && item.status !== 'resolved' && (
+            <button
+              type="button"
+              className="btn-primary small action-btn-visible"
+              disabled={isGenerating || !aiEnabled}
+              onClick={handleDraftClick}
+              title={tr("Draft with AI policy proposal")}
+            >
+              {isGenerating ? tr('Drafting...') : tr('Draft with AI')}
+            </button>
           )}
-          <button type="button" className="btn-ghost" onClick={onClose} aria-label="Close panel (Esc)">
+
+          {item.status !== 'resolved' && (
+            <button
+              type="button"
+              className="btn-secondary small action-btn-visible"
+              disabled={isGenerating}
+              onClick={handleRecheckClick}
+              title={tr("Re-check punch evidence against policy rules")}
+            >
+              {tr("Re-check evidence")}
+            </button>
+          )}
+
+          {item.status !== 'resolved' && !item.stale_warning && (
+            <button
+              type="button"
+              className="btn-secondary small"
+              title={tr("Simulate a new punch arriving while viewing this proposal (HTTP 409 guard)")}
+              onClick={() => onSimulateStale(item.id)}
+            >
+              {tr("Simulate Stale (409)")}
+            </button>
+
+          )}
+
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={onClose}
+            aria-label={tr("Close panel (Esc)")}
+            title={tr("Close panel (Esc)")}
+          >
             ✕
           </button>
         </div>
       </div>
 
+      {/* 2. Proposal / Readiness Status Banners */}
       {item.stale_warning && (
         <div className="banner banner-error" role="alert">
+
           <strong>Stale draft:</strong> the evidence changed after this draft was generated, so approving it would be refused by the server (HTTP 409). Draft again on the latest evidence.{' '}
           <button type="button" className="btn-primary" style={{ marginLeft: 8, padding: '4px 10px' }} onClick={() => onRepropose(item.id)}>
             Draft on latest evidence
           </button>
+
+          <div>
+            <strong>{tr("Stale Proposal Blocked (HTTP 409):")}</strong> {tr("Underlying punch evidence updated to v")}{item.evidence_version + 1} {tr("after this draft was generated. Approval is blocked to prevent race conditions.")}{' '}
+            <button type="button" className="btn-primary small" style={{ marginLeft: 8 }} onClick={handleRecheckClick}>
+              {tr("Re-Propose on Latest Evidence")}
+            </button>
+
         </div>
       )}
 
       {!canDecide && (
         <div className="banner banner-warn" role="alert">
-          <strong>Access Denied for Edits ({role}):</strong> Only an authorized <code>manager</code> can approve, edit, or reject timecard corrections.
+          <strong>{tr("Read-Only Mode")} ({role}):</strong> {tr("Only an authorized")} <code>{tr("manager")}</code> {tr("or admin can approve, edit, or reject timecard exceptions.")}
         </div>
       )}
 
       {item.status === 'resolved' && item.resolution && (
-        <div className="banner banner-success">
-          <strong>Resolved ({item.resolution.decision.toUpperCase()})</strong> by {item.resolution.decided_by} • Trace{' '}
+        <div className="banner banner-success" role="status">
+          <strong>{tr("Resolved")} ({item.resolution.decision.toUpperCase()})</strong> {tr("by")} {item.resolution.decided_by} at {item.resolution.decided_at.slice(0, 16)} • {tr("Trace")}{' '}
           <span className="mono">{item.resolution.trace_id}</span>
           {item.resolution.comment ? ` — "${item.resolution.comment}"` : ''}
         </div>
       )}
 
+      {/* 3. Timeline with non-overlapping break markers, actual range, and timezone */}
       <PunchTimeline item={item} editedTimeHHMM={mode === 'edit' ? editedTime : null} />
 
-      <div className="card-block">
-        <div className="section-label">Observed Facts (Immutable Source Records)</div>
-        <ul className="punch-list">
-          {item.punches.map((p) => (
-            <li key={p.id} className="mono small">
-              <strong>{p.type.toUpperCase()}</strong> — {p.ts} ({p.source} / {p.device_id}) [ID: {p.id}]
-            </li>
-          ))}
-        </ul>
-        {item.employee_note && (
-          <div className="untrusted-note">
-            <span className="untrusted-tag">UNTRUSTED EMPLOYEE NOTE (EVIDENCE ONLY)</span>
+      {/* 4. Observed Facts (Recorded punches card with copyable IDs and language prop) */}
+      <RecordedPunchesCard item={item} lang={lang} />
+
+      {item.employee_note && (
+        <div className="card-block">
+          <div className="untrusted-note" style={{ marginTop: 0 }}>
+            <span className="untrusted-tag">{tr("UNTRUSTED EMPLOYEE NOTE (EVIDENCE ONLY)")}</span>
             <p>"{item.employee_note}"</p>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
+      {/* 5. Before & After Hours Diff Breakdown */}
       <div className="diff-grid">
         <div className="diff-box">
-          <span className="section-label">Before Correction</span>
-          <div className="mono">Regular: {item.before_hours.regular_hours}</div>
-          <div className="mono">Overtime: {item.before_hours.overtime_hours}</div>
-          <div className="small muted">{item.before_hours.pay_status}</div>
+          <span className="section-label">{tr("Before Correction")}</span>
+          <div className="hours-line">{tr("Regular:")} {item.before_hours.regular_hours}</div>
+          <div className="hours-line">{tr("Overtime:")} {item.before_hours.overtime_hours}</div>
+          <div className="small muted">{tr(item.before_hours.pay_status)}</div>
         </div>
         <div className="diff-box diff-after">
-          <span className="section-label">After Proposed Fix</span>
-          <div className="mono">Regular: {item.after_hours?.regular_hours ?? item.before_hours.regular_hours}</div>
-          <div className="mono">Overtime: {item.after_hours?.overtime_hours ?? item.before_hours.overtime_hours}</div>
-          <div className="small">{item.after_hours?.pay_status ?? 'Manual manager resolution required'}</div>
+          <span className="section-label">{tr("After Proposed Fix")}</span>
+          <div className="hours-line">{tr("Regular:")} {item.after_hours?.regular_hours ?? item.before_hours.regular_hours}</div>
+          <div className="hours-line">{tr("Overtime:")} {item.after_hours?.overtime_hours ?? item.before_hours.overtime_hours}</div>
+          <div className="small">{tr(item.after_hours?.pay_status ?? 'Manual manager resolution required')}</div>
         </div>
       </div>
 
+      {/* 6. AI Proposal / No-Draft / Escalation State */}
       {!aiEnabled ? (
         <div className="banner banner-warn">
-          <strong>AI Kill-Switch Active (Rules-Only Mode):</strong> AI proposal generation is disabled. Deterministic detection and manual manager resolution remain active.
+          <strong>{tr("AI Kill-Switch Active (Rules-Only Mode):")}</strong> {tr("AI proposal drafting is disabled. Deterministic detection and manual manager edits remain active.")}
         </div>
-      ) : proposal ? (
+      ) : !proposal ? (
+        <div className="ai-card" style={{ background: '#f8fafc', borderColor: '#e2e8f0' }}>
+          <div className="ai-card-header">
+            <span className="badge-neutral">{tr("NO PROPOSAL YET")}</span>
+          </div>
+          <p className="small muted" style={{ margin: '6px 0' }}>
+            {tr('No automated proposal has been generated for this exception. Click')} <strong>"{tr("Draft with AI")}"</strong> {tr('in the header to evaluate policy rules and infer a recommendation, or use')} <strong>"{tr("Edit Fix")}"</strong> {tr('below to resolve manually.')}
+          </p>
+        </div>
+      ) : (
         <div className="ai-card">
           <div className="ai-card-header">
-            <span className="badge-ai">AI DRAFT</span>
-            <span className="mono small">
-              Confidence: <strong>{Math.round(proposal.confidence * 100)}%</strong> • Model: {proposal.model_id} • Prompt: {proposal.prompt_hash}
-            </span>
+            <span className="badge-ai">{tr("AI DRAFT")}</span>
+            <span className="small tnum">{tr("Confidence:")} <strong>{Math.round(proposal.confidence * 100)}%</strong> • {tr("Model:")} <code className="mono">{proposal.model_id}</code></span>
           </div>
-          <p className="ai-rationale">{proposal.rationale}</p>
+          <p className="ai-rationale">{tr(proposal.rationale)}</p>
+
           {proposal.actions.length > 0 && (
             <div className="proposed-actions">
-              <span className="section-label">Proposed Action</span>
+              <span className="section-label">{tr("Proposed Action")}</span>
               {proposal.actions.map((act, idx) => (
                 <div key={idx} className="action-pill">
                   <code className="mono">{act.type}</code>
                   {act.new_ts && <strong className="mono"> → {act.new_ts}</strong>}
-                  <span>: {act.note}</span>
+                  <span>: {tr(act.note ?? '')}</span>
                 </div>
               ))}
             </div>
           )}
+
           {proposal.missing_information.length > 0 && (
             <div className="escalation-box">
-              <strong>Escalated — Missing Information:</strong>
+              <strong>{tr("Escalated — Missing Information:")}</strong>
               <ul>
                 {proposal.missing_information.map((m, i) => (
-                  <li key={i}>{m}</li>
+                  <li key={i}>{tr(m)}</li>
                 ))}
               </ul>
             </div>
           )}
+
           <div className="citations-block">
-            <span className="section-label">Grounded Policy Citations ({proposal.citations.length})</span>
+            <span className="section-label">{tr("Grounded Policy Citations (")}{proposal.citations.length})</span>
             {proposal.citations.map((c) => (
               <div key={c.chunk_id} className="citation-item">
                 <span className="mono citation-id">{c.chunk_id}</span>
-                <p className="small">"{c.quote}"</p>
+                <p className="small">"{tr(c.quote)}"</p>
               </div>
             ))}
           </div>
         </div>
-      ) : null}
+      )}
 
+      {/* 7. Deterministic Validator Checklist */}
       {activeRuleOutcomes.length > 0 && (
         <div className="card-block">
           <div className="section-label">
@@ -263,76 +528,208 @@ export function ResolutionPanel({
                 </span>
                 <span className="mono rule-code">{r.rule}</span>
                 <span className="small">{r.detail}</span>
+
+          <div className="section-label">{tr("Deterministic Rules Validator (")}{activeRuleOutcomes.filter((r) => r.passed).length}/{activeRuleOutcomes.length}{" " + tr("Passed)")}</div>
+          <div className="rules-grid">
+            {activeRuleOutcomes.map((r) => (
+              <div key={r.rule} className={`rule-row ${r.passed ? 'rule-pass' : 'rule-fail'}`}>
+                <span className="rule-icon">{tr(r.passed ? '✓ PASS' : '✕ FAIL')}</span>
+                <span className="rule-code" title={r.rule}>{tr(r.rule)}</span>
+                <span className="small">{tr(r.detail)}</span>
               </div>
             ))}
           </div>
         </div>
       )}
 
+      {/* 8. Expandable Technical Details (IDs, Evidence Hash, Canonical Codes, Versioning) */}
+      <details className="tech-details-box">
+        <summary className="tech-details-summary">
+          <span>{tr("Technical Identifiers & Audit Details")}</span>
+          <span className="mono small muted">{item.id}</span>
+        </summary>
+        <div className="tech-details-body">
+          <div className="tech-grid">
+            <div className="tech-item">
+              <span className="tech-label">{tr("Canonical Code:")}</span>
+              <div className="tech-val-row">
+                <code className="mono">{item.code}</code>
+                <button
+                  type="button"
+                  className="tech-copy-btn"
+                  onClick={() => copyToClipboard('code', item.code)}
+                >
+                  {copiedKey === 'code' ? tr('Copied!') : tr('Copy')}
+                </button>
+              </div>
+            </div>
+
+            <div className="tech-item">
+              <span className="tech-label">{tr("Exception ID:")}</span>
+              <div className="tech-val-row">
+                <code className="mono">{item.id}</code>
+                <button
+                  type="button"
+                  className="tech-copy-btn"
+                  onClick={() => copyToClipboard('id', item.id)}
+                >
+                  {copiedKey === 'id' ? tr('Copied!') : tr('Copy')}
+                </button>
+              </div>
+            </div>
+
+            <div className="tech-item">
+              <span className="tech-label">{tr("Employee ID:")}</span>
+              <div className="tech-val-row">
+                <code className="mono">{item.employee_id}</code>
+                <button
+                  type="button"
+                  className="tech-copy-btn"
+                  onClick={() => copyToClipboard('empid', item.employee_id)}
+                >
+                  {copiedKey === 'empid' ? tr('Copied!') : tr('Copy')}
+                </button>
+              </div>
+            </div>
+
+            <div className="tech-item">
+              <span className="tech-label">{tr("Evidence Version:")}</span>
+              <div className="tech-val-row">
+                <code className="mono">v{item.evidence_version}</code>
+              </div>
+            </div>
+
+            <div className="tech-item">
+              <span className="tech-label">{tr("Policy Pack:")}</span>
+              <div className="tech-val-row">
+                <code className="mono">{item.policy_pack_id}</code>
+              </div>
+            </div>
+
+            {proposal?.prompt_hash && (
+              <div className="tech-item">
+                <span className="tech-label">{tr("Prompt Hash:")}</span>
+                <div className="tech-val-row">
+                  <code className="mono">{proposal.prompt_hash}</code>
+                  <button
+                    type="button"
+                    className="tech-copy-btn"
+                    onClick={() => copyToClipboard('phash', proposal.prompt_hash)}
+                  >
+                    {copiedKey === 'phash' ? tr('Copied!') : tr('Copy')}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {proposal?.model_id && (
+              <div className="tech-item">
+                <span className="tech-label">{tr("Model ID:")}</span>
+                <div className="tech-val-row">
+                  <code className="mono">{proposal.model_id}</code>
+                </div>
+              </div>
+            )}
+
+            {item.resolution?.trace_id && (
+              <div className="tech-item">
+                <span className="tech-label">{tr("Resolution Trace:")}</span>
+                <div className="tech-val-row">
+                  <code className="mono">{item.resolution.trace_id}</code>
+                  <button
+                    type="button"
+                    className="tech-copy-btn"
+                    onClick={() => copyToClipboard('trace', item.resolution!.trace_id)}
+                  >
+                    {copiedKey === 'trace' ? tr('Copied!') : tr('Copy')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </details>
+
+      {/* 9. Interactive Modes: Edit Form, Reject Form, Review Buttons */}
       {mode === 'edit' && (
         <div className="edit-box">
+
           <div className="section-label">Manual Manager Correction (the backend re-validates it on submit)</div>
           <label className="field-label">
             Corrected Out-Punch Time ({item.timezone}):
             <input type="time" value={editedTime} onChange={(e) => setEditedTime(e.target.value)} className="input-field mono" />
+          <div className="section-label">{tr("Manual Manager Correction (Live Validator Re-Check)")}</div>
+          <label className="field-label">{tr("Corrected Out-Punch Time (")}{item.timezone}):
+            <input type="time" value={editedTime} onChange={(e) => setEditedTime(e.target.value)} className="input-field tnum" />
           </label>
           <label className="field-label">
-            Audit Note (optional):
-            <input type="text" placeholder="e.g., Confirmed exit timestamp with security log" value={comment} onChange={(e) => setComment(e.target.value)} className="input-field" />
+            {tr("Audit Note (optional):")}
+            <input type="text" placeholder={tr("e.g., Confirmed exit timestamp with security badge log")} value={comment} onChange={(e) => setComment(e.target.value)} className="input-field" />
           </label>
           {editCheck && !editCheck.valid && (
-            <div className="banner banner-error" role="alert">{editCheck.error}</div>
+            <div className="banner banner-error" role="alert">{tr(editCheck.error ?? '')}</div>
           )}
           <div className="button-row">
             <button type="button" className="btn-primary" disabled={!canDecide || !editCheck?.valid || submitting} onClick={() => handleSubmit('edited', { editedTime, comment })}>
-              Save & Re-Validate Edit
+              {tr("Save & Re-Validate Edit")}
             </button>
-            <button type="button" className="btn-secondary" onClick={() => setMode('review')}>Cancel (Esc)</button>
+            <button type="button" className="btn-secondary" onClick={() => setMode('review')}>
+              {tr("Cancel (Esc)")}
+            </button>
           </div>
         </div>
       )}
 
       {mode === 'reject' && (
         <div className="edit-box">
-          <div className="section-label">Reject Proposal (Reason Code Required)</div>
-          <label className="field-label">
-            Reason Code:
+          <div className="section-label">{tr("Reject Proposal (Reason Code Required)")}</div>
+          <label className="field-label">{tr("Reason Code:")}
             <select value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} className="input-field">
-              <option value="INSUFFICIENT_EVIDENCE">INSUFFICIENT_EVIDENCE — Needs employee confirmation</option>
-              <option value="POLICY_MISMATCH">POLICY_MISMATCH — Incorrect pay/break treatment</option>
-              <option value="UNAUTHORIZED_OT">UNAUTHORIZED_OT — Overtime not pre-approved</option>
-              <option value="TIME_INACCURATE">TIME_INACCURATE — Suggested timestamp disagrees with log</option>
+              <option value="INSUFFICIENT_EVIDENCE">{tr("INSUFFICIENT_EVIDENCE — Needs employee confirmation")}</option>
+              <option value="POLICY_MISMATCH">{tr("POLICY_MISMATCH — Incorrect pay/break treatment")}</option>
+              <option value="UNAUTHORIZED_OT">{tr("UNAUTHORIZED_OT — Overtime not pre-approved")}</option>
+              <option value="TIME_INACCURATE">{tr("TIME_INACCURATE — Suggested timestamp disagrees with log")}</option>
             </select>
           </label>
-          <label className="field-label">
-            Manager Comment:
-            <input type="text" placeholder="Explain why proposal is rejected..." value={comment} onChange={(e) => setComment(e.target.value)} className="input-field" />
+          <label className="field-label">{tr("Manager Comment:")}
+            <input type="text" placeholder={tr("Explain why proposal is rejected...")} value={comment} onChange={(e) => setComment(e.target.value)} className="input-field" />
           </label>
           <div className="button-row">
             <button type="button" className="btn-danger" disabled={!canDecide || submitting} onClick={() => handleSubmit('rejected', { reasonCode: rejectReason, comment })}>
-              Confirm Rejection
+              {tr("Confirm Rejection")}
             </button>
-            <button type="button" className="btn-secondary" onClick={() => setMode('review')}>Cancel (Esc)</button>
+            <button type="button" className="btn-secondary" onClick={() => setMode('review')}>
+              {tr("Cancel (Esc)")}
+            </button>
           </div>
         </div>
       )}
 
       {mode === 'review' && item.status !== 'resolved' && (
-        <div className="panel-footer">
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={!canDecide || Boolean(item.stale_warning) || !proposal || !proposal.validator_passed || proposal.decision === 'escalate' || submitting}
-            onClick={() => handleSubmit('approved', {})}
-          >
-            Approve Proposal (A)
-          </button>
-          <button type="button" className="btn-secondary" disabled={!canDecide} onClick={() => setMode('edit')}>
-            Edit Fix (E)
-          </button>
-          <button type="button" className="btn-danger-outline" disabled={!canDecide} onClick={() => setMode('reject')}>
-            Reject (R)
-          </button>
+        <div className="panel-footer-container">
+          <div className="panel-footer">
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={!canDecide || !proposalStateInfo.canApprove || submitting}
+              onClick={() => handleSubmit('approved', {})}
+              aria-describedby={!proposalStateInfo.canApprove ? 'approval-disabled-reason' : undefined}
+            >
+              {tr("Approve Proposal (A)")}
+            </button>
+            <button type="button" className="btn-secondary" disabled={!canDecide} onClick={() => setMode('edit')}>
+              {tr("Edit Fix (E)")}
+            </button>
+            <button type="button" className="btn-danger-outline" disabled={!canDecide} onClick={() => setMode('reject')}>
+              {tr("Reject (R)")}
+            </button>
+          </div>
+
+          {!proposalStateInfo.canApprove && proposalStateInfo.approvalDisabledReason && (
+            <div id="approval-disabled-reason" className="approval-disabled-note small muted">
+              <span>ⓘ {tr("Approval disabled:")}</span> {tr(proposalStateInfo.approvalDisabledReason)}
+            </div>
+          )}
         </div>
       )}
     </aside>

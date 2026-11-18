@@ -50,7 +50,7 @@
   {
     "id": "e03",
     "category": "evidence",
-    "description": "Completing the shift pushes the projected week past 40 h (US-FED): needs overtime review",
+    "description": "Completing the shift pushes the projected week past 40 h (US-FED): escalated for overtime review",
     "rules_only": true,
     "input": {
       "jurisdiction": "US-FED",
@@ -71,7 +71,7 @@
     },
     "expected": {
       "outcome": "not_eligible",
-      "status": "blocked"
+      "status": "escalated"
     }
   },
   {

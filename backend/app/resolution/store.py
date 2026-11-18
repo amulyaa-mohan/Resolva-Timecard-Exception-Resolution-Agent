@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -31,10 +32,10 @@ from app.core.contracts import (
     ProposalResult,
     ProposedAction,
     PunchRecord,
-    PunchSource,
 )
 from app.policies.registry import PolicyRegistry, PolicyResolutionError
 from app.resolution import totals
+from app.resolution.apply import apply_corrections
 from app.rules.engine import net_worked_hours
 from app.rules.validator import make_validator
 
@@ -184,7 +185,9 @@ class SqliteBackend:
         finally:
             connection.close()
 
-    def load_case(self, connection, exception_id: str, manager_id: str, *, lock: bool):
+    def load_case(
+        self, connection, exception_id: str, manager_id: str, *, lock: bool, raw: bool = False
+    ):
         row = connection.execute(
             "SELECT c.evidence_json, c.correction_revision FROM demo_case_snapshots c "
             "JOIN demo_employee_managers m ON m.employee_id=c.employee_id "
@@ -194,6 +197,14 @@ class SqliteBackend:
         if row is None:
             raise CaseAccessDenied("case unavailable for this manager")
         return CaseContext.model_validate_json(row[0]), row[1]
+
+    def effective_workday(self, connection, case: CaseContext):
+        # The demo stores only exception snapshots, rather than employee punch history.
+        return None
+
+    def still_open(self, connection, exception_id: str) -> bool:
+        """The demo store never dismisses an exception, so it is always live here."""
+        return True
 
     def mark_escalated(self, connection, exception_id: str) -> None:
         """The escalations table is the demo store's only status record."""
@@ -259,6 +270,16 @@ class ResolutionStore:
             for i in exception_ids
         }
 
+    @staticmethod
+    def _approved(connection, exception_id: str) -> bool:
+        return (
+            connection.execute(
+                "SELECT 1 FROM decisions WHERE exception_id=? AND decision='approve'",
+                (exception_id,),
+            ).fetchone()
+            is not None
+        )
+
     def _escalate(self, connection, exception_id: str, reason: str, source: str, now) -> None:
         connection.execute(
             "INSERT INTO escalations VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
@@ -269,40 +290,46 @@ class ResolutionStore:
     def effective_timecard(self, exception_id: str, manager_id: str) -> dict:
         """Raw punches plus approved corrections: what the timecard now says (A-06)."""
         with self._transaction(immediate=False) as connection:
-            case, _ = self._load(connection, exception_id, manager_id)
+            case, _ = self.backend.load_case(
+                connection, exception_id, manager_id, lock=False, raw=True
+            )
             rows = connection.execute(
                 "SELECT c.correction_id, c.actions_json FROM corrections c "
                 "JOIN decisions d ON d.decision_id = c.decision_id "
                 "WHERE c.exception_id = ? AND d.decision = 'approve' ORDER BY c.created_at",
                 (exception_id,),
             ).fetchall()
-        punches = {p.punch_id: p for p in case.punches}
-        applied = []
-        for correction_id, actions_json in rows:
-            parsed = actions_json if isinstance(actions_json, list) else json.loads(actions_json)
-            for index, action in enumerate(parsed):
-                applied.append({"correction_id": correction_id, **action})
-                ts = datetime.fromisoformat(action["new_ts"]) if action.get("new_ts") else None
-                if action["type"] == "add_punch":
-                    key = f"correction:{correction_id}:{index}"
-                    punches[key] = PunchRecord(
-                        punch_id=key,
-                        employee_id=case.employee.employee_id,
-                        ts=ts,
-                        type=action["punch_type"],
-                        source=PunchSource.IMPORT,
-                    )
-                elif action["type"] == "adjust_punch" and action.get("punch_id") in punches:
-                    target = punches[action["punch_id"]]
-                    punches[action["punch_id"]] = target.model_copy(update={"ts": ts})
-        effective = sorted(punches.values(), key=lambda p: p.ts)
+            effective = self.backend.effective_workday(connection, case)
+        parsed = [
+            (cid, actions if isinstance(actions, list) else json.loads(actions))
+            for cid, actions in rows
+        ]
+        applied = [
+            {"correction_id": cid, **action} for cid, actions in parsed for action in actions
+        ]
+        if effective is None:
+            effective = apply_corrections(case.punches, case.employee.employee_id, parsed)
+        # One zone for the whole response (2026-11-18): PostgreSQL returns UTC while approved
+        # actions keep the offset they were submitted with, so a frontend saw 03:55 next to
+        # 09:05 for the same day. Everything is shown in the employee's local time.
+        zone = ZoneInfo(case.employee.timezone)
+
+        def local(punch: PunchRecord) -> PunchRecord:
+            return punch.model_copy(update={"ts": punch.ts.astimezone(zone)})
+
+        for action in applied:
+            if action.get("new_ts"):
+                ts = action["new_ts"]
+                ts = datetime.fromisoformat(ts) if isinstance(ts, str) else ts
+                action["new_ts"] = ts.astimezone(zone).isoformat()
         return {
             "exception_id": exception_id,
             "employee_id": case.employee.employee_id,
             "work_date": case.work_date,
-            "raw_punches": case.punches,
+            "timezone": case.employee.timezone,
+            "raw_punches": [local(p) for p in case.punches],
             "corrections_applied": applied,
-            "effective_punches": effective,
+            "effective_punches": [local(p) for p in effective],
             "net_worked_hours": net_worked_hours(effective),
         }
 
@@ -322,30 +349,47 @@ class ResolutionStore:
         """Draft a correction for an authorized case and persist it with its model trace.
 
         Track B's generate_proposal runs the gates and calls the real validator with trusted
-        totals read inside this transaction. Nothing here approves: an eligible proposal is
-        only a draft a manager may then approve.
+        totals read in the same snapshot as the case, without holding the write lock (audit
+        A2). Nothing here approves: an eligible proposal is only a draft a manager may then
+        approve, and approval re-validates against fresh evidence and totals.
         """
         now = self.clock()
-        with self._transaction() as connection:
-            case, _revision = self._load(connection, exception_id, manager_id, lock=True)
-            if connection.execute(
-                "SELECT 1 FROM decisions WHERE exception_id=? AND decision='approve'",
-                (exception_id,),
-            ).fetchone():
+        # Audit A2: the model call (up to the LLM budget) used to run inside the write
+        # transaction, holding the global write lock, so every proposal, decision and import
+        # queued behind it. Now: (1) a short read, (2) the pipeline with no lock held, (3) a
+        # short write that re-checks the evidence before persisting.
+        with self._transaction(immediate=False) as connection:
+            case, revision = self._load(connection, exception_id, manager_id)
+            if self._approved(connection, exception_id):
                 raise DecisionConflict("exception already resolved")
+            # Refuse before any model call: a dismissed case gets no draft (Codex review).
+            if not self.backend.still_open(connection, exception_id):
+                raise DecisionConflict("exception is no longer open; request a new proposal")
             try:
                 policy = self.registry.resolve(case.employee, case.work_date)
             except PolicyResolutionError:
                 policy = None  # the pipeline escalates without an applicable policy
+            # Trusted totals, read once from the same snapshot as the case.
+            aggregates = totals.load_aggregates(connection, case, policy, now) if policy else None
 
-            def validator(c, actions, p):
-                return make_validator(
-                    lambda inner: totals.load_aggregates(connection, inner, p, now)
-                )(c, actions, p)
+        result = generate_proposal(
+            case,
+            policy,
+            provider=provider,
+            validator=make_validator(lambda _case: aggregates),
+            settings=settings,
+        )
 
-            result = generate_proposal(
-                case, policy, provider=provider, validator=validator, settings=settings
-            )
+        with self._transaction() as connection:
+            current, current_revision = self._load(connection, exception_id, manager_id, lock=True)
+            if self._approved(connection, exception_id):
+                raise DecisionConflict("exception already resolved")
+            if current_revision != revision or current.evidence_version != case.evidence_version:
+                raise DecisionConflict(
+                    "evidence changed while the proposal was drafted; request a new proposal"
+                )
+            if not self.backend.still_open(connection, exception_id):
+                raise DecisionConflict("exception is no longer open; request a new proposal")
             proposal_id = f"PRP-{uuid.uuid4().hex}"
             connection.execute(
                 "INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -366,6 +410,9 @@ class ResolutionStore:
                 ),
             )
             trace = result.trace
+            # Audit A3: the request trace id comes from the client (X-Trace-Id) and repeats
+            # across retries, so it cannot be a primary key on its own.
+            trace_key = f"{trace.trace_id}:{proposal_id}"
             # The trace is immutable audit evidence; the model's own text lives in its own
             # table so a retention job can purge it without touching the trace.
             connection.execute(
@@ -373,7 +420,7 @@ class ResolutionStore:
                 "prompt_version, prompt_hash, retrieved_chunk_ids, attempts, latency_ms, error, "
                 "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    trace.trace_id,
+                    trace_key,
                     proposal_id,
                     trace.provider,
                     trace.model_id,
@@ -389,7 +436,7 @@ class ResolutionStore:
             connection.execute(
                 "INSERT INTO llm_raw_outputs VALUES (?, ?, ?, ?)",
                 (
-                    trace.trace_id,
+                    trace_key,
                     json.dumps(trace.raw_outputs),
                     json.dumps(trace.parse_errors),
                     now.astimezone(UTC).isoformat(),
@@ -417,6 +464,7 @@ class ResolutionStore:
                     "policy": f"{result.policy_pack_id}@{result.policy_version}",
                     "prompt_version": trace.prompt_version,
                     "trace_id": trace.trace_id,
+                    "trace_key": trace_key,
                     "reasons": result.reasons,
                 },
                 occurred_at=now,
@@ -455,6 +503,8 @@ class ResolutionStore:
                 (exception_id,),
             ).fetchone():
                 raise DecisionConflict("exception already resolved")
+            if not self.backend.still_open(connection, exception_id):
+                raise DecisionConflict("exception is no longer open")
             try:
                 policy = self.registry.resolve(case.employee, case.work_date)
             except PolicyResolutionError as exc:
@@ -541,20 +591,15 @@ class ResolutionStore:
                 blocked = ValidationRejected(checks)
             else:
                 new_revision = revision + 1
-                after = build_verified_case(case, correction_revision=new_revision)
-                corrected = [
-                    *case.punches,
-                    *(
-                        PunchRecord(
-                            punch_id=f"correction-{i}",
-                            employee_id=case.employee.employee_id,
-                            ts=a.new_ts,
-                            type=a.punch_type,
-                            source=PunchSource.IMPORT,
-                        )
-                        for i, a in enumerate(request.actions)
-                    ),
-                ]
+                raw_case, _ = self.backend.load_case(
+                    connection, exception_id, manager_id, lock=False, raw=True
+                )
+                after = build_verified_case(raw_case, correction_revision=new_revision)
+                corrected = apply_corrections(
+                    case.punches,
+                    case.employee.employee_id,
+                    [(decision_id, actions)],  # `actions` is the JSON form built above
+                )
                 event = audit.append_event(
                     connection,
                     actor_type="manager",
@@ -601,7 +646,8 @@ class ResolutionStore:
                 # Raw evidence_json is untouched; the revision makes older proposals stale.
                 self.backend.mark_resolved(connection, exception_id, revision, new_revision)
                 # Later days' weekly totals must see the corrected hours.
-                worked = net_worked_hours(corrected)
+                effective = self.backend.effective_workday(connection, case)
+                worked = net_worked_hours(corrected if effective is None else effective)
                 if worked is not None and case.schedule is not None:
                     totals.upsert_day_total(
                         connection,

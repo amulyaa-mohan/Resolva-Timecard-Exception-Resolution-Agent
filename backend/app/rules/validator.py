@@ -33,6 +33,7 @@ from app.rules.engine import (
     blocked_checks,
     evaluate_rules,
     instant,
+    net_worked_hours,
 )
 
 # Trusted backend source of other-day totals, keyed by the case's own identifiers.
@@ -110,7 +111,11 @@ def _within(
     punch_type: PunchType | None = None,
 ) -> bool:
     """Is `ts` supported by one anchor? A stated time (a note) is one-sided."""
-    directional = kind == EvidenceKind.NOTE and punch_type in _NO_EXTRA_PAY
+    # Stated times (notes) and habits (same-weekday history) are one-sided: a habit of 18:00
+    # must not support 18:05, which would add paid time nobody claimed (Codex finding 2).
+    directional = kind in (EvidenceKind.NOTE, EvidenceKind.HISTORY_PUNCH) and (
+        punch_type in _NO_EXTRA_PAY
+    )
     for anchor in anchors:
         offset = (instant(ts) - instant(anchor)).total_seconds()
         if directional:
@@ -159,9 +164,9 @@ def _check_add(case, action, policy) -> str | None:
 
 def _tolerance_reason(action: ProposedAction, policy: PolicySnapshot) -> str:
     minutes = policy.rules.evidence_tolerance_min
-    if action.evidence_ref.kind == EvidenceKind.NOTE:
+    if action.evidence_ref.kind in (EvidenceKind.NOTE, EvidenceKind.HISTORY_PUNCH):
         return (
-            f"Proposed time is not within {minutes} min of the stated time in the direction "
+            f"Proposed time is not within {minutes} min of the stated or habitual time in the direction "
             "that adds no unclaimed paid time."
         )
     return f"Proposed time is more than {minutes} min from the evidence it cites."
@@ -224,7 +229,11 @@ def _validate(
             if action.type not in SUPPORTED:
                 # acknowledge / add_break / void_shift / flag_premium / schedule swap need
                 # agreed semantics (contract) before they can be validated; never guessed.
-                return _reject(f"{action.type.value} corrections are not supported yet.")
+                # Audit A4: cannot be judged yet, which is not the same as wrong: escalate.
+                return _reject(
+                    f"{action.type.value} corrections are not supported yet; manager review.",
+                    RuleOutcome.INSUFFICIENT_EVIDENCE,
+                )
         targets = [a.punch_id for a in parsed if a.type == ActionType.ADJUST_PUNCH]
         if len(set(targets)) != len(targets):
             return _reject("Two actions target the same punch.")
@@ -280,29 +289,116 @@ def _validate(
         # another violation (e.g. completing a shift that then exceeds weekly hours).
         checks = evaluate_rules(simulated, policy, aggregates)
         checks = _warning_needs_review(checks, parsed)
+        checks = _carry_prior_warnings(checks, before, case, simulated, parsed, policy)
         return ValidationResult(
-            passed=all(c.passed for c in checks), checks=checks, rule_version=RULE_VERSION
+            passed=all(c.passed for c in checks),
+            checks=checks,
+            rule_version=RULE_VERSION,
         )
     except (ValueError, AttributeError, KeyError) as exc:
         return _reject(f"Invalid correction evidence: {exc}", RuleOutcome.INSUFFICIENT_EVIDENCE)
 
 
+def _late_only_revealed(
+    simulated: CaseContext, actions: list[ProposedAction], policy: PolicySnapshot
+) -> bool:
+    """Is the schedule deviation only a late arrival, revealed by an added clock-out?
+
+    Decided 2026-11-18 (late arrival only). A clock-out completes a day with a late clock-in, so
+    the late-arrival warning appears only then. It is carried, and so does not block, only when
+    the correction adds a clock-out, the arrival is late beyond tolerance, and the departure is
+    within tolerance. An early departure, or any other rule, is never carried this way.
+    """
+    if simulated.schedule is None:
+        return False
+    if not any(a.type == ActionType.ADD_PUNCH and a.punch_type == PunchType.OUT for a in actions):
+        return False
+    work = [p for p in simulated.punches if p.type in (PunchType.IN, PunchType.OUT)]
+    ins = [p for p in work if p.type == PunchType.IN]
+    outs = [p for p in work if p.type == PunchType.OUT]
+    if not ins or not outs:
+        return False
+    tolerance = policy.rules.late_tolerance_min * 60
+    late_by = (
+        instant(min(ins, key=lambda p: instant(p.ts)).ts) - instant(simulated.schedule.start)
+    ).total_seconds()
+    early_by = (
+        instant(simulated.schedule.end) - instant(max(outs, key=lambda p: instant(p.ts)).ts)
+    ).total_seconds()
+    return late_by > tolerance and early_by <= tolerance
+
+
+def _carry_prior_warnings(
+    checks: list[RuleCheck],
+    before: list[RuleCheck],
+    original: CaseContext,
+    simulated: CaseContext,
+    actions: list[ProposedAction],
+    policy: PolicySnapshot,
+) -> list[RuleCheck]:
+    """Warnings that this correction does not block (decided 2026-11-18).
+
+    1. A warning already open before the correction, on a rule the correction does not target.
+    2. A late-arrival warning revealed by an added clock-out (see _late_only_revealed).
+
+    Such a check is reported as passing, with a reason saying why, because `passed` must agree
+    with the checks (contract 0.2.0). The warning stays open as its own exception, so nothing is
+    hidden. Problem-severity rules, the target rule, overtime, meal breaks, early departures and
+    any other violation the correction creates still block.
+    """
+    already_open = {c.code for c in before if c.outcome == RuleOutcome.VIOLATION}
+    revealed_late = _late_only_revealed(simulated, actions, policy)
+    carried: dict[ExceptionCode, str] = {}
+    for c in checks:
+        if c.outcome != RuleOutcome.VIOLATION or c.code == original.code:
+            continue
+        if DEFAULT_SEVERITY[c.code] != Severity.WARNING:
+            continue
+        if c.code in already_open:
+            if c.code == ExceptionCode.OVERTIME_RISK:
+                old_hours = net_worked_hours(original.punches)
+                new_hours = net_worked_hours(simulated.punches)
+                # Other-day totals are unchanged, so a day's increase also raises weekly hours.
+                if old_hours is None or new_hours is None or new_hours > old_hours:
+                    continue
+            carried[c.code] = "Already open before this correction"
+        elif c.code == ExceptionCode.SCHEDULE_DEVIATION and revealed_late:
+            carried[c.code] = "Late arrival revealed by the added clock-out, not changed by it"
+    updated = [
+        c.model_copy(
+            update={
+                "passed": True,
+                "outcome": RuleOutcome.PASS,
+                "reason": f"{carried[c.code]}: {c.reason}",
+            }
+        )
+        if c.code in carried
+        else c
+        for c in checks
+    ]
+    return updated
+
+
 def _warning_needs_review(
     checks: list[RuleCheck], actions: list[ProposedAction]
 ) -> list[RuleCheck]:
-    """An evidenced fix whose only remaining failure is a warning goes to the manager.
+    """An evidenced fix whose remaining failures are all warnings goes to the manager.
 
     Agreed with Track B (2026-11-18): the pipeline then ESCALATES instead of BLOCKING, so a
-    manager can approve or acknowledge it. Problem-severity rules keep blocking, and nothing
-    here makes a correction approvable on its own.
+    manager reviews it. Any problem-severity failure keeps blocking, and nothing here makes a
+    correction approvable on its own (approval re-validates and still refuses it).
     """
     failed = [c for c in checks if not c.passed]
+    # OVERTIME_RISK added, and several warnings allowed, 2026-11-18 (agreed Track A/B
+    # question): overtime that was really worked must be paid and reviewed, not used to block
+    # an evidenced fix of another rule. Live demo: a spread-over fixed to the stated 06:30
+    # still had 10 h worked of 9 and a 30-minute late start, both warnings.
     reviewable = {
         code for code, severity in DEFAULT_SEVERITY.items() if severity == Severity.WARNING
-    } & {ExceptionCode.SCHEDULE_DEVIATION}
-    if not all(a.evidence_ref is not None for a in actions) or len(failed) != 1:
+    } & {ExceptionCode.SCHEDULE_DEVIATION, ExceptionCode.OVERTIME_RISK}
+    if not failed or not all(a.evidence_ref is not None for a in actions):
         return checks
-    if failed[0].code not in reviewable or failed[0].outcome != RuleOutcome.VIOLATION:
+    if any(c.code not in reviewable or c.outcome != RuleOutcome.VIOLATION for c in failed):
         return checks
     return [
         RuleCheck(
@@ -311,7 +407,7 @@ def _warning_needs_review(
             reason=f"Fix is evidenced but leaves a warning: manager review. {c.reason}",
             outcome=RuleOutcome.INSUFFICIENT_EVIDENCE,
         )
-        if c is failed[0]
+        if c in failed
         else c
         for c in checks
     ]

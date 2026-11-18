@@ -23,7 +23,14 @@ appends a `PROPOSAL_GENERATED` audit event (actor `ai`). It returns `ProposalRes
 `eligible` (every rule passes; a manager may now approve it), `blocked` (a rule is violated) or
 `escalated` (something cannot be decided). It approves nothing: approval is a separate decision
 that re-validates against fresh evidence, so a proposal can never be rubber-stamped.
-409 when the exception is already resolved; 503 when the model provider is unreachable.
+409 when the exception is already resolved, or when its evidence changed while the proposal was
+being drafted (request a new proposal); 503 when the model provider is unreachable.
+
+The model call runs outside any database transaction (audit A2, 2026-11-18): a short read loads
+the case and the trusted totals, the pipeline runs with no lock held, and a short write
+re-checks the evidence version before storing. Other managers' proposals, decisions and imports
+no longer wait for the model. Stored traces are keyed `<request trace id>:<proposal id>`, so a
+reused `X-Trace-Id` is safe (audit A3).
 
 ### Escalation
 
@@ -90,8 +97,10 @@ or any finished day of the quarter is missing or incomplete. Days from local tod
 
 ## Limits
 
-- Static demo tokens, not an identity provider. PostgreSQL is not yet in Docker or CI (see the Track B request below).
-- Only `add_punch` corrections can pass validation today.
+- Static demo tokens, not an identity provider. PostgreSQL runs in CI (`postgres:15` service) and in Docker (`--profile postgres`).
+- Only `add_punch` and `adjust_punch` corrections can pass validation today. Both are applied by one shared function
+  (`app/resolution/apply.py`) in the timecard view, the approval and detection; an adjustment moves the targeted punch
+  and never adds one.
 - Approval does not require a stored proposal; the server re-validates whatever actions are submitted.
 - The corrected punch is stored as a correction row; detail reads still show raw punches plus the resolved status.
 - Attendance event updates (pushing corrections to an external HCM) are not built.
@@ -108,7 +117,6 @@ Then set `ATTENDANCE_ENABLED=true` and `ATTENDANCE_DATABASE_URL` in `backend/.en
 Tests: `TEST_DATABASE_URL=postgresql://.../resolva_test pytest backend/tests` runs the PostgreSQL variants.
 The database name must end in `_test`, because the fixture drops and recreates its `public` schema.
 
-Requested from Track B (owner of CI and Docker):
-- a `postgres:15` service in `.github/workflows/ci.yml`, plus `pip install -e ".[dev,postgres]"` and `TEST_DATABASE_URL`;
-- a `postgres` service (profile) in `docker-compose.yml`;
-- `psycopg[binary]` pinned in `requirements-dev.lock` if CI should install it.
+Done by Track B (dcccc0c): a `postgres:15` service in CI with `TEST_DATABASE_URL` (the build fails
+if any PostgreSQL test is skipped), a `postgres` profile in `docker-compose.yml`, `psycopg[binary]`
+pinned in `requirements-dev.lock`, and the API image installs the `postgres` extra.

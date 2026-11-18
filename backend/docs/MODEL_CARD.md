@@ -95,9 +95,70 @@ setup as above, prompt v2, plus the B-04 language sets.
   manager saw a partial or "not understood" reply, never a wrong one. "Parity 50%" in the
   report means 2 of 4 paraphrases gave identical results in all three languages.
 
+## Evaluation with Track A's real validator (2026-11-18, commit dcccc0c)
+
+Report: `backend/evals/reports/ollama-qwen2.5-7b-instruct-propose_v2-real-validator.md`, generated
+from a clean checkout of dcccc0c. Same model, embeddings and GPU as above; prompt v2. Proposals are
+validated by Track A's attendance rules (`attendance-rules@0.4-draft` via `make_validator`) with
+complete evidence (observed meal break, trusted weekly/quarterly totals, evaluation time). The
+stand-in window validator judges the same model outputs as a comparison column.
+
+- 45 labelled cases (36 earlier + 9 evidence-gap cases). All six live gates pass: 0 unsafe
+  eligible under either validator, 100% injection resistance, 100% harness block rate (20 cases),
+  no wrong-version leakage, 100% language parity, 100% write refusal.
+- Proposal accuracy 100%, escalation recall and precision 100%, every category 100% (clear,
+  ambiguous, adversarial, jurisdiction, evidence); citation validity 100%; no repair retries;
+  latency p50 4.78 s, p95 5.17 s over 33 model calls.
+- What the real rules add: on the 6 rules-only cases (no or short meal break, totals missing or
+  for the wrong week, work date not certified, weekly overtime) the real rules made 0 of 6
+  eligible; the stand-in would have made 6 of 6 eligible. Missing evidence escalates to the
+  manager (`insufficient_evidence`); broken rules block (`violation`).
+- Live smoke check (`scripts/live_check.py`, now on the real validator): 6/6 as expected, p50
+  5.0 s.
+- Scope: MISSING_PUNCH proposals only; other exception codes are covered by retrieval cases and
+  Track A's rule tests until their correction semantics are agreed.
+
+## Proposals beyond missing punches (2026-11-18, step 2)
+
+Prompt `propose_v3` (now the default) adds stated-time adjustment rules to v2. New eval category
+`adjustment`: 12 cases for SCHEDULE_DEVIATION, SPREAD_OVER_BREACH and OVERLAPPING_SHIFT (5 fixable
+to a time the employee stated, 7 that must escalate: no stated time, a time too far to be a
+punching error, an injected 07:00, a request to hide a spread-over breach, a duplicate session).
+57 cases in total, validated by Track A's real rules. Qwen2.5-7B, same setup as above.
+
+- Full runs (uncommitted tree; the committed report follows the commit): v2 and v3 both pass all
+  six live gates with proposal accuracy 100%, every category 100%, no repair retries; p50 5.95 s
+  (v2) and 6.12 s (v3) on a slower machine state than earlier runs.
+- Five repeats per case: late arrival 5/5 under both prompts; spread-over fix 4/5 (v2, one
+  refusal citing its rule against moving punches on a spread-over breach) vs 5/5 (v3). v3 is the
+  default for that reason.
+- Found live: the model wrote KA-11's id as `IN-KA@2025.1#KA-2025.1#KA-11` in 9 of 10 runs while
+  its decision and quote were right. Such ids are now normalised only when they start with the
+  active pack@version and name exactly one retrieved clause (gate check
+  `citation_ids_normalised`); other unretrieved citations are still blocked.
+
+## Final verification (2026-11-18, merged `main` 34c2506)
+
+Full live evaluation on the merged code, run in a Linux container against Ollama on the GPU
+(Qwen2.5-7B + `nomic-embed-text`, prompt v3, Track A's real validator): all six live gates pass;
+proposal accuracy 100% with every category at 100% (clear, ambiguous, adversarial, jurisdiction,
+evidence, adjustment); 0 unsafe eligible; 0 repair retries; latency p50 4.45 s, p95 5.01 s.
+On the live Docker stack, the demo week (all six exception types, imported and detected) runs
+end to end, and the 49-check HTTP walk-through passes with 0 server errors.
+
+Two defects were found only by running live against PostgreSQL and fixed: UTC timestamps in the
+case JSON (the model copied `+00:00` onto local times) and a prompt-v3 rule that made the model
+avoid the scheduled start for a missing clock-in (c10: v2 6/6, v3 0/6 before the fix, 5/5 after).
+
 ## Known limitations
 
 - Model confidence is self-reported and uncalibrated; it is gated but never sufficient on its own.
 - Results from `MockProvider` show that the harness works, not how good a model is.
 - Measured accuracy, escalation quality and latency come from the B-05 evaluation suite, not from
   this card. Do not quote numbers that are not in `backend/evals/reports/`.
+- Supported AI fixes: `add_punch` (missing punch) and `adjust_punch` to a time the employee stated.
+  Meal-break, overtime and duplicate-session fixes need contract 0.3.0; until then the model's
+  suggestion is shown but the case escalates to the manager.
+- Hindi and Kannada lexicons cover a tested demo command set and have not been reviewed by native
+  speakers. Free-form paraphrases go through the LLM fallback (10/12 correct; misses fail safe).
+- Demo policy packs are simplified models, not legal advice or a compliance certification.

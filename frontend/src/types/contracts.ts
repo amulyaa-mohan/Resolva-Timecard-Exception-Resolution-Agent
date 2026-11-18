@@ -4,7 +4,7 @@
 export type ExceptionStatus = 'open' | 'proposed' | 'escalated' | 'resolved';
 export type DecisionType = 'approved' | 'edited' | 'rejected';
 export type Role = 'employee' | 'manager' | 'payroll_admin' | 'compliance' | 'admin';
-export type UILang = 'en' | 'kn' | 'hi';
+export type UILang = 'en' | 'hi';
 
 export interface PunchEvent {
   id: string;
@@ -13,6 +13,9 @@ export interface PunchEvent {
   type: 'in' | 'out' | 'break_start' | 'break_end';
   source: 'kiosk' | 'mobile' | 'badge' | 'web' | 'import';
   device_id: string;
+
+  source?: 'kiosk' | 'mobile' | 'badge' | 'web' | 'import' | string;
+  device_id?: string;
 }
 
 export interface ScheduleShift {
@@ -133,6 +136,9 @@ export interface AuditEvent {
   before_summary: string;
   after_summary: string;
   ts: string;
+  model_id?: string;
+  evidence_hash?: string;
+  decision_id?: string | null;
 }
 
 export interface PolicyPack {
@@ -160,3 +166,6 @@ export interface ImportRow {
   valid: boolean;
   error?: string;
 }
+
+
+

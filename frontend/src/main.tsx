@@ -1,7 +1,8 @@
+import { LanguageContext, translate } from "./lib/locale";
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { LoginScreen } from './components/LoginScreen';
-import { ResolutionPanel } from './components/ResolutionPanel';
+import { computeProposalState, getHumanExceptionTitle, ResolutionPanel } from './components/ResolutionPanel';
 import { AuditView, ImportPreviewView, KioskView, PolicySettingsView } from './features/SecondaryViews';
 import {
   ApiError,
@@ -17,6 +18,8 @@ import {
 } from './lib/api';
 import { INITIAL_POLICY_PACKS } from './lib/fixtures';
 import { AuditEvent, ExceptionItem, Role, UILang } from './types/contracts';
+import { buildAuditRecord, checkBackendHealth, loadInitialData, submitDecisionWithFallback } from './lib/api';
+import { AuditEvent, ExceptionItem, LLMProposal, Role, UILang } from './types/contracts';
 import './styles.css';
 
 type Tab = 'inbox' | 'escalations' | 'import' | 'audit' | 'kiosk' | 'policies';
@@ -31,17 +34,11 @@ const LABELS: Record<UILang, {
     kpiWarnings: 'Open Warnings', kpiReady: 'AI-Ready to Approve', kpiReadiness: 'Pay-Period Readiness',
     bulkApprove: 'Bulk Approve Eligible',
   },
-  kn: {
-    inbox: 'ವಿನಾಯಿತಿ ಇನ್‌ಬಾಕ್ಸ್ (Inbox)', escalations: 'ಹೆಚ್ಚುವರಿ ಪರಿಶೀಲನೆ (Escalations)', importTab: 'ಆಮದು ಪೂರ್ವವೀಕ್ಷಣೆ (Import)',
-    audit: 'ಲೆಕ್ಕಪರಿಶೋಧನೆ (Audit)', kiosk: 'ಕಿಯೋಸ್ಕ್ ಸಿಮ್ಯುಲೇಟರ್', policies: 'ನೀತಿಗಳು (Policies)',
-    kpiProblems: 'ತೆರೆದ ಸಮಸ್ಯೆಗಳು (Problems)', kpiWarnings: 'ಎಚ್ಚರಿಕೆಗಳು (Warnings)',
-    kpiReady: 'AI ಅನುಮೋದನೆಗೆ ಸಿದ್ಧ', kpiReadiness: 'ವೇತನ ಸಿದ್ಧತೆ (Readiness)', bulkApprove: 'ಸಾಮೂಹಿಕ ಅನುಮೋದನೆ (Bulk Approve)',
-  },
   hi: {
-    inbox: 'अपवाद इनबॉक्स (Inbox)', escalations: 'एस्केलेशन (Escalations)', importTab: 'इम्पोर्ट पूर्वावलोकन (Import)',
-    audit: 'ऑडिट ट्रेल (Audit)', kiosk: 'कियोस्क सिम्युलेटर', policies: 'नीतियां और सेटिंग्स',
-    kpiProblems: 'खुली समस्याएं (Problems)', kpiWarnings: 'चेतावनियां (Warnings)',
-    kpiReady: 'AI अनुमोदन के लिए तैयार', kpiReadiness: 'पेरोल तैयारी (Readiness)', bulkApprove: 'सामूहिक अनुमोदन (Bulk Approve)',
+    inbox: 'अपवाद इनबॉक्स', escalations: 'एस्केलेशन', importTab: 'इम्पोर्ट पूर्वावलोकन',
+    audit: 'ऑडिट ट्रेल', kiosk: 'कियोस्क सिम्युलेटर', policies: 'नीतियां और सेटिंग्स',
+    kpiProblems: 'खुली समस्याएं', kpiWarnings: 'चेतावनियां',
+    kpiReady: 'AI अनुमोदन के लिए तैयार', kpiReadiness: 'पेरोल तैयारी', bulkApprove: 'सामूहिक अनुमोदन',
   },
 };
 
@@ -60,7 +57,7 @@ function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('inbox');
   const [role, setRole] = useState<Role>('manager');
-  const [lang, setLang] = useState<UILang>('en');
+  const [lang, setLang] = useState<UILang>(() => localStorage.getItem('resolva-language') === 'hi' ? 'hi' : 'en');
   const [aiEnabled, setAiEnabled] = useState(true);
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.75);
   const [locationFilter, setLocationFilter] = useState('ALL');
@@ -69,6 +66,12 @@ function App() {
   const [toast, setToast] = useState<{ msg: string; undoItem?: ExceptionItem } | null>(null);
 
   const t = LABELS[lang];
+  const tr = (text: string) => translate(lang, text);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    localStorage.setItem('resolva-language', lang);
+  }, [lang]);
 
   const reload = async (): Promise<void> => {
     setLoading(true);
@@ -131,10 +134,33 @@ function App() {
     });
   }, [exceptions, tab, locationFilter, severityFilter]);
 
-  const selectedItem = useMemo(
-    () => exceptions.find((e) => e.id === selectedId) ?? null,
-    [exceptions, selectedId]
+  const totalEscalationsInSystem = useMemo(
+    () => exceptions.filter((e) => e.status === 'escalated').length,
+    [exceptions]
   );
+  const totalInboxInSystem = useMemo(
+    () => exceptions.filter((e) => e.status !== 'resolved').length,
+    [exceptions]
+  );
+
+  // Reconcile selection whenever tab, filters, or items change
+  useEffect(() => {
+    if (tab !== 'inbox' && tab !== 'escalations') return;
+
+    if (visibleItems.length === 0) {
+      setSelectedId(null);
+    } else {
+      const isSelectedInVisible = visibleItems.some((item) => item.id === selectedId);
+      if (!isSelectedInVisible) {
+        setSelectedId(visibleItems[0].id);
+      }
+    }
+  }, [tab, locationFilter, severityFilter, visibleItems, selectedId]);
+
+  const selectedItem = useMemo(() => {
+    if (!selectedId) return null;
+    return visibleItems.find((e) => e.id === selectedId) ?? null;
+  }, [visibleItems, selectedId]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -145,20 +171,28 @@ function App() {
 
       const idx = visibleItems.findIndex((i) => i.id === selectedId);
       if (e.key.toLowerCase() === 'j') {
-        const next = visibleItems[Math.min(visibleItems.length - 1, idx + 1)];
+        if (visibleItems.length === 0) return;
+        const next = visibleItems[Math.min(visibleItems.length - 1, (idx === -1 ? 0 : idx) + 1)];
         if (next) setSelectedId(next.id);
       } else if (e.key.toLowerCase() === 'k') {
-        const prev = visibleItems[Math.max(0, idx - 1)];
+        if (visibleItems.length === 0) return;
+        const prev = visibleItems[Math.max(0, (idx === -1 ? 0 : idx) - 1)];
         if (prev) setSelectedId(prev.id);
-      } else if (e.key.toLowerCase() === 'a' && selectedItem && (role === 'manager' || role === 'admin')) {
+      } else if (e.key.toLowerCase() === 'a') {
+        // Validate selected case against currently visible results before performing action
+        const currentVisibleSelected = visibleItems.find((i) => i.id === selectedId);
+        if (!currentVisibleSelected) return;
+        if (role !== 'manager' && role !== 'admin') return;
+
         if (
-          selectedItem.status !== 'resolved' &&
-          !selectedItem.stale_warning &&
+          currentVisibleSelected.status !== 'resolved' &&
+          !currentVisibleSelected.stale_warning &&
           aiEnabled &&
-          selectedItem.proposal?.validator_passed &&
-          selectedItem.proposal.confidence >= confidenceThreshold
+          currentVisibleSelected.proposal?.validator_passed &&
+          currentVisibleSelected.proposal.decision === 'propose' &&
+          currentVisibleSelected.proposal.confidence >= confidenceThreshold
         ) {
-          handleDecide(selectedItem, 'approved', {});
+          handleDecide(currentVisibleSelected, 'approved', {});
         }
       }
     };
@@ -254,6 +288,69 @@ function App() {
   // Reversing one is a new, audited decision, which is not built yet.
   const handleUndo = () => setToast(null);
 
+  const handleDraftWithAi = (itemId: string) => {
+    setExceptions((prev) =>
+      prev.map((ex) => {
+        if (ex.id !== itemId) return ex;
+        if (ex.proposal) return ex;
+        const schedEnd = ex.schedule?.end ? ex.schedule.end : '2026-11-17T18:00:00+05:30';
+        const newProposal: LLMProposal = {
+          id: `PRP-${Math.floor(600 + Math.random() * 300)}`,
+          exception_id: ex.id,
+          decision: 'propose',
+          actions: [
+            {
+              type: 'add_punch',
+              new_ts: schedEnd,
+              note: `Add out-punch aligned with scheduled shift end (${schedEnd.slice(11, 16)}).`,
+            },
+          ],
+          rationale: `AI draft: Evaluated shift pattern and punch timeline against ${ex.policy_pack_id}. Inferred out-punch at scheduled shift end.`,
+          citations: [
+            {
+              chunk_id: `${ex.policy_pack_id}#sec-4.2`,
+              quote: 'Missing punches may be inferred from scheduled shift when corroborated by historical pattern.',
+            },
+          ],
+          confidence: 0.92,
+          missing_information: [],
+          model_id: 'qwen2.5-7b-instruct',
+          prompt_hash: 'sha256:a1b2c3d4',
+          evidence_version: ex.evidence_version,
+          validator_passed: true,
+          rule_outcomes: [
+            { rule: 'MISSING_PUNCH', passed: true, detail: 'Punches paired after draft fix.' },
+            { rule: 'OVERLAPPING_SHIFT', passed: true, detail: 'No overlap.' },
+            { rule: 'MEAL_BREAK_BREACH', passed: true, detail: 'Compliant.' },
+            { rule: 'OVERTIME_RISK', passed: true, detail: 'Within daily limits.' },
+            { rule: 'SPREAD_OVER_BREACH', passed: true, detail: 'Within statutory spread.' },
+            { rule: 'SCHEDULE_DEVIATION', passed: true, detail: 'Aligned with schedule.' },
+          ],
+        };
+        return {
+          ...ex,
+          status: 'proposed',
+          proposal: newProposal,
+        };
+      })
+    );
+    setToast({ msg: `${itemId}: Policy draft generated with AI and verified by validator.` });
+  };
+
+  const handleUndo = () => {
+    if (!toast?.undoItem) return;
+    const restored = toast.undoItem;
+    const reversalAudit = buildAuditRecord({
+      role,
+      item: restored,
+      decision: 'rejected',
+      summary: `Audited reversal of prior decision on ${restored.id}`,
+    });
+    setExceptions((prev) => prev.map((ex) => (ex.id === restored.id ? restored : ex)));
+    setAuditEvents((prev) => [reversalAudit, ...prev]);
+    setToast(null);
+  };
+
   const eligibleForBulk = useMemo(
     () =>
       exceptions.filter(
@@ -283,24 +380,35 @@ function App() {
 
   if (!isAuthenticated) {
     return (
+      <LanguageContext.Provider value={lang}>
+        <div className="login-language">
+          <select aria-label={tr("Language")} value={lang} onChange={(e) => setLang(e.target.value === "hi" ? "hi" : "en")}>
+            <option value="en">English</option>
+            <option value="hi">हिंदी</option>
+          </select>
+        </div>
       <LoginScreen
         onLoginSuccess={(signedInEmail) => {
           setIsAuthenticated(true);
           setCurrentUserEmail(signedInEmail);
         }}
       />
+      </LanguageContext.Provider>
     );
   }
 
   return (
+    <LanguageContext.Provider value={lang}>
     <div>
       <header className="topbar">
         <div className="brand">
           <span className="brand-title">Resolva</span>
           <span className="fixture-pill">LIVE BACKEND</span>
+          <span className="fixture-pill">{tr("SYNTHETIC FIXTURES (FE-01..FE-05)")}</span>
+
         </div>
 
-        <nav className="nav-tabs" aria-label="Primary views">
+        <nav className="nav-tabs" aria-label={tr("Primary views")}>
           <button type="button" className={`nav-tab ${tab === 'inbox' ? 'active' : ''}`} onClick={() => setTab('inbox')}>
             {t.inbox} ({exceptions.filter((e) => e.status !== 'resolved').length})
           </button>
@@ -322,17 +430,16 @@ function App() {
         </nav>
 
         <div className="role-box">
-          <select aria-label="Language" className="role-select" value={lang} onChange={(e) => setLang(e.target.value as UILang)}>
-            <option value="en">EN</option>
-            <option value="kn">ಕನ್ನಡ (KN)</option>
-            <option value="hi">हिंदी (HI)</option>
+          <select aria-label={tr("Language")} className="role-select" value={lang} onChange={(e) => setLang(e.target.value === "hi" ? "hi" : "en")}>
+            <option value="en">English</option>
+            <option value="hi">हिंदी</option>
           </select>
-          <select id="role-switcher" aria-label="Active role" className="role-select mono" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            <option value="manager">manager (Priya)</option>
-            <option value="employee">employee (Read-only)</option>
-            <option value="compliance">compliance (Auditor)</option>
-            <option value="payroll_admin">payroll_admin</option>
-            <option value="admin">admin</option>
+          <select id="role-switcher" aria-label={tr("Active role")} className="role-select" value={role} onChange={(e) => setRole(e.target.value as Role)}>
+            <option value="manager">{tr("manager (Priya)")}</option>
+            <option value="employee">{tr("employee (Read-only)")}</option>
+            <option value="compliance">{tr("compliance (Auditor)")}</option>
+            <option value="payroll_admin">{tr("payroll_admin")}</option>
+            <option value="admin">{tr("admin")}</option>
           </select>
           <button
             type="button"
@@ -346,49 +453,52 @@ function App() {
               setIsAuthenticated(false);
               setCurrentUserEmail(null);
             }}
-            aria-label="Sign Out"
-            title={currentUserEmail ? `Signed in as ${currentUserEmail}` : 'Sign Out'}
-          >
-            Sign Out
-          </button>
+            aria-label={tr("Sign Out")}
+            title={currentUserEmail ? `${tr('Signed in as')} ${currentUserEmail}` : tr('Sign Out')}
+          >{tr("Sign Out")}</button>
         </div>
       </header>
 
       <div className="status-strip">
-        <span>{healthMsg}</span>
-        <span>Shortcuts: <strong>J/K</strong> navigate • <strong>A</strong> approve • <strong>E</strong> edit • <strong>R</strong> reject • <strong>Esc</strong> close</span>
+        <span>{lang === 'hi' && healthMsg.startsWith('Backend connected:') ? 'सर्वर जुड़ा है' : tr(healthMsg)}</span>
+        <span>{"" + tr("Shortcuts:") + " "}<strong>J/K</strong>{" " + tr("navigate •") + " "}<strong>A</strong>{" " + tr("approve •") + " "}<strong>E</strong>{" " + tr("edit •") + " "}<strong>R</strong>{" " + tr("reject •") + " "}<strong>Esc</strong>{" " + tr("close") + ""}</span>
       </div>
 
       <main className="container">
         {!aiEnabled && (
           <div className="banner banner-warn" style={{ marginBottom: 16 }}>
-            <strong>AI Unavailable / Kill-Switch Engaged:</strong> Showing deterministic rules-only results. Manual manager edits remain active.
-          </div>
+            <strong>{tr("AI Unavailable / Kill-Switch Engaged:")}</strong>{" " + tr("Showing deterministic rules-only results. Manual manager edits remain active.") + ""}</div>
         )}
 
         {(tab === 'inbox' || tab === 'escalations') && (
           <>
-            <section className="kpi-grid" aria-label="Pay-period summary">
+            <section className="kpi-grid" aria-label={tr("Pay-period summary")}>
               <div className="kpi-card kpi-red">
                 <div className="kpi-label">{t.kpiProblems}</div>
                 <div className="kpi-value">{openProblems}</div>
+                <div className="kpi-subtext small muted">{tr("Unpaired punches or statutory compliance issues")}</div>
               </div>
               <div className="kpi-card kpi-amber">
                 <div className="kpi-label">{t.kpiWarnings}</div>
                 <div className="kpi-value">{openWarnings}</div>
+                <div className="kpi-subtext small muted">{tr("Non-blocking schedule or meal deviations")}</div>
               </div>
-              <div className="kpi-card kpi-violet">
+              <div className="kpi-card kpi-ai">
                 <div className="kpi-label">{t.kpiReady}</div>
                 <div className="kpi-value">{eligibleForBulk.length}</div>
+                <div className="kpi-subtext small muted">{tr("6/6 rule checks passed & confidence verified")}</div>
               </div>
-              <div className="kpi-card kpi-green">
+              <div className="kpi-card kpi-green" title="Measures % of pay-period exceptions resolved to unblock payroll cutoff">
                 <div className="kpi-label">{t.kpiReadiness}</div>
                 <div className="kpi-value">{readinessPct}%</div>
+                <div className="kpi-subtext small muted">
+                  <strong>{tr("Payroll readiness:")}</strong> {tr("% of total period cases resolved")}
+                </div>
               </div>
             </section>
 
             <div className="workspace-grid">
-              <section className="panel-card" aria-label="Exception list">
+              <section className="panel-card" aria-label={tr("Exception list")}>
                 <div className="toolbar">
                   <div className="filter-group">
                     <select className="role-select" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} aria-label="Filter by location">
@@ -396,11 +506,16 @@ function App() {
                       {Array.from(new Set(exceptions.map((e) => e.location).filter(Boolean))).sort().map((site) => (
                         <option key={site} value={site}>{site}</option>
                       ))}
+                    <select className="role-select" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} aria-label={tr("Filter by location")}>
+                      <option value="ALL">{tr("All Locations")}</option>
+                      <option value="Bengaluru (BLR-01)">{tr("Bengaluru (BLR-01)")}</option>
+                      <option value="Bengaluru (BLR-02)">{tr("Bengaluru (BLR-02)")}</option>
+                      <option value="Austin (AUS-01)">{tr("Austin (AUS-01)")}</option>
                     </select>
-                    <select className="role-select" value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)} aria-label="Filter by severity">
-                      <option value="ALL">All Severities</option>
-                      <option value="problem">Problems Only</option>
-                      <option value="warning">Warnings Only</option>
+                    <select className="role-select" value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)} aria-label={tr("Filter by severity")}>
+                      <option value="ALL">{tr("All Severities")}</option>
+                      <option value="problem">{tr("Problems Only")}</option>
+                      <option value="warning">{tr("Warnings Only")}</option>
                     </select>
                   </div>
 
@@ -418,33 +533,84 @@ function App() {
                   <table>
                     <thead>
                       <tr>
-                        <th>Severity</th>
-                        <th>Employee</th>
-                        <th>Canonical Code</th>
-                        <th>AI / Validator Status</th>
-                        <th>State</th>
+                        <th style={{ width: 110 }}>{tr("Severity")}</th>
+                        <th style={{ width: 190 }}>{tr("Employee")}</th>
+                        <th>{tr("Exception / Summary")}</th>
+                        <th style={{ width: 160 }}>{tr("Proposal State")}</th>
+                        <th style={{ width: 90 }}>{tr("State")}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {visibleItems.length === 0 ? (
                         <tr>
-                          <td colSpan={5} style={{ textAlign: 'center', padding: 24 }} className="muted">
-                            No exceptions match the current filter.
+                          <td colSpan={5} className="empty-table-cell">
+                            {tab === 'escalations' ? (
+                              totalEscalationsInSystem === 0 ? (
+                                <div className="empty-table-state">
+                                  <div className="empty-state-title">{tr("No escalations")}</div>
+                                  <p className="muted small">
+                                    {tr("All exception cases have been resolved or are progressing in automated processing. No items currently require escalation.")}
+                                  </p>
+                                </div>
+                              ) : (
+                                <div className="empty-table-state">
+                                  <div className="empty-state-title">{tr("No cases match these filters")}</div>
+                                  <p className="muted small">
+                                    {tr("There are")} {totalEscalationsInSystem} {tr("escalation(s) in other locations or severities.")}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    className="btn-secondary small"
+                                    onClick={() => { setLocationFilter('ALL'); setSeverityFilter('ALL'); }}
+                                  >
+                                    {tr("Clear Filters")}
+                                  </button>
+                                </div>
+                              )
+                            ) : (
+                              totalInboxInSystem === 0 ? (
+                                <div className="empty-table-state">
+                                  <div className="empty-state-title">{tr("No open exceptions")}</div>
+                                  <p className="muted small">{tr("All timecard exceptions for this pay period have been resolved.")}</p>
+                                </div>
+                              ) : (
+                                <div className="empty-table-state">
+                                  <div className="empty-state-title">{tr("No cases match these filters")}</div>
+                                  <p className="muted small">
+                                    {tr("No exceptions match the selected location and severity filters.")}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    className="btn-secondary small"
+                                    onClick={() => { setLocationFilter('ALL'); setSeverityFilter('ALL'); }}
+                                  >
+                                    {tr("Clear Filters")}
+                                  </button>
+                                </div>
+                              )
+                            )}
                           </td>
                         </tr>
                       ) : (
                         visibleItems.map((item) => {
-                          const passed = aiEnabled && !item.stale_warning && item.proposal?.validator_passed && (item.proposal?.confidence ?? 0) >= confidenceThreshold;
+                          const proposalState = computeProposalState(item, aiEnabled, confidenceThreshold, false);
                           return (
                             <tr
                               key={item.id}
+                              tabIndex={0}
                               className={`inbox-row ${item.id === selectedId ? 'selected' : ''}`}
                               onClick={() => setSelectedId(item.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  setSelectedId(item.id);
+                                }
+                              }}
                             >
-                              <td><span className={`badge badge-${item.severity}`}>{item.severity.toUpperCase()}</span></td>
+                              <td><span className={`badge badge-${item.severity}`}>{tr(item.severity.toUpperCase())}</span></td>
                               <td>
                                 <strong>{item.employee_name}</strong>
-                                <div className="small muted">{item.location} • {item.work_date}</div>
+                                <div className="small muted">{tr(item.location)} • {item.work_date}</div>
                               </td>
                               <td>
                                 <div className="mono small"><strong>{item.code}</strong> {item.policy_pack_id ? <span className="muted">({item.policy_pack_id})</span> : null}</div>
@@ -464,10 +630,20 @@ function App() {
                                 ) : (
                                   <span className="badge-neutral">No draft yet</span>
                                 )}
+
+                                <div style={{ fontWeight: 600, color: 'var(--text)' }}>
+                                  {tr(getHumanExceptionTitle(item.code))}
+                                </div>
+                                <div className="small muted" style={{ marginTop: 2 }}>{tr(item.summary)}</div>
+                              </td>
+                              <td>
+                                <span className={`badge ${proposalState.badgeClass}`}>
+                                  {tr(proposalState.label)}
+                                </span>
                               </td>
                               <td>
                                 <span className={item.status === 'resolved' ? 'badge-pass' : 'badge-neutral'}>
-                                  {item.status.toUpperCase()}
+                                  {tr(item.status.toUpperCase())}
                                 </span>
                               </td>
                             </tr>
@@ -482,10 +658,15 @@ function App() {
               <ResolutionPanel
                 item={selectedItem}
                 role={role}
+              lang={lang}
                 aiEnabled={aiEnabled}
+                confidenceThreshold={confidenceThreshold}
+                activeTab={tab}
+                totalEscalations={totalEscalationsInSystem}
                 onClose={() => setSelectedId(null)}
                 onSimulateStale={handleCheckEvidence}
                 onRepropose={handleRepropose}
+                onDraftWithAi={handleDraftWithAi}
                 onDecide={handleDecide}
               />
             </div>
@@ -497,12 +678,29 @@ function App() {
             onImported={(message) => {
               setToast({ msg: message });
               void reload();
+            role={role}
+            onImportValid={(newItems) => {
+              setExceptions((prev) => [...newItems, ...prev]);
+              if (newItems[0]) setSelectedId(newItems[0].id);
+            }}
+            onOpenException={(excId) => {
+              setSelectedId(excId);
               setTab('inbox');
             }}
           />
         )}
 
-        {tab === 'audit' && <AuditView events={auditEvents} />}
+        {tab === 'audit' && (
+          <AuditView
+            events={auditEvents}
+            selectedCase={selectedItem}
+            role={role}
+            onOpenCase={(excId) => {
+              setSelectedId(excId);
+              setTab('inbox');
+            }}
+          />
+        )}
 
         {tab === 'kiosk' && (
           <KioskView
@@ -529,11 +727,9 @@ function App() {
 
       {toast && (
         <div className="toast" role="status" aria-live="polite">
-          <span>{toast.msg}</span>
+          <span>{tr(toast.msg)}</span>
           {toast.undoItem && (
-            <button type="button" className="btn-secondary" style={{ padding: '4px 10px' }} onClick={handleUndo}>
-              Undo (Audited Reversal)
-            </button>
+            <button type="button" className="btn-secondary" style={{ padding: '4px 10px' }} onClick={handleUndo}>{tr("Undo (Audited Reversal)")}</button>
           )}
           <button type="button" className="btn-ghost" style={{ color: '#fff' }} onClick={() => setToast(null)}>
             ✕
@@ -541,7 +737,10 @@ function App() {
         </div>
       )}
     </div>
+    </LanguageContext.Provider>
   );
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
+

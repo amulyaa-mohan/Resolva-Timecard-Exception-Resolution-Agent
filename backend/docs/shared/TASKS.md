@@ -15,7 +15,7 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 | A-01 | DB foundation, synthetic seed, role dependencies | Jayanth | IN PROGRESS | SHARED-01 | Reproducible employee/shift/punch fixture and server-side permission checks |
 | B-01 | App configuration, mock provider, development packaging | Amulya | REVIEW | SHARED-01 (draft) | Verified: clean install, server, offline mock, kill-switch, Docker healthy; startup in LOCAL_DEVELOPMENT.md |
 | A-02 | Missing-punch detection and correction validation | Jayanth | REVIEW | A-01 (built on the demo store; final schema pending) | Verified: valid fix with trusted totals passes; unsupported, unproven or after-as_of fixes blocked; missing evidence escalates |
-| B-02 | One versioned policy pack and proposal pipeline | Amulya | REVIEW | B-01, SHARED-01 (draft) | IN-KA@2025.1 pack; generate_proposal returns eligible/blocked/escalated; real validator pending A-02 |
+| B-02 | One versioned policy pack and proposal pipeline | Amulya | REVIEW | B-01, SHARED-01 (draft) | Step 2 (2026-11-18): adjust_punch proposals for SCHEDULE_DEVIATION, SPREAD_OVER_BREACH, OVERLAPPING_SHIFT (prompt v3 default, 12 adjustment eval cases, live 100%). IN-KA@2025.1 pack; generate_proposal returns eligible/blocked/escalated; real validator pending A-02 |
 | A-03 | Decisions, immutable corrections, audit | Jayanth | REVIEW | A-02 (built on the demo SQLite store ahead of A-01) | Verified: atomic decision+correction+audit, stale 409, one approval, idempotent replay, append-only hash-chained audit; see RESOLUTION_API.md |
 | SHARED-02 | First end-to-end missing-punch integration | Both | REVIEW | A-03, B-02 | Verified on PostgreSQL via HTTP: import -> detect -> POST /proposal (eligible) -> approve -> corrected timecard -> audit; mock provider |
 | A-04 | Remaining five exception rules | Jayanth | REVIEW | SHARED-01 0.2.0-draft | Six checks with outcomes, totals, policy calendar, as_of; add_punch + adjust_punch validated; acknowledge/add_break/void_shift/flag_premium await agreed semantics |
@@ -36,4 +36,4 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 
 ## Current next step
 
-Contract `0.2.0-draft` is adopted by both tracks, and the evals use Track A's real validator with complete evidence and exact outcomes (2026-11-18). Next: freeze SHARED-01 (drop -draft, make `as_of` required, update frontend `contracts.ts`), then SHARED-02.
+Hand-in (2026-11-18): `main` = `backend` at 34c2506, CI green, verified end to end on the Docker stack with live Qwen2.5-7B (see backend/docs/MODEL_CARD.md, "Final verification"). Future work, out of scope for the deadline: contract 0.3.0 (add_break, void_shift, acknowledge, roster final), freezing SHARED-01 and updating frontend `contracts.ts`, and a native-speaker review of the Hindi/Kannada lexicons. Unsupported fix types escalate to the manager meanwhile.

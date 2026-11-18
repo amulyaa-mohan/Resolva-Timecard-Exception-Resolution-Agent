@@ -172,15 +172,24 @@ def test_history_ref(punch, ok, policy):
     assert validator(case, [out_at(18, 5, ref)], policy).passed is ok  # 3 min from 18:08
 
 
-def test_evidenced_late_clock_out_is_referred_to_the_manager(policy):
-    # The note supports 18:10, which is 10 min past the shift end (tolerance 7). The fix is
+def test_evidenced_early_departure_is_referred_to_the_manager(policy):
+    # The note supports 17:50, 10 min before the shift end (tolerance 7). The fix is
     # evidenced and its only remainder is a warning, so it escalates rather than blocking.
-    case = case_with(notes=("I left at 18:10",))
+    case = case_with(notes=("I left at 17:50",))
     ref = EvidenceRef(kind=EvidenceKind.NOTE, id="N-0")
-    result = validator(case, [out_at(18, 10, ref)], policy)
+    result = validator(case, [out_at(17, 50, ref)], policy)
     failed = {c.code: c.outcome for c in result.checks if not c.passed}
     assert not result.passed
     assert failed == {ExceptionCode.SCHEDULE_DEVIATION: RuleOutcome.INSUFFICIENT_EVIDENCE}
+
+
+def test_evidenced_late_clock_out_is_not_a_deviation(policy):
+    # Audit A5: policy KA-9 defines deviations as late arrival / early departure only;
+    # staying 10 min longer is extra time for OVERTIME_RISK, not a schedule deviation.
+    case = case_with(notes=("I left at 18:10",))
+    ref = EvidenceRef(kind=EvidenceKind.NOTE, id="N-0")
+    result = validator(case, [out_at(18, 10, ref)], policy)
+    assert result.passed, [c.reason for c in result.checks if not c.passed]
 
 
 def test_ref_still_bounded_by_inference_window(policy):
@@ -370,14 +379,12 @@ def test_two_adjustments_fix_spread(policy):
     result = validator(case, [adjust("P-0", 6, 25), adjust("P-3", 18, 5)], policy)
     failed = {c.code: c.reason for c in result.checks if not c.passed}
     assert ExceptionCode.SPREAD_OVER_BREACH not in failed  # the targeted rule is fixed
-    # ...but the day still breaks other rules (7 h after the break, 10h40 net, early start),
-    # so the correction cannot be approved as-is.
-    assert not result.passed
-    assert {
-        ExceptionCode.MEAL_BREAK_BREACH,
-        ExceptionCode.OVERTIME_RISK,
-        ExceptionCode.SCHEDULE_DEVIATION,
-    } <= set(failed)
+    # The day still has warnings (7 h after the break, 10h40 net). They were already open and
+    # this correction does not change them, so they no longer block it (decided 2026-11-18).
+    # An early start is not a deviation (audit A5).
+    assert result.passed
+    assert {ExceptionCode.MEAL_BREAK_BREACH, ExceptionCode.OVERTIME_RISK}.isdisjoint(failed)
+    assert ExceptionCode.SCHEDULE_DEVIATION not in failed
 
 
 @pytest.mark.parametrize(
