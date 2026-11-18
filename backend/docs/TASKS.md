@@ -20,3 +20,11 @@ Record new backend-only tasks below; use a unique ID, owner, status, dependencie
 | A-START-01 | C V Jayanth | REVIEW | Draft attendance DTOs, deterministic pairing, missing-punch checks; review before shared API adoption |
 
 | A-INTEGRATE-01 | C V Jayanth | REVIEW | Track B case adapter, evidence hash, repository boundary and assigned-manager authorization |
+
+| A-RULES-02 | C V Jayanth | REVIEW | Six deterministic checks and shared action simulation; incomplete aggregate evidence blocks eligibility |
+
+| A-READ-API-01 | C V Jayanth | REVIEW | Demo authenticated exception reads, persisted assignment filtering and repeatable startup |
+
+| A-RULES-03 | C V Jayanth | REVIEW | Aggregate-aware real validator via existing CorrectionValidator interface; work-date scoping; pipeline integration tests (depends on A-RULES-02) |
+
+| A-RULES-04 | C V Jayanth | REVIEW | Agreed Track B answers: per-run totals reload, recorded totals/period/as-of, internal pass/violation/insufficient_evidence outcomes (depends on A-RULES-03; field wiring waits for contract 0.2.0) |

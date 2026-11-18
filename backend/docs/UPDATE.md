@@ -260,3 +260,50 @@ Never include credentials, private employee data, or invented test results.
 - Caveat: one existing upstream httpx test-client deprecation warning. No live-model evaluation rerun.
 - Publication: user authorized commit/push of Track A work and contract responses to backend; main and other team branches are unchanged.
 - Next step: review/freeze shared decisions, then finish persistence/authentication and deterministic validation.
+
+### 2026-11-18 — C V Jayanth — A-RULES-02 — Six deterministic demo-policy checks
+
+- Branch: backend; status REVIEW for rule module, A-02/A-04 remain IN PROGRESS for complete integration.
+- Changed: rules/engine.py provides six checks; validator.py simulates supported missing-punch actions and reruns that engine, preserving original evidence. Added 33 rule boundary/safety cases and RULE_ENGINE.md.
+- Checks cover work pairing, overlap, observed breaks, daily/projected weekly/quarterly limits, spread and schedule tolerance. Elapsed durations use UTC; invalid/ambiguous evidence fails closed.
+- Contracts: internal AggregateEvidence proposed for trusted complete work-date/week/quarter values. Shared contracts.py untouched; no client or model detection_details used as aggregate authority.
+- Validation: 224 pytest tests passed; Ruff lint passed; 108 files passed format check; all eight offline evaluation gates passed; Git whitespace passed. One existing upstream test-client warning remains. Offline eval still uses its stand-in validator; production-adapter safety is tested separately.
+- Limits: no API/database changes. Actual approval still blocked without trusted aggregate contract. Only exact schedule-anchored missing work punches supported; other actions, live as_of semantics and full schema integration pending.
+- Next step: agree aggregate/evaluation/action contracts with Track B and database team, then wire complete evidence and authorized decision persistence.
+- Publication: local only; not committed or pushed.
+
+### 2026-11-18 — C V Jayanth — A-READ-API-01 — Persisted manager-scoped exception reads
+
+- Branch: backend; status REVIEW; overall A-01 and approval workflow still incomplete.
+- Changed: optional read-only exception list/detail APIs; separate attendance settings; expiring server-provisioned bearer credentials with stored digests; persistent manager assignment checks; synthetic provisioning CLI; API/setup docs.
+- Filters: Track B-compatible exception type, severity, status, IDs, date presets/bounds, pagination and manager-scoped counts. Only open demo snapshots exist; escalation/decision persistence is pending.
+- Shared changes: main.py registers optional attendance repository/router; backend/.env.example adds attendance settings; .gitignore excludes local identity files. Track B modules and shared contracts.py unchanged.
+- Validation: 244 pytest tests passed; Ruff lint passed; 113 files passed formatting; synthetic provisioning plus authenticated list/detail smoke passed. One existing upstream test-client deprecation warning. No live model tests needed.
+- Limits: demo SQLite snapshot store and static expiring credentials, not final migrations/SSO. No approval writes, complete persisted aggregate loader or atomic correction/audit yet. Permissions are checked server-side; request role headers cannot grant access.
+- Next step: team reviews endpoint/aggregate contracts; database adapter and trusted aggregate source must be implemented before approval is enabled.
+- Publication: local only; not committed or pushed.
+
+### 2026-11-18 — C V Jayanth — A-RULES-03 — Real validator wired to the proposal pipeline
+
+- Branch: backend; status REVIEW. A-02/A-04 remain IN PROGRESS. Builds on Codex's uncommitted A-RULES-02/A-READ-API-01 work, which was preserved unchanged except the edits listed here.
+- Changed: validator.py adds make_validator(load_aggregates), which keeps the shared three-argument CorrectionValidator interface. A trusted aggregate source can let a fully evidenced missing-punch fix reach ELIGIBLE. validate_correction is unchanged in behaviour and still fails closed. If the loader raises, returns None or returns the wrong type, the correction is blocked. engine.py blocks contexts that contain a clock-in on another local date, so that time cannot be double-counted.
+- Tests: tests/unit/test_validator_aggregates.py and tests/integration/test_real_validator_pipeline.py cover exact weekly/quarterly boundaries, missing aggregates versus zero, a crashing source, fixes that leave a meal-break violation or create overtime, detection/validation equality, overnight shifts, local-versus-UTC dates, DST fall-back (US-FED), unsupported or ambiguous actions, cross-employee evidence, and eligible/blocked/escalated outcomes through generate_proposal.
+- Validation: 282 pytest passed (1 existing upstream warning); Ruff lint passed; 116 files formatted. Offline eval (`python -m evals.run --gates ci`): all 8 gates PASS, but this uses the STAND-IN validator stub-window-v1, not the real validator. The mock provider proves the harness only, not model quality. No live model run.
+- Unresolved (TRACK_A_CONTRACT_RESPONSE.md, A-RULES-03 section): aggregate delivery, insufficient-evidence outcome versus BLOCKED, time-anchor semantics versus the 5-minute gate, the eval validator swap, week/quarter calendars and as_of.
+- Limits: no production aggregate loader exists yet, so no running route produces ELIGIBLE. Only add_punch for a missing work punch is supported. No approval, persistence or audit.
+- Next step: Amulya answers questions 1-4; then implement a DemoCaseRepository-backed aggregate loader and swap the real validator into evals.
+- Publication: local only; not committed or pushed.
+
+### 2026-11-18 — C V Jayanth — A-RULES-04 — Track B contract answers applied on the Track A side
+
+- Branch: backend; status REVIEW. Amulya's answers to the five A-RULES-03 questions are recorded as agreed in TRACK_A_CONTRACT_RESPONSE.md.
+- Changed: engine.py (now attendance-rules@0.3-draft).
+  - Each check now has an explicit outcome: pass, violation or insufficient_evidence (evaluate_rule_outcomes).
+  - AggregateEvidence carries week_start, quarter_start and an aware as_of. Totals for a different week or quarter, or without a period or as-of time, count as insufficient evidence.
+  - The OVERTIME_RISK reason records the totals, periods and as-of time it used.
+  - make_validator already re-reads totals on every call; a test now proves it.
+- Shared files: no change to contracts.py or Track B modules. One assertion in test_track_a_boundary.py was updated for the new reason wording; the blocking behaviour is unchanged.
+- Validation: 296 pytest passed (1 existing upstream warning); Ruff lint passed; 116 files formatted. Offline eval `--gates ci`: 8/8 PASS on the STAND-IN validator (stub-window-v1), with the mock provider. No live model run.
+- Open: the Indian quarter definition still needs confirming; who authors 0.2.0 still needs Jayanth's confirmation.
+- Next step: publish the backend branch so Amulya can pull it. After 0.2.0, populate the outcome field, add evidence_ref and the tolerance, and add week_start weekday checks and as_of open-shift handling.
+- Publication: local only; not committed or pushed.

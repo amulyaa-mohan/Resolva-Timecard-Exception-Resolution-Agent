@@ -18,7 +18,7 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 | B-02 | One versioned policy pack and proposal pipeline | Amulya | REVIEW | B-01, SHARED-01 (draft) | IN-KA@2025.1 pack; generate_proposal returns eligible/blocked/escalated; real validator pending A-02 |
 | A-03 | Decisions, immutable corrections, audit | Jayanth | TODO | A-02 | Authorized decision creates correction and audit; stale approval rejected |
 | SHARED-02 | First end-to-end missing-punch integration | Both | TODO | A-03, B-02 | Ingest → detect → propose → validate → approve → audit passes |
-| A-04 | Remaining five exception rules | Jayanth | TODO | SHARED-02 | Boundary, overlap, overnight, and timezone tests pass |
+| A-04 | Remaining five exception rules | Jayanth | IN PROGRESS | SHARED-01 aggregate review | Six draft checks tested; aggregate wiring, live evaluation time and action semantics still pending |
 | B-03 | Hybrid retrieval, real provider, evidence gates | Amulya | REVIEW | SHARED-02 (built early against draft contracts and stub validator) | Verified: wrong-version clauses never retrieved and citations blocked; timeout budget enforced; Ollama live check 6/6; Groq tested with mocked HTTP only |
 | A-05 | CSV/JSON import preview and deduplication | Jayanth | TODO | A-04 | Equivalent inputs produce equivalent records and rule outcomes |
 | B-04 | Multilingual intents and AI fallback | Amulya | REVIEW | B-03 | Verified: 14 commands x en/hi/kn parity 100% with AI off (CI gate) and over live HTTP; write requests refused in all languages; LLM fallback 10/12 on paraphrases with Qwen in two runs, misses failed safe |
@@ -32,6 +32,7 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 - Branch migration complete: `main` is default and `cv-jayanth` is removed.
 - Final schemas, policy fixtures, and action-specific validation semantics.
 - Model provider for the first live demonstration.
+- Contract 0.2.0 agreed in substance (2026-11-18; see TRACK_A_CONTRACT_RESPONSE.md, A-RULES-03 answers): RuleCheck.outcome, ProposedAction.evidence_ref, CaseContext.as_of, and the policy fields week_start, quarter_start_month and evidence_tolerance_min. Amulya proposed she authors contracts.py and the pipeline in one commit; Jayanth has not confirmed yet.
 
 ## Current next step
 

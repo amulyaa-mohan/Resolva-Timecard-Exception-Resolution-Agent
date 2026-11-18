@@ -15,3 +15,6 @@ dist/
 work/
 coverage/
 *.egg-info/
+
+# Local demo identity and database provisioning
+backend/local/

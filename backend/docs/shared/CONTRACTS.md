@@ -2,7 +2,7 @@
 
 Status: SHARED-01 draft `0.1.0-draft` exists in `backend/app/core/contracts.py` (proposed by Track B; not yet agreed).
 Open decisions and how Track A plugs in: `backend/docs/shared/TRACK_B_INTEGRATION.md`.
-Running APIs include GET /health and POST /assistant/query (documented below). Attendance/decision endpoints remain pending.
+Running APIs include GET /health, POST /assistant/query, and optional authenticated GET /exceptions and GET /exceptions/{exception_id}. Decision endpoints remain pending.
 
 Before implementing a shared boundary, record:
 - Task ID, proposing owner and affected teams.
@@ -66,3 +66,18 @@ Next decisions: ingestion window/shift assignment, typed ambiguity/escalation re
 
 See TRACK_A_CONTRACT_RESPONSE.md for all ten decisions and additional draft issues.
 Track A adapts core/contracts.py without changing its version. CaseService and the partial validator are implemented; production persistence/authentication remain pending.
+
+## A-RULES-02 — Aggregate evidence proposal
+
+See backend/docs/RULE_ENGINE.md for the internal AggregateEvidence draft, scope and trusted-source requirements.
+All six closed-context checks exist; the three-argument CorrectionValidator remains compatible and fails closed without complete aggregate inputs.
+No shared contracts.py or Track B modules were changed. Agreement is still needed on aggregate provenance, week/quarter boundaries, evaluation time, action targets and richer insufficient-evidence outcomes.
+
+## A-READ-API-01 — Read-only attendance endpoint draft
+
+See backend/docs/ATTENDANCE_API.md for filters, pagination, errors and setup.
+Track A adds a router in app/attendance/router.py and registers it in main.py.
+Manager tokens are server-provisioned and expiring; persisted employee assignments scope reads.
+Query parameter names match Track B ExceptionQuery. Shared core/contracts.py remains unchanged.
+Attendance config is independent ATTENDANCE_* settings; no Track B provider/language implementation changed.
+These are demo snapshot APIs; final normalized persistence, production identity and decision writes remain pending.
