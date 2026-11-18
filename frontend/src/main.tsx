@@ -377,6 +377,7 @@ function App() {
               <ResolutionPanel
                 item={selectedItem}
                 role={role}
+              lang={lang}
                 aiEnabled={aiEnabled}
                 onClose={() => setSelectedId(null)}
                 onSimulateStale={handleSimulateStale}
@@ -454,3 +455,4 @@ function App() {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
