@@ -248,8 +248,8 @@ def seed(dsn: str, directory: Path) -> None:
     if shifts.invalid or punches.invalid:
         bad = [r.error for r in (*shifts.rows, *punches.rows) if r.status == "invalid"]
         raise ValueError(f"demo data is invalid: {bad}")
-    added = commit_import(backend, shifts, batch_id=new_batch_id())
-    added += commit_import(backend, punches, batch_id=new_batch_id())
+    added = commit_import(backend, shifts, batch_id=new_batch_id(), manager_id=MANAGER)
+    added += commit_import(backend, punches, batch_id=new_batch_id(), manager_id=MANAGER)
     touched = local_dates(punches, EMPLOYEES)
     registry = PolicyRegistry.from_directory(BACKEND_DIR / "policies")
     created = run_detection(backend, registry, touched, as_of=datetime.now(UTC))
@@ -257,7 +257,7 @@ def seed(dsn: str, directory: Path) -> None:
     notes = preview_notes(read_rows(build_notes_csv(monday), "csv"), employee_timezones=EMPLOYEES)
     if notes.invalid:
         raise ValueError(f"demo notes are invalid: {[r.error for r in notes.rows if r.error]}")
-    note_count, attached = import_notes(backend, notes, as_of=datetime.now(UTC))
+    note_count, attached = import_notes(backend, notes, as_of=datetime.now(UTC), manager_id=MANAGER)
     token_path = write_credentials(directory)
     print(
         f"Demo week of {monday.isoformat()}: {added} new records imported, "

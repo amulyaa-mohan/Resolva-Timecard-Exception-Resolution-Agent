@@ -575,3 +575,17 @@ Never include credentials, private employee data, or invented test results.
 - Added to the audit above (found when checking how the UI reads times): the API's timestamps depended on the database
   session's timezone (`03:30Z` from a UTC server vs `09:00+05:30` locally), which would have broken the Docker demo's
   timeline. Case times are now always in the employee's timezone; `evidence_version` is unchanged. 615 passed with Postgres.
+
+### 2026-11-18 — Audit follow-up — Effective workday consistency
+
+- PostgreSQL timecards and approval totals now reuse detection's corrected employee punches and work-date grouping, including adjustments that bring in unlinked punches.
+- Approval returns a conflict if the effective workday differs from the exception's linked punch IDs or timestamps. The manager must review the updated timecard before a correction can proceed.
+- Timecard raw evidence and correction history retain their exception scope. The effective punches and net hours describe the employee's workday. SQLite retains its snapshot behavior.
+- Added a PostgreSQL regression for a punch adjusted into the workday from outside the exception's evidence.
+- Publication: local changes in the audit fix worktree.
+
+### 2026-11-18 — Audit follow-up — Multiple exceptions on one workday
+
+- PostgreSQL open and escalated cases now use the effective workday for evidence snapshots, proposal validation and approval. A correction on a sibling exception changes that snapshot's evidence version, even when its exception revision stays the same.
+- Replaced the linked-punch equality guard. An outdated request still conflicts, and a refreshed request reaches the deterministic rules. Historical case and timecard raw evidence remain scoped to the exception.
+- Added a PostgreSQL regression for a clock-out added by a correction on another exception.

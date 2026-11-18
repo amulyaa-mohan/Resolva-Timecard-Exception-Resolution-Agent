@@ -42,3 +42,5 @@ Record new backend-only tasks below; use a unique ID, owner, status, dependencie
 | A-AUDIT-01 | C V Jayanth | REVIEW | Review of Track B audit fixes A1-A6; structured detection_details keys; employee notes import and attach (depends on A-05, A-DETECT-01) |
 
 | A-AUDIT-02 | C V Jayanth | REVIEW | Self-audit of post-audit Track A code: 7 backend fixes with regression tests (see docs/AUDIT_TRACK_A_2026-11-18.md) |
+
+| A-AUDIT-03 | C V Jayanth | REVIEW | Align PostgreSQL timecard and approval totals with detection workday evidence |

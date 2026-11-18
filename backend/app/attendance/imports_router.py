@@ -121,7 +121,13 @@ def commit(
     request: Request,
     manager: Annotated[ManagerCredential, Depends(authenticated_manager)],
 ):
-    from app.attendance.ingest import commit_import, import_notes, new_batch_id, run_detection
+    from app.attendance.ingest import (
+        ImportNotAuthorized,
+        commit_import,
+        import_notes,
+        new_batch_id,
+        run_detection,
+    )
 
     try:
         backend, employees, preview = _preview(request, body, manager.manager_id)
@@ -137,7 +143,12 @@ def commit(
     batch_id = new_batch_id()
     as_of = request.app.state.resolution_store.clock().astimezone(UTC)
     if preview.kind == "notes":
-        inserted, attached = import_notes(backend, preview, as_of=as_of)
+        try:
+            inserted, attached = import_notes(
+                backend, preview, as_of=as_of, manager_id=manager.manager_id
+            )
+        except ImportNotAuthorized as exc:
+            return problem(403, str(exc), title="Not authorized for these employees")
         return ImportResult(
             batch_id=batch_id,
             inserted=inserted,
@@ -146,7 +157,10 @@ def commit(
             detected_exception_ids=[],
             notes_attached=attached,
         )
-    inserted = commit_import(backend, preview, batch_id=batch_id)
+    try:
+        inserted = commit_import(backend, preview, batch_id=batch_id, manager_id=manager.manager_id)
+    except ImportNotAuthorized as exc:
+        return problem(403, str(exc), title="Not authorized for these employees")
     detected = run_detection(
         backend,
         request.app.state.resolution_store.registry,

@@ -435,10 +435,16 @@ def _two_employee_import(dsn):
         punches.append(
             f"{employee},2026-11-12 09:00,in,{employee}-in"
         )  # no clock-out: an exception
+    # M-1 also covers E-002 so one manager can import both employees in a single commit.
+    sql(
+        dsn,
+        "INSERT INTO manager_assignments (manager_id, employee_id, valid_from) "
+        "VALUES ('M-1', 'E-002', now() - interval '1 day')",
+    )
     backend = PostgresBackend(dsn)
     for kind, lines, build in (("s", shifts, preview_shifts), ("p", punches, preview_punches)):
         preview = build(read_rows("\n".join(lines) + "\n", "csv"), employee_timezones=zones)
-        commit_import(backend, preview, batch_id=f"B-{kind}")
+        commit_import(backend, preview, batch_id=f"B-{kind}", manager_id="M-1")
     return backend, local_dates(preview, zones)
 
 

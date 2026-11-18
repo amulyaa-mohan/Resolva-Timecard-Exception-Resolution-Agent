@@ -42,6 +42,34 @@ def assigned_employees(backend: PostgresBackend, manager_id: str) -> dict[str, s
         )
 
 
+class ImportNotAuthorized(Exception):
+    """An employee in the rows is no longer assigned to the importing manager."""
+
+
+def _require_assigned(c, manager_id: str, employee_ids: set[str]) -> None:
+    """Re-check assignments inside the write transaction (finding 4).
+
+    The preview check can be stale by commit time. FOR SHARE locks the assignment rows, so a
+    concurrent revocation (an UPDATE or DELETE on them) waits until this import commits or
+    rolls back, and it cannot slip in between the check and the inserts.
+    """
+    if not employee_ids:
+        return
+    marks = ",".join("?" * len(employee_ids))
+    found = {
+        r[0]
+        for r in c.execute(
+            "SELECT employee_id FROM manager_assignments WHERE manager_id = ? "
+            f"AND employee_id IN ({marks}) AND valid_from <= now() "
+            "AND (valid_to IS NULL OR valid_to > now()) FOR SHARE",
+            (manager_id, *sorted(employee_ids)),
+        ).fetchall()
+    }
+    missing = employee_ids - found
+    if missing:
+        raise ImportNotAuthorized(f"not assigned to you any more: {', '.join(sorted(missing))}")
+
+
 def existing_keys(backend: PostgresBackend, preview: ImportPreview) -> frozenset[tuple[str, str]]:
     ids = [r.punch.punch_id for r in preview.rows if r.punch is not None]
     if not ids:
@@ -69,10 +97,19 @@ def existing_note_ids(backend: PostgresBackend, preview: ImportPreview) -> froze
         )
 
 
-def commit_import(backend: PostgresBackend, preview: ImportPreview, *, batch_id: str) -> int:
-    """Insert valid rows; returns how many were new. Caller authorized every employee."""
+def commit_import(
+    backend: PostgresBackend, preview: ImportPreview, *, batch_id: str, manager_id: str
+) -> int:
+    """Insert valid rows; returns how many were new. Raises ImportNotAuthorized if an employee
+    is no longer assigned to `manager_id` (checked again inside the transaction)."""
     inserted = 0
     with backend.transaction() as c:
+        _require_assigned(
+            c,
+            manager_id,
+            {r.punch.employee_id for r in preview.rows if r.status == "valid" and r.punch}
+            | {r.shift.employee_id for r in preview.rows if r.status == "valid" and r.shift},
+        )
         for row in preview.rows:
             if row.status != "valid":
                 continue
@@ -163,7 +200,7 @@ def attach_notes(c, employee_ids: set[str], *, as_of: datetime) -> dict[str, lis
 
 
 def import_notes(
-    backend: PostgresBackend, preview: ImportPreview, *, as_of: datetime
+    backend: PostgresBackend, preview: ImportPreview, *, as_of: datetime, manager_id: str
 ) -> tuple[int, dict[str, list[str]]]:
     """Store valid notes and attach them to exceptions in ONE transaction.
 
@@ -171,6 +208,11 @@ def import_notes(
     because a re-import reports it as a duplicate and would never attach it.
     """
     with backend.transaction() as c:
+        _require_assigned(
+            c,
+            manager_id,
+            {r.note.employee_id for r in preview.rows if r.status == "valid" and r.note},
+        )
         inserted = 0
         for row in preview.rows:
             if row.status == "valid" and row.note is not None:
@@ -279,7 +321,7 @@ def _detect_employee(
         findings = detect(
             employee, work_date, day, shift, policy, as_of=as_of, aggregates=aggregates
         )
-        _clear_resolved(c, employee_id, work_date, {f.code for f in findings}, as_of)
+        _clear_resolved(c, employee_id, work_date, {f.code for f in findings}, day, as_of)
         for finding in violations(findings):
             exception_id = f"EX-{employee_id}-{work_date.isoformat()}-{finding.code.value}"
             details = {**finding.details, "reason": finding.reason}
@@ -336,13 +378,19 @@ def _link_day_punches(c, exception_id: str, day: list[PunchRecord]) -> list[str]
     return linked
 
 
-def _clear_resolved(c, employee_id: str, work_date: date, still_found: set, as_of: datetime):
+def _clear_resolved(
+    c, employee_id: str, work_date: date, still_found: set, day: list[PunchRecord], as_of: datetime
+):
     """Dismiss open or escalated exceptions whose rule now PASSES for this day.
 
     A rule that is merely undecided (insufficient evidence) is left alone: not knowing is not the
     same as being fixed. Without this, a punch imported after the exception was raised left a
     phantom the manager could not resolve (the validator says the problem is no longer present).
     Dismissal is recorded, never a delete, and a recurrence reopens it (see _reopen).
+
+    Finding 1: the day's punches are linked to the exception before it is dismissed. The
+    evidence version hashes the linked punches, so a draft proposal made before the new punch
+    arrived becomes stale and cannot be approved or persisted against the dismissed exception.
     """
     for exception_id, code, status in c.execute(
         "SELECT exception_id, code, status FROM exceptions WHERE employee_id = ? "
@@ -351,6 +399,9 @@ def _clear_resolved(c, employee_id: str, work_date: date, still_found: set, as_o
     ).fetchall():
         if code in {f.value for f in still_found}:
             continue
+        linked = _link_day_punches(c, exception_id, day)
+        if linked:
+            _note_new_evidence(c, exception_id, linked, as_of)
         c.execute(
             "UPDATE exceptions SET status = 'dismissed' WHERE exception_id = ?", (exception_id,)
         )
@@ -407,13 +458,13 @@ def _probe(employee: EmployeeContext, work_date: date):
 
 
 def _effective_punches(c, employee_id: str, lo: datetime, hi: datetime) -> list[PunchRecord]:
-    rows = c.execute(
-        "SELECT punch_id, employee_id, ts, type, source, device_id FROM punches "
-        "WHERE employee_id = ? AND ts >= ? AND ts < ? ORDER BY ts",
-        (employee_id, lo, hi),
-    ).fetchall()
-    keys = ("punch_id", "employee_id", "ts", "type", "source", "device_id")
-    punches = [PunchRecord.model_validate(dict(zip(keys, r, strict=True))) for r in rows]
+    """The employee's timecard punches whose EFFECTIVE time falls in [lo, hi).
+
+    Finding 3: an approved adjust_punch can move a punch recorded outside the window into it,
+    or move one recorded inside it out. So every punch an approved correction targets is loaded
+    whatever its recorded time, corrections are applied, and only then is the window applied to
+    each punch's effective time.
+    """
     corrections = [
         (cid, actions if isinstance(actions, list) else json.loads(actions))
         for cid, actions in c.execute(
@@ -422,9 +473,25 @@ def _effective_punches(c, employee_id: str, lo: datetime, hi: datetime) -> list[
             (employee_id,),
         )
     ]
+    targets = sorted(
+        {
+            action["punch_id"]
+            for _, actions in corrections
+            for action in actions
+            if action.get("type") == "adjust_punch" and action.get("punch_id")
+        }
+    )
+    columns = "punch_id, employee_id, ts, type, source, device_id"
+    sql = f"SELECT {columns} FROM punches WHERE employee_id = ? AND (ts >= ? AND ts < ?"
+    params: list = [employee_id, lo, hi]
+    if targets:
+        sql += f" OR punch_id IN ({','.join('?' * len(targets))})"
+        params.extend(targets)
+    rows = c.execute(sql + ") ORDER BY ts", tuple(params)).fetchall()
+    keys = ("punch_id", "employee_id", "ts", "type", "source", "device_id")
+    punches = [PunchRecord.model_validate(dict(zip(keys, r, strict=True))) for r in rows]
     effective = apply_corrections(punches, employee_id, corrections)
-    # A correction's added punch outside this window belongs to another day.
-    return [p for p in effective if not p.punch_id.startswith(CORRECTION_PREFIX) or lo <= p.ts < hi]
+    return [p for p in effective if lo <= p.ts < hi]
 
 
 def new_batch_id() -> str:
