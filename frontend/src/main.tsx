@@ -392,7 +392,7 @@ function App() {
                 <div className="kpi-value">{openWarnings}</div>
                 <div className="kpi-subtext small muted">{tr("Non-blocking schedule or meal deviations")}</div>
               </div>
-              <div className="kpi-card kpi-violet">
+              <div className="kpi-card kpi-ai">
                 <div className="kpi-label">{t.kpiReady}</div>
                 <div className="kpi-value">{eligibleForBulk.length}</div>
                 <div className="kpi-subtext small muted">{tr("6/6 rule checks passed & confidence verified")}</div>
