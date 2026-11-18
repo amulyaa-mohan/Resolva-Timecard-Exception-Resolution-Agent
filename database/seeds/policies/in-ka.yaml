@@ -1,0 +1,36 @@
+# ==============================================================================
+# ShiftSense Policy Configuration: Karnataka, India (IN-KA)
+# ==============================================================================
+# DISCLAIMER & NOTICE:
+# This policy configuration file is intended solely for software demonstration,
+# automated exception detection testing, and rule-engine verification purposes.
+# It does not constitute formal legal advice or official statutory counsel.
+# ==============================================================================
+
+metadata:
+  policy_pack_code: "IN-KA"
+  version: "1.0.0"
+  name: "Karnataka Shops & Commercial Establishments Policy Pack"
+  jurisdiction: "Karnataka, India"
+  governing_statute: "Karnataka Shops and Commercial Establishments Act, 1961"
+  description: >
+    Statutory labor parameters, spreadover boundaries, rest break requirements,
+    and attendance tolerances for commercial establishments in Karnataka.
+
+working_hours:
+  daily_regular_hours_limit: 9.0
+  weekly_regular_hours_limit: 48.0
+  maximum_spread_hours: 12.0
+
+overtime:
+  rate_multiplier: 2.0
+  quarterly_cap_hours: 50.0
+
+rest_breaks:
+  threshold_hours: 5.0
+  duration_minutes: 60
+  paid: false
+
+tolerances:
+  late_tolerance_minutes: 7
+  missing_punch_inference_window_minutes: 30

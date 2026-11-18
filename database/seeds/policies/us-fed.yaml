@@ -1,0 +1,57 @@
+# ==============================================================================
+# ShiftSense Policy Configuration: US Federal Standard with State Overlays (US-FED)
+# ==============================================================================
+# DISCLAIMER & NOTICE:
+# This policy configuration file is intended solely for software demonstration,
+# automated exception detection testing, and rule-engine verification purposes.
+# It does not constitute formal legal advice or official statutory counsel.
+# ==============================================================================
+
+metadata:
+  policy_pack_code: "US-FED"
+  version: "1.0.0"
+  name: "US Federal Fair Labor Standards Act (FLSA) Policy Pack"
+  jurisdiction: "United States (Federal with State Overlays)"
+  governing_statute: "Fair Labor Standards Act (FLSA), 29 U.S.C. § 201 et seq."
+  description: >
+    Baseline US Federal wage-and-hour compliance rules governing non-exempt
+    employees under FLSA, augmented with state-specific overlays (e.g. California).
+
+federal_standards:
+  weekly_regular_hours_limit: 40.0
+  overtime_rate_multiplier: 1.5
+  daily_regular_hours_limit: null  # FLSA does not mandate daily overtime
+  consecutive_days_threshold: null
+
+tolerances:
+  late_tolerance_minutes: 7  # 7-minute rounding/grace rule (29 CFR § 785.48)
+  missing_punch_inference_window_minutes: 30
+
+overlays:
+  california_meal_break:
+    enabled: true
+    jurisdiction: "California, USA"
+    governing_statute: "California Labor Code § 512 & IWC Wage Orders"
+    description: >
+      Mandatory meal break intervals and premium pay rules for California operations.
+    first_meal_break:
+      threshold_shift_hours: 5.0
+      duration_minutes: 30
+      must_commence_before_shift_hour: 5.0
+      waivable_if_shift_under_hours: 6.0
+    second_meal_break:
+      threshold_shift_hours: 10.0
+      duration_minutes: 30
+      must_commence_before_shift_hour: 10.0
+      waivable_if_shift_under_hours: 12.0
+    rest_periods:
+      interval_hours: 4.0
+      duration_minutes: 10
+      paid: true
+    premium_penalty:
+      hours_pay_per_violation: 1.0  # One additional hour of regular rate pay per day of violation
+    daily_overtime:
+      daily_threshold_hours: 8.0
+      daily_rate_multiplier: 1.5
+      double_time_threshold_hours: 12.0
+      double_time_rate_multiplier: 2.0
