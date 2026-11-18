@@ -11,7 +11,7 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 | COORD-04 | Area-specific agent guidance and progress logs | Jayanth | REVIEW | — | Frontend/backend/database guides and routing verified |
 | COORD-05 | Simplify to frontend/backend root folders | Jayanth | REVIEW | — | References/config verified; backend test, lint and frontend build passed |
 | COORD-01 | Shared instructions and tracker | Jayanth | REVIEW | — | Teammates read rules and record task ownership |
-| SHARED-01 | Freeze initial API/data contracts | Both | REVIEW | COORD-01 | `0.2.0-draft` (2026-11-18) implements Track A's answers and Amulya's reply: rule outcomes, evidence refs, policy week/quarter/tolerance, as_of (TRACK_B_INTEGRATION.md 5a). Jayanth to adopt in the validator and confirm before freeze |
+| SHARED-01 | Freeze initial API/data contracts | Both | REVIEW | COORD-01 | `0.2.0-draft` (2026-11-18) implements Track A's answers and Amulya's reply: rule outcomes, evidence refs, policy week/quarter/tolerance, as_of (TRACK_B_INTEGRATION.md 5a). Adopted by Track A in 8ad2e15 and verified by Track B's evals (exact outcomes per gap case, live Qwen); freeze pending both owners' sign-off |
 | A-01 | DB foundation, synthetic seed, role dependencies | Jayanth | IN PROGRESS | SHARED-01 | Reproducible employee/shift/punch fixture and server-side permission checks |
 | B-01 | App configuration, mock provider, development packaging | Amulya | REVIEW | SHARED-01 (draft) | Verified: clean install, server, offline mock, kill-switch, Docker healthy; startup in LOCAL_DEVELOPMENT.md |
 | A-02 | Missing-punch detection and correction validation | Jayanth | REVIEW | A-01 (built on the demo store; final schema pending) | Verified: valid fix with trusted totals passes; unsupported, unproven or after-as_of fixes blocked; missing evidence escalates |
@@ -23,7 +23,7 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 | A-05 | CSV/JSON import preview and deduplication | Jayanth | REVIEW | A-04, PostgreSQL store | Verified: CSV/JSON equivalence, mapping, DST refusal, dedupe/no-op re-import, scope; import triggers detection (IMPORT_DETECTION.md) |
 | B-04 | Multilingual intents and AI fallback | Amulya | REVIEW | B-03 | Verified: 14 commands x en/hi/kn parity 100% with AI off (CI gate) and over live HTTP; write requests refused in all languages; LLM fallback 10/12 on paraphrases with Qwen in two runs, misses failed safe |
 | A-06 | Bulk decisions and attendance event updates | Jayanth | IN PROGRESS | A-05 | Bulk decisions verified (per-item auth, validation, stale, idempotency); attendance event updates pending |
-| B-05 | CI and reproducible AI evaluation | Amulya | REVIEW | B-04 (done first; eval needs no language work) | CI runs lint, tests, offline eval gates and frontend build; live Qwen reports in backend/evals/reports (prompt v1 vs v2) |
+| B-05 | CI and reproducible AI evaluation | Amulya | REVIEW | B-04 (done first; eval needs no language work) | CI runs lint, tests, offline eval gates and frontend build; live Qwen reports in backend/evals/reports (prompt v1 vs v2). Evals now use Track A's real validator with complete evidence (break, totals, as_of) plus 9 evidence-gap cases; stand-in shown side by side |
 | SHARED-03 | Final integration, startup verification, README | Both | TODO | A-06, B-05 | Fresh setup and full workflow verified; real results documented |
 
 ## Decisions pending
@@ -36,4 +36,4 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 
 ## Current next step
 
-Contract `0.2.0-draft` is in place. Jayanth adopts it in the validator and CaseService (TRACK_B_INTEGRATION.md 5a: outcomes, evidence_ref tolerance, week_start, as_of); Amulya moves evals to complete evidence and reports the stand-in and real validators side by side; then freeze SHARED-01 and start SHARED-02.
+Contract `0.2.0-draft` is adopted by both tracks, and the evals use Track A's real validator with complete evidence and exact outcomes (2026-11-18). Next: freeze SHARED-01 (drop -draft, make `as_of` required, update frontend `contracts.ts`), then SHARED-02.

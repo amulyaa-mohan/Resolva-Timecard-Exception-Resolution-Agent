@@ -415,3 +415,33 @@ Never include credentials, private employee data, or invented test results.
   - The SHARED-02 path on PostgreSQL is tested end to end: import shifts and punches -> detection (exactly one MISSING_PUNCH)
     -> re-import no-op -> list/detail -> generate_proposal ELIGIBLE with derived totals -> approve -> audit -> re-detection quiet.
 - Next step: review with Soumya's database work; Amulya answers the adjust/acknowledge questions and adds PostgreSQL to CI.
+
+### 2026-11-18 — Amulya Mohan — B-05 — Evaluations on Track A's real validator with complete evidence
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed:
+  - `evals/schema.py`: cases carry complete evidence by default (observed meal break punches 4 h into the shift, trusted totals via `AggregateSpec`, `as_of` the next day at 12:00); cases opt out explicitly; new `evidence` category and `rules_only` flag; `detection_details` names the unmatched work punch, not a break.
+  - `evals/aggregates.py` (new): trusted `AggregateEvidence` per case, keyed by the case's own exception id; week and quarter starts from the pack (`week_start`, `quarter_start_month`); `real_validator` = Track A's `make_validator(load)`.
+  - `evals/run.py`: every proposal is validated by the real rules; the stand-in judges the same recorded model outputs (replayed, no extra model calls) as a comparison column; safety gates require zero unsafe under both; accuracy gated on the real validator (`--gate-validator`); new CI gate `evidence_case_accuracy`.
+  - `evals/cases/evidence.json` (new, 9 cases): totals unavailable, no break, weekly overtime (US-FED), totals for the wrong week, open shift at `as_of`, uncertified work date, short break, plus two eligible controls.
+- Results (mock, CI): 9/9 gates; real and stand-in agree on all shared cases. Rebased onto Track A's 0.2.0 adoption (8ad2e15): the gap cases now require exact outcomes, and each stops on the rule it targets: e01/e04/e06 ESCALATED (`insufficient_evidence`), e02/e03/e07 BLOCKED (`violation`), e05 BLOCKED by the as_of gate, controls e08/e09 ELIGIBLE. Live Qwen2.5-7B against 8ad2e15: all 6 live gates, proposal accuracy 100% under both validators, every category 100%, 0 repair retries, p50 5.24 s, p95 5.69 s. The real rules made 0 of 6 rules-only cases eligible; the stand-in would have made 6 of 6 eligible.
+- Contracts: none (uses `make_validator` and `AggregateEvidence` as published by Track A; no Track A files changed).
+- Validation: ruff check and format clean; pytest 396 passed (incl. Track A's 8ad2e15); `python -m evals.run` 9/9 CI gates; live run above.
+- Next step: commit, then generate the committed live report from a clean tree.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan — B-05 / SHARED-01 — CI PostgreSQL, adjust_punch evidence gate, answers to Track A
+
+- Branch: `backend` (pulled Track A c85111c: PostgreSQL store, import/detection, bulk decisions, adjust_punch).
+- Status: REVIEW.
+- CI and Docker (Track A request in RESOLUTION_API.md):
+  - The backend job has a `postgres:15` service with `TEST_DATABASE_URL` (a `_test` database, trust auth, CI only) and installs `.[dev,postgres]`.
+  - A guard step fails the build if any PostgreSQL test is skipped.
+  - `psycopg==3.3.9` and `psycopg-binary==3.3.9` are pinned in `requirements-dev.lock`.
+  - `docker-compose.yml` has a `postgres` profile (PostgreSQL 15, 127.0.0.1 only, volume `postgres-data`); the API image installs the `postgres` extra; `.env.example` and LOCAL_DEVELOPMENT.md show the local setup.
+- Evidence gate: `anchor_times` now handles `adjust_punch` for every code. The target must be one of the case's punches, its type is read from that punch, and only `note` refs are attached; schedule and history refs (including model-supplied ones) and times after `as_of` are refused. Other unanchored actions still have model-supplied refs removed.
+- Answers: Track B section in TRACK_A_CONTRACT_RESPONSE.md (adjust_punch; semantics proposals for acknowledge, add_break, void_shift, flag_premium, suggest_schedule_swap; detection_details keys; escalate evidenced warning-level deviations).
+- Finding raised: two-sided tolerance can grant unclaimed time. With the real validator, a note stating 09:05 lets an adjustment to the scheduled 09:00 become ELIGIBLE. Proposed one-sided rounding of stated times; not changed unilaterally.
+- Validation: ruff check and format clean; pytest 441 passed and 31 PostgreSQL tests skipped without a database; with `TEST_DATABASE_URL` on local PostgreSQL 15.20 (compose profile), 466 passed and the guard passed, and without it the guard fails as intended; `docker compose config` valid; API image built, and `psycopg` 3.3.9 and the app import inside it; `python -m evals.run` 9/9 CI gates on Track A's c85111c validator.
+- Publication: committed and pushed to `backend` (authorised by the owner).

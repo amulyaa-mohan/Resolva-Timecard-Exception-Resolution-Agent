@@ -355,16 +355,98 @@ def test_right_id_wrong_kind_is_rejected(case):
     assert "does not support" in anchor_times(case, [action], timedelta(minutes=5))[1][0]
 
 
-def test_unverified_model_ref_never_reaches_the_validator_for_other_codes():
-    case = make_case().model_copy(update={"code": ExceptionCode.SCHEDULE_DEVIATION})
+def test_unverified_model_ref_never_reaches_the_validator_for_unanchored_actions():
+    case = make_case().model_copy(update={"code": ExceptionCode.OVERTIME_RISK})
     action = ProposedAction(
-        type="adjust_punch",
-        punch_id="P-1",
-        new_ts=case.punches[0].ts,
-        evidence_ref=EvidenceRef(kind=EvidenceKind.NOTE, id="N-99"),
+        type="acknowledge", evidence_ref=EvidenceRef(kind=EvidenceKind.NOTE, id="N-99")
     )
     anchored, problems = anchor_times(case, [action], timedelta(minutes=5))
     assert problems == [] and anchored[0].evidence_ref is None
+
+
+# ------------------------------------------------------------------ adjust_punch (Track A A-05)
+
+_LATE = "2026-11-12T09:20:00+05:30"
+
+
+def _late_arrival(note: str | None = "I was at the gate at 09:05, the kiosk was down."):
+    """SCHEDULE_DEVIATION: clock-in recorded 09:20 for a 09:00 start."""
+    base = make_case(notes=(note,) if note else ())
+    punch = base.punches[0].model_copy(update={"ts": datetime.fromisoformat(_LATE)})
+    return base.model_copy(update={"code": ExceptionCode.SCHEDULE_DEVIATION, "punches": [punch]})
+
+
+def _adjust(hhmm: str, **extra) -> ProposedAction:
+    return ProposedAction(
+        type="adjust_punch",
+        punch_id=extra.pop("punch_id", "P-1"),
+        new_ts=datetime.fromisoformat(f"2026-11-12T{hhmm}:00+05:30"),
+        **extra,
+    )
+
+
+def test_adjustment_to_a_stated_time_is_anchored_to_the_note():
+    anchored, problems = anchor_times(_late_arrival(), [_adjust("09:05")], timedelta(minutes=5))
+    assert problems == []
+    assert anchored[0].evidence_ref == EvidenceRef(kind=EvidenceKind.NOTE, id="N-0")
+    assert anchored[0].punch_type is None  # the model's action is not rewritten beyond the ref
+
+
+def test_adjustment_to_the_scheduled_time_is_refused():
+    # A late arrival must not be quietly moved to the scheduled start.
+    case = _late_arrival(note=None)
+    _, problems = anchor_times(case, [_adjust("09:00")], timedelta(minutes=5))
+    assert "not a time the employee stated" in problems[0]
+    ref = EvidenceRef(kind=EvidenceKind.SCHEDULE_START, id="S-1")
+    _, problems = anchor_times(case, [_adjust("09:00", evidence_ref=ref)], timedelta(minutes=5))
+    assert "does not support" in problems[0]
+
+
+def test_adjustment_from_history_is_refused():
+    case = _late_arrival(note=None)
+    habit = case.punches[0].model_copy(
+        update={"punch_id": "H-1", "ts": datetime.fromisoformat("2026-11-05T09:05:00+05:30")}
+    )
+    case = case.model_copy(update={"punch_history": [habit]})
+    _, problems = anchor_times(case, [_adjust("09:05")], timedelta(minutes=5))
+    assert problems and "not a time the employee stated" in problems[0]
+
+
+def test_adjustment_must_target_this_cases_punch():
+    _, problems = anchor_times(
+        _late_arrival(), [_adjust("09:05", punch_id="P-other")], timedelta(minutes=5)
+    )
+    assert "not one of this case's punches" in problems[0]
+
+
+def test_adjustment_after_as_of_is_refused():
+    case = _late_arrival(note="Clocked in at 23:00.")
+    case = case.model_copy(update={"as_of": datetime.fromisoformat("2026-11-12T20:00:00+05:30")})
+    _, problems = anchor_times(case, [_adjust("23:00")], timedelta(minutes=5))
+    assert "after the evaluation time" in problems[0]
+
+
+def test_adjustment_through_the_pipeline_reaches_the_validator_with_a_note_ref(policy, settings):
+    seen = []
+
+    def spy(case, actions, policy):
+        seen.extend(actions)
+        return passing_validator(case, actions, policy)
+
+    body = {
+        "exception_id": "X-1",
+        "decision": "propose",
+        "actions": [
+            {"type": "adjust_punch", "punch_id": "P-1", "new_ts": "2026-11-12T09:05:00+05:30"}
+        ],
+        "rationale": "Employee states 09:05; kiosk was down.",
+        "citations": [{"chunk_id": KA8, "quote": KA8_QUOTE}],
+        "confidence": 0.9,
+        "missing_information": [],
+    }
+    result = run(_late_arrival(), policy, settings, script=[json.dumps(body)], validator=spy)
+    assert any(c.name == "time_evidence" and c.passed for c in result.gate_checks), result.reasons
+    assert seen and seen[0].evidence_ref == EvidenceRef(kind=EvidenceKind.NOTE, id="N-0")
 
 
 def test_rule_check_accepts_json_booleans():

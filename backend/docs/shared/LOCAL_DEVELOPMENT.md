@@ -75,3 +75,17 @@ This scaffold does not implement authentication, business rules or correction ap
 ## Optional attendance reads
 
 See `backend/docs/ATTENDANCE_API.md` (repository-relative) to provision synthetic persisted attendance and an expiring manager credential. The read endpoints are disabled until explicitly configured.
+
+## Local PostgreSQL (attendance store and its tests)
+
+```bash
+cd backend
+docker compose --profile postgres up -d postgres        # PostgreSQL 15 on 127.0.0.1:5432, trust auth
+docker compose exec -T postgres psql -U postgres -c "CREATE DATABASE resolva_test"
+pip install -e ".[dev,postgres]"
+TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:5432/resolva_test python -m pytest -q
+```
+
+The test database name must end in `_test`, because the fixture wipes its schema. For the app, migrate and
+seed `resolva` as in `docs/RESOLUTION_API.md`, then set `ATTENDANCE_DATABASE_URL` in `backend/.env`.
+The compose database is for local development only: it uses trust auth and listens on 127.0.0.1.

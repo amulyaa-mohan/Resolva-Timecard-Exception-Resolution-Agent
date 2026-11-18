@@ -71,22 +71,30 @@ Settings are unprefixed env vars or `backend/.env` (`AI_ENABLED`, `LLM_PROVIDER`
   actions -> time evidence (added punch within 5 min of schedule/stated time/history) -> citations
   retrieved + verbatim -> validator (non-empty) -> missing info -> confidence.
 - Prompts: `propose_v2` (default; adds a trusted `<facts>` block with local dates) and `propose_v1`.
-- Evals: `cd backend && python -m evals.run` (36 labelled cases, 18 scripted unsafe outputs, 12 retrieval
-  cases). CI (`.github/workflows/ci.yml`) runs lint, format, pytest, eval gates, frontend build.
+- Evals: `cd backend && python -m evals.run` (45 labelled cases incl. 9 evidence-gap cases, 20 scripted
+  unsafe outputs, 12 retrieval cases). Since 2026-11-18 proposals are validated by Track A's
+  `make_validator` with trusted eval totals (`evals/aggregates.py`); cases carry an observed break,
+  totals and `as_of`; the stand-in judges the same recorded outputs as a comparison column. CI (`.github/workflows/ci.yml`) runs lint, format, pytest, eval gates, frontend build.
   Live reports at c6bde83 (Qwen2.5-7B): v1 83% proposal accuracy, v2 100% (two runs); 0 unsafe
-  eligible and 100% injection resistance in all runs. Numbers are in docs/MODEL_CARD.md. Validator in
-  evals is a stand-in. Real-model results vary run to run; rely on the deterministic gates.
+  eligible and 100% injection resistance in all runs. Numbers are in docs/MODEL_CARD.md.
+  Real-model results vary run to run; rely on the deterministic gates.
 - Latest live report (475b4cc, prompt v2 + language): all 6 live gates pass, proposal accuracy 100%,
   p50 4.23 s, lexicon intents 100% in en/hi/kn, paraphrases 10/12 (safe misses).
-- Tests: 223 passing (incl. Track A). `tzdata` is a runtime dependency (Windows/slim images). Local Ollama in Docker: `cd backend && docker compose -f docker-compose.yml
+- Tests: 441 passing + 31 PostgreSQL tests (466 with `TEST_DATABASE_URL`; CI runs them on a
+  `postgres:15` service and fails if they skip). `docker compose --profile postgres` for local PG. `tzdata` is a runtime dependency (Windows/slim images). Local Ollama in Docker: `cd backend && docker compose -f docker-compose.yml
   -f docker-compose.gpu.yml --profile ollama up -d ollama` (models persist in the `ollama-models` volume).
 
 ## Next up
 
-1. Jayanth adopts 0.2.0 (outcomes, evidence_ref tolerance, week_start, as_of excluded from his
-   hash). Then make `as_of` required and freeze SHARED-01; update frontend `contracts.ts`.
-1b. Evals: complete evidence per case, incomplete cases expecting ESCALATED, report stub vs real
-   `validate_correction` side by side; then gate CI on the real one and re-run live evals.
+1. Jayanth adopted 0.2.0 (8ad2e15) and added PostgreSQL, import/detection, bulk decisions and
+   adjust_punch (c85111c). Track B answers to his A-05/A-06 questions are in
+   TRACK_A_CONTRACT_RESPONSE.md (adjust_punch gate done; proposals for acknowledge, add_break
+   [`new_end_ts`], void_shift [`target_punch_ids`], flag_premium, swap = advisory; one-sided
+   rounding of stated times). On agreement: draft contract 0.3.0, make swap proposals ESCALATED,
+   then freeze SHARED-01 (drop -draft, `as_of` required, frontend `contracts.ts`).
+1b. Generate the committed live report (real validator) from a clean tree and add it to
+   MODEL_CARD.md; switch `scripts/live_check.py` to the real validator. Answer Jayanth's open
+   question: should an evidence-backed late clock-out (SCHEDULE_DEVIATION, warning) escalate?
 2. SHARED-02 with Jayanth: first end-to-end missing-punch flow through his routes; wire
    `ExceptionQuery` filters into his exception list.
 3. Ask native Hindi/Kannada speakers to review the lexicons and reply templates.

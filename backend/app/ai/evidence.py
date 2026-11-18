@@ -141,22 +141,31 @@ def anchor_times(
     actions: list[ProposedAction],
     tolerance: timedelta = DEFAULT_TOLERANCE,
 ) -> tuple[list[ProposedAction], list[str]]:
-    """Attach an EvidenceRef to every added punch time, or report why it cannot be anchored.
+    """Attach an EvidenceRef to every proposed punch time, or report why it cannot be anchored.
+
+    - add_punch (MISSING_PUNCH): the schedule, a time stated in a note, or a same-weekday history
+      punch of the same type may support the time.
+    - adjust_punch (any code): a recorded punch is itself evidence, so it may only be moved to a
+      time the employee stated in a note. Schedule and history are refused, so a late arrival cannot
+      be quietly moved to the scheduled start. The target must be one of the case's own punches;
+      its type comes from that punch (an adjustment may leave punch_type empty). Agreed with
+      Track A's validator (RULE_ENGINE.md, adjust_punch rules).
 
     Returns (actions with evidence_ref set, problems). Problems:
-    - the time is after the case's evaluation time (as_of): a punch cannot be added in the future,
+    - the time is after the case's evaluation time (as_of): no punch may be placed in the future,
       which also stops a closing punch for a shift that is still open;
-    - no schedule time, stated note time or same-weekday history punch supports the time;
+    - nothing allowed for that action supports the time;
     - the model supplied an evidence_ref that does not resolve to supporting evidence.
+    Other actions are not anchored here, so a model-supplied ref on them is removed (unverified).
     """
-    if case.code != ExceptionCode.MISSING_PUNCH:
-        # Not anchored here, so a model-supplied ref is unverified: never pass it on.
-        return [_without_ref(a) for a in actions], []
     zone = local_zone(case)
+    own = {p.punch_id: p for p in case.punches}
     problems: list[str] = []
     anchored: list[ProposedAction] = []
     for action in actions:
-        if action.type != ActionType.ADD_PUNCH or action.new_ts is None:
+        adding = action.type == ActionType.ADD_PUNCH and case.code == ExceptionCode.MISSING_PUNCH
+        adjusting = action.type == ActionType.ADJUST_PUNCH
+        if not (adding or adjusting) or action.new_ts is None:
             anchored.append(_without_ref(action))
             continue
         ts = action.new_ts
@@ -168,7 +177,25 @@ def anchor_times(
             )
             anchored.append(action)
             continue
-        found = _candidates(case, action, local, tolerance)
+        if adjusting:
+            target = own.get(action.punch_id or "")
+            if target is None:
+                problems.append(
+                    f"adjust_punch target {action.punch_id} is not one of this case's punches"
+                )
+                anchored.append(action)
+                continue
+            typed = action.model_copy(update={"punch_type": target.type})
+            found = [
+                r for r in _candidates(case, typed, local, tolerance) if r.kind == EvidenceKind.NOTE
+            ]
+            unsupported = (
+                f"{local:%H:%M} is not a time the employee stated; a recorded punch is only "
+                "moved to a stated time"
+            )
+        else:
+            found = _candidates(case, action, local, tolerance)
+            unsupported = f"{local:%H:%M} is not supported by the schedule, notes or history"
         if action.evidence_ref is not None:
             if action.evidence_ref not in found:
                 problems.append(
@@ -179,7 +206,7 @@ def anchor_times(
         elif found:
             anchored.append(action.model_copy(update={"evidence_ref": found[0]}))
         else:
-            problems.append(f"{local:%H:%M} is not supported by the schedule, notes or history")
+            problems.append(unsupported)
             anchored.append(action)
     return anchored, problems
 

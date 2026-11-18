@@ -3,6 +3,7 @@
 #   docker compose --profile ollama up --build      API + local Ollama (CPU)
 #   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile ollama up --build
 #                                                   API + Ollama on an NVIDIA GPU
+#   docker compose --profile postgres up -d postgres  local PostgreSQL 15 for the attendance store
 # Pull models once: docker compose exec ollama ollama pull qwen2.5:7b-instruct
 #                   docker compose exec ollama ollama pull nomic-embed-text
 services:
@@ -31,5 +32,23 @@ services:
     volumes:
       - ollama-models:/root/.ollama
 
+  postgres:
+    image: postgres:15
+    profiles: ["postgres"]
+    environment:
+      # Local development only: trust auth, reachable from this machine only (127.0.0.1).
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_DB: resolva
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   ollama-models:
+  postgres-data:
