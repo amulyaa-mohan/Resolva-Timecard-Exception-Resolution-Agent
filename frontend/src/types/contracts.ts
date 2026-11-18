@@ -106,6 +106,9 @@ export interface AuditEvent {
   before_summary: string;
   after_summary: string;
   ts: string;
+  model_id?: string;
+  evidence_hash?: string;
+  decision_id?: string | null;
 }
 
 export interface PolicyPack {
@@ -133,5 +136,6 @@ export interface ImportRow {
   valid: boolean;
   error?: string;
 }
+
 
 
