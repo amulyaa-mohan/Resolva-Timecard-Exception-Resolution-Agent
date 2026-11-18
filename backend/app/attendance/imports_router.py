@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.attendance.access import ManagerCredential, authenticated_manager
 from app.attendance.importer import (
+    MAX_BYTES,
     NOTE_FIELDS,
     PUNCH_FIELDS,
     SHIFT_FIELDS,
@@ -29,7 +30,7 @@ class ImportRequest(BaseModel):
 
     kind: Literal["punches", "shifts", "notes"] = "punches"
     format: Literal["csv", "json"]
-    content: str = Field(min_length=1)
+    content: str = Field(min_length=1, max_length=MAX_BYTES)
     mapping: dict[str, str] = Field(
         default_factory=dict, description="Canonical field -> column name in the file."
     )

@@ -12,7 +12,7 @@ All instants are `timestamptz` stored in UTC. All `*_id` columns are business id
 | `PunchSource` | `kiosk`, `mobile`, `web`, `import` | `punches.source` |
 | `ExceptionCode` | `MISSING_PUNCH`, `OVERLAPPING_SHIFT`, `MEAL_BREAK_BREACH`, `OVERTIME_RISK`, `SPREAD_OVER_BREACH`, `SCHEDULE_DEVIATION` | `exceptions.code` |
 | `Severity` | `problem`, `warning` | `exceptions.severity` |
-| `ExceptionStatus` | `open`, `escalated`, `resolved`, `dismissed` | `exceptions.status` |
+| `ExceptionStatus` | `open`, `escalated`, `resolved`, `dismissed` (detection found the problem gone; it reopens if the problem returns) | `exceptions.status` |
 | `DecisionType` | `approve`, `reject`, `escalate` | `decisions.decision` |
 | `DecisionSource` | `ai_proposal`, `manager_edit`, `none` | `decisions.source` |
 | `GateStatus` | `eligible`, `blocked`, `escalated` | `proposals.status` |

@@ -30,11 +30,10 @@ from app.core.contracts import (
     GateStatus,
     ProposalResult,
     ProposedAction,
-    PunchRecord,
-    PunchSource,
 )
 from app.policies.registry import PolicyRegistry, PolicyResolutionError
 from app.resolution import totals
+from app.resolution.apply import apply_corrections
 from app.rules.engine import net_worked_hours
 from app.rules.validator import make_validator
 
@@ -286,26 +285,14 @@ class ResolutionStore:
                 "WHERE c.exception_id = ? AND d.decision = 'approve' ORDER BY c.created_at",
                 (exception_id,),
             ).fetchall()
-        punches = {p.punch_id: p for p in case.punches}
-        applied = []
-        for correction_id, actions_json in rows:
-            parsed = actions_json if isinstance(actions_json, list) else json.loads(actions_json)
-            for index, action in enumerate(parsed):
-                applied.append({"correction_id": correction_id, **action})
-                ts = datetime.fromisoformat(action["new_ts"]) if action.get("new_ts") else None
-                if action["type"] == "add_punch":
-                    key = f"correction:{correction_id}:{index}"
-                    punches[key] = PunchRecord(
-                        punch_id=key,
-                        employee_id=case.employee.employee_id,
-                        ts=ts,
-                        type=action["punch_type"],
-                        source=PunchSource.IMPORT,
-                    )
-                elif action["type"] == "adjust_punch" and action.get("punch_id") in punches:
-                    target = punches[action["punch_id"]]
-                    punches[action["punch_id"]] = target.model_copy(update={"ts": ts})
-        effective = sorted(punches.values(), key=lambda p: p.ts)
+        parsed = [
+            (cid, actions if isinstance(actions, list) else json.loads(actions))
+            for cid, actions in rows
+        ]
+        applied = [
+            {"correction_id": cid, **action} for cid, actions in parsed for action in actions
+        ]
+        effective = apply_corrections(case.punches, case.employee.employee_id, parsed)
         return {
             "exception_id": exception_id,
             "employee_id": case.employee.employee_id,
@@ -568,19 +555,11 @@ class ResolutionStore:
             else:
                 new_revision = revision + 1
                 after = build_verified_case(case, correction_revision=new_revision)
-                corrected = [
-                    *case.punches,
-                    *(
-                        PunchRecord(
-                            punch_id=f"correction-{i}",
-                            employee_id=case.employee.employee_id,
-                            ts=a.new_ts,
-                            type=a.punch_type,
-                            source=PunchSource.IMPORT,
-                        )
-                        for i, a in enumerate(request.actions)
-                    ),
-                ]
+                corrected = apply_corrections(
+                    case.punches,
+                    case.employee.employee_id,
+                    [(decision_id, actions)],  # `actions` is the JSON form built above
+                )
                 event = audit.append_event(
                     connection,
                     actor_type="manager",

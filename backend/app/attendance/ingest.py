@@ -20,11 +20,11 @@ from app.core.contracts import (
     DEFAULT_SEVERITY,
     EmployeeContext,
     PunchRecord,
-    PunchSource,
     ScheduledShift,
 )
 from app.policies.registry import PolicyRegistry, PolicyResolutionError
 from app.resolution import totals
+from app.resolution.apply import CORRECTION_PREFIX, apply_corrections
 from app.rules.detection import detect, group_by_work_date, shift_for, violations
 from app.rules.engine import RULE_VERSION, net_worked_hours
 
@@ -191,123 +191,212 @@ def run_detection(
     *,
     as_of: datetime,
 ) -> list[str]:
-    """Recompute day totals, then raise exceptions for violations. Returns new exception ids."""
+    """Recompute day totals, then raise exceptions for violations. Returns new exception ids.
+
+    One transaction PER EMPLOYEE, not one for the whole import. Every writer takes the same lock, so
+    a single long transaction stalls every approval behind it: measured at about 5 ms per
+    employee, a 5,000-row import of one punch each would hold it for roughly 24 s. Per employee,
+    the lock is held for milliseconds and approvals interleave. Detection is idempotent and a
+    retry re-checks every date it was given, so a failure part-way loses nothing.
+    """
     created: list[str] = []
-    with backend.transaction() as c:
-        for employee_id, dates in sorted(touched.items()):
-            row = c.execute(
-                "SELECT employee_id, location_id, jurisdiction, timezone, worker_category "
-                "FROM employees WHERE employee_id = ?",
-                (employee_id,),
-            ).fetchone()
-            keys = ("employee_id", "location_id", "jurisdiction", "timezone", "worker_category")
-            employee = EmployeeContext.model_validate(dict(zip(keys, row, strict=True)))
-            zone = ZoneInfo(employee.timezone)
-            # Totals cover each touched date's whole policy week, so the loader finds no gaps.
-            week_days = set(dates)
-            for touched_date in dates:
-                try:
-                    start_day = registry.resolve(employee, touched_date).rules.week_start.number
-                except PolicyResolutionError:
-                    continue
-                monday = totals.week_start(touched_date, start_day)
-                week_days |= {monday + timedelta(days=i) for i in range(7)}
-            first, last = min(week_days) - timedelta(days=1), max(week_days) + timedelta(days=2)
-            lo = datetime.combine(first, time(0), tzinfo=zone)
-            hi = datetime.combine(last, time(0), tzinfo=zone)
-            punches = _effective_punches(c, employee_id, lo, hi)
-            shifts = [
-                ScheduledShift(
-                    shift_id=r[0], employee_id=r[1], start=r[2], end=r[3], planned_break_min=r[4]
-                )
-                for r in c.execute(
-                    "SELECT shift_id, employee_id, start_at, end_at, planned_break_min "
-                    "FROM scheduled_shifts WHERE employee_id = ? AND start_at >= ? "
-                    "AND start_at < ?",
-                    (employee_id, lo, hi),
-                )
-            ]
-            groups = group_by_work_date(punches, employee.timezone)
-            for work_date in sorted(week_days):
-                day = groups.get(work_date, [])
-                shift = shift_for(shifts, work_date, employee.timezone)
-                worked = net_worked_hours(day) if day else 0.0
-                # Final once the shift (or, unscheduled, the local day) is over. Assumption:
-                # schedules are imported for every working day, so an unscheduled past day
-                # with no punches is a day off (0 h), not missing data.
-                day_end = datetime.combine(work_date + timedelta(days=1), time(0), tzinfo=zone)
-                ended = (shift.end if shift else day_end) <= as_of
-                totals.upsert_day_total(
-                    c,
-                    employee_id=employee_id,
-                    work_date=work_date,
-                    worked_hours=worked or 0.0,
-                    scheduled_hours=(shift.end - shift.start).total_seconds() / 3600
-                    if shift
-                    else 0.0,
-                    complete=worked is not None and ended,
-                    evidence_final=ended,
-                    source="detection",
-                    now=as_of,
-                )
-            for work_date in sorted(week_days):
-                day = groups.get(work_date, [])
-                shift = shift_for(shifts, work_date, employee.timezone)
-                if not day:
-                    continue  # absence is not one of the six exceptions
-                try:
-                    policy = registry.resolve(employee, work_date)
-                except PolicyResolutionError:
-                    continue
-                probe = _probe(employee, work_date)
-                aggregates = totals.load_aggregates(c, probe, policy, as_of)
-                for finding in violations(
-                    detect(
-                        employee, work_date, day, shift, policy, as_of=as_of, aggregates=aggregates
-                    )
-                ):
-                    exception_id = f"EX-{employee_id}-{work_date.isoformat()}-{finding.code.value}"
-                    new = c.execute(
-                        "INSERT INTO exceptions (exception_id, employee_id, shift_id, code, "
-                        "severity, work_date, rule_version, detection_details) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
-                        (
-                            exception_id,
-                            employee_id,
-                            shift.shift_id if shift else None,
-                            finding.code.value,
-                            DEFAULT_SEVERITY[finding.code].value,
-                            work_date,
-                            RULE_VERSION,
-                            Jsonb({**finding.details, "reason": finding.reason}),
-                        ),
-                    ).rowcount
-                    if not new:
-                        continue
-                    for p in day:
-                        if not p.punch_id.startswith("correction:"):
-                            c.execute(
-                                "INSERT INTO exception_punches VALUES (?, ?)",
-                                (exception_id, p.punch_id),
-                            )
-                    audit.append_event(
-                        c,
-                        actor_type="system",
-                        actor_id="detection",
-                        event_type="EXCEPTION_DETECTED",
-                        exception_id=exception_id,
-                        payload={
-                            "code": finding.code.value,
-                            "reason": finding.reason,
-                            "rule_version": RULE_VERSION,
-                            "policy": f"{policy.pack_id}@{policy.version}",
-                        },
-                        occurred_at=as_of,
-                    )
-                    created.append(exception_id)
-        # Notes already on file belong to the exceptions detection has just raised.
-        attach_notes(c, set(touched), as_of=as_of)
+    for employee_id, dates in sorted(touched.items()):
+        with backend.transaction() as c:
+            created += _detect_employee(c, registry, employee_id, dates, as_of)
+            # Notes already on file belong to the exceptions detection has just raised.
+            attach_notes(c, {employee_id}, as_of=as_of)
     return created
+
+
+def _detect_employee(
+    c, registry: PolicyRegistry, employee_id: str, dates: set[date], as_of: datetime
+) -> list[str]:
+    created: list[str] = []
+    row = c.execute(
+        "SELECT employee_id, location_id, jurisdiction, timezone, worker_category "
+        "FROM employees WHERE employee_id = ?",
+        (employee_id,),
+    ).fetchone()
+    keys = ("employee_id", "location_id", "jurisdiction", "timezone", "worker_category")
+    employee = EmployeeContext.model_validate(dict(zip(keys, row, strict=True)))
+    zone = ZoneInfo(employee.timezone)
+    # Totals cover each touched date's whole policy week, so the loader finds no gaps.
+    week_days = set(dates)
+    for touched_date in dates:
+        try:
+            start_day = registry.resolve(employee, touched_date).rules.week_start.number
+        except PolicyResolutionError:
+            continue
+        monday = totals.week_start(touched_date, start_day)
+        week_days |= {monday + timedelta(days=i) for i in range(7)}
+    first, last = min(week_days) - timedelta(days=1), max(week_days) + timedelta(days=2)
+    lo = datetime.combine(first, time(0), tzinfo=zone)
+    hi = datetime.combine(last, time(0), tzinfo=zone)
+    punches = _effective_punches(c, employee_id, lo, hi)
+    shifts = [
+        ScheduledShift(
+            shift_id=r[0], employee_id=r[1], start=r[2], end=r[3], planned_break_min=r[4]
+        )
+        for r in c.execute(
+            "SELECT shift_id, employee_id, start_at, end_at, planned_break_min "
+            "FROM scheduled_shifts WHERE employee_id = ? AND start_at >= ? "
+            "AND start_at < ?",
+            (employee_id, lo, hi),
+        )
+    ]
+    groups = group_by_work_date(punches, employee.timezone)
+    for work_date in sorted(week_days):
+        day = groups.get(work_date, [])
+        shift = shift_for(shifts, work_date, employee.timezone)
+        worked = net_worked_hours(day) if day else 0.0
+        # Final once the shift (or, unscheduled, the local day) is over. Assumption:
+        # schedules are imported for every working day, so an unscheduled past day
+        # with no punches is a day off (0 h), not missing data.
+        day_end = datetime.combine(work_date + timedelta(days=1), time(0), tzinfo=zone)
+        ended = (shift.end if shift else day_end) <= as_of
+        totals.upsert_day_total(
+            c,
+            employee_id=employee_id,
+            work_date=work_date,
+            worked_hours=worked or 0.0,
+            scheduled_hours=(shift.end - shift.start).total_seconds() / 3600 if shift else 0.0,
+            complete=worked is not None and ended,
+            evidence_final=ended,
+            source="detection",
+            now=as_of,
+        )
+    for work_date in sorted(week_days):
+        day = groups.get(work_date, [])
+        shift = shift_for(shifts, work_date, employee.timezone)
+        if not day:
+            continue  # absence is not one of the six exceptions
+        try:
+            policy = registry.resolve(employee, work_date)
+        except PolicyResolutionError:
+            continue
+        probe = _probe(employee, work_date)
+        aggregates = totals.load_aggregates(c, probe, policy, as_of)
+        findings = detect(
+            employee, work_date, day, shift, policy, as_of=as_of, aggregates=aggregates
+        )
+        _clear_resolved(c, employee_id, work_date, {f.code for f in findings}, as_of)
+        for finding in violations(findings):
+            exception_id = f"EX-{employee_id}-{work_date.isoformat()}-{finding.code.value}"
+            details = {**finding.details, "reason": finding.reason}
+            new = c.execute(
+                "INSERT INTO exceptions (exception_id, employee_id, shift_id, code, "
+                "severity, work_date, rule_version, detection_details) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                (
+                    exception_id,
+                    employee_id,
+                    shift.shift_id if shift else None,
+                    finding.code.value,
+                    DEFAULT_SEVERITY[finding.code].value,
+                    work_date,
+                    RULE_VERSION,
+                    Jsonb(details),
+                ),
+            ).rowcount
+            linked = _link_day_punches(c, exception_id, day)
+            if new:
+                audit.append_event(
+                    c,
+                    actor_type="system",
+                    actor_id="detection",
+                    event_type="EXCEPTION_DETECTED",
+                    exception_id=exception_id,
+                    payload={
+                        "code": finding.code.value,
+                        "reason": finding.reason,
+                        "rule_version": RULE_VERSION,
+                        "policy": f"{policy.pack_id}@{policy.version}",
+                    },
+                    occurred_at=as_of,
+                )
+                created.append(exception_id)
+            elif _reopen(c, exception_id, details, as_of):
+                created.append(exception_id)
+            elif linked:
+                _note_new_evidence(c, exception_id, linked, as_of)
+    return created
+
+
+def _link_day_punches(c, exception_id: str, day: list[PunchRecord]) -> list[str]:
+    """Link the day's raw punches as the exception's evidence; returns the newly linked ids."""
+    linked = []
+    for punch in day:
+        if punch.punch_id.startswith(CORRECTION_PREFIX):
+            continue
+        if c.execute(
+            "INSERT INTO exception_punches VALUES (?, ?) ON CONFLICT DO NOTHING",
+            (exception_id, punch.punch_id),
+        ).rowcount:
+            linked.append(punch.punch_id)
+    return linked
+
+
+def _clear_resolved(c, employee_id: str, work_date: date, still_found: set, as_of: datetime):
+    """Dismiss open or escalated exceptions whose rule now PASSES for this day.
+
+    A rule that is merely undecided (insufficient evidence) is left alone: not knowing is not the
+    same as being fixed. Without this, a punch imported after the exception was raised left a
+    phantom the manager could not resolve (the validator says the problem is no longer present).
+    Dismissal is recorded, never a delete, and a recurrence reopens it (see _reopen).
+    """
+    for exception_id, code, status in c.execute(
+        "SELECT exception_id, code, status FROM exceptions WHERE employee_id = ? "
+        "AND work_date = ? AND status IN ('open', 'escalated')",
+        (employee_id, work_date),
+    ).fetchall():
+        if code in {f.value for f in still_found}:
+            continue
+        c.execute(
+            "UPDATE exceptions SET status = 'dismissed' WHERE exception_id = ?", (exception_id,)
+        )
+        audit.append_event(
+            c,
+            actor_type="system",
+            actor_id="detection",
+            event_type="EXCEPTION_CLEARED",
+            exception_id=exception_id,
+            payload={"reason": "the rule now passes after new evidence", "was": status},
+            occurred_at=as_of,
+        )
+
+
+def _reopen(c, exception_id: str, details: dict, as_of: datetime) -> bool:
+    """Bring a dismissed exception back when its problem returns. True if it was reopened."""
+    reopened = c.execute(
+        "UPDATE exceptions SET status = CASE WHEN EXISTS (SELECT 1 FROM escalations s "
+        "WHERE s.exception_id = exceptions.exception_id) THEN 'escalated' ELSE 'open' END, "
+        "detection_details = ? WHERE exception_id = ? AND status = 'dismissed'",
+        (Jsonb(details), exception_id),
+    ).rowcount
+    if reopened:
+        audit.append_event(
+            c,
+            actor_type="system",
+            actor_id="detection",
+            event_type="EXCEPTION_REOPENED",
+            exception_id=exception_id,
+            payload={"reason": details.get("reason", "the problem returned")},
+            occurred_at=as_of,
+        )
+    return bool(reopened)
+
+
+def _note_new_evidence(c, exception_id: str, punch_ids: list[str], as_of: datetime) -> None:
+    """New punches joined a live exception. That changes its evidence version, so say so."""
+    audit.append_event(
+        c,
+        actor_type="system",
+        actor_id="detection",
+        event_type="EVIDENCE_ATTACHED",
+        exception_id=exception_id,
+        payload={"punch_ids": punch_ids},
+        occurred_at=as_of,
+    )
 
 
 def _probe(employee: EmployeeContext, work_date: date):
@@ -325,25 +414,17 @@ def _effective_punches(c, employee_id: str, lo: datetime, hi: datetime) -> list[
     ).fetchall()
     keys = ("punch_id", "employee_id", "ts", "type", "source", "device_id")
     punches = [PunchRecord.model_validate(dict(zip(keys, r, strict=True))) for r in rows]
-    for correction_id, actions in c.execute(
-        "SELECT correction_id, actions_json FROM corrections WHERE employee_id = ?",
-        (employee_id,),
-    ):
-        for i, action in enumerate(actions if isinstance(actions, list) else json.loads(actions)):
-            if action.get("type") != "add_punch":
-                continue
-            ts = datetime.fromisoformat(action["new_ts"])
-            if lo <= ts < hi:
-                punches.append(
-                    PunchRecord(
-                        punch_id=f"correction:{correction_id}:{i}",
-                        employee_id=employee_id,
-                        ts=ts,
-                        type=action["punch_type"],
-                        source=PunchSource.IMPORT,
-                    )
-                )
-    return punches
+    corrections = [
+        (cid, actions if isinstance(actions, list) else json.loads(actions))
+        for cid, actions in c.execute(
+            "SELECT correction_id, actions_json FROM corrections WHERE employee_id = ? "
+            "ORDER BY created_at, correction_id",
+            (employee_id,),
+        )
+    ]
+    effective = apply_corrections(punches, employee_id, corrections)
+    # A correction's added punch outside this window belongs to another day.
+    return [p for p in effective if not p.punch_id.startswith(CORRECTION_PREFIX) or lo <= p.ts < hi]
 
 
 def new_batch_id() -> str:

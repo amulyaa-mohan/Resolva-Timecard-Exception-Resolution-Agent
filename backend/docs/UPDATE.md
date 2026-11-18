@@ -555,3 +555,20 @@ Never include credentials, private employee data, or invented test results.
   lint and format pass; `evals.run --gates ci` 9/9 PASS (the mock provider; this proves the harness, not model quality).
   The AI flows that read the notes were not run against a live model here.
 - Open: "unscheduled shift" as a schedule deviation needs a signal that schedules are complete; contract 0.3.0 review.
+
+### 2026-11-18 — C V Jayanth — A-AUDIT-02 — Self-audit of the code written after Track B's audit
+
+- Branch: backend. Status REVIEW. Full findings, reproductions and what was checked and fine:
+  `backend/docs/AUDIT_TRACK_A_2026-11-18.md`.
+- Fixed (each reproduced by a failing test first): approving an `adjust_punch` returned 500 (three places re-implemented
+  "apply corrections"; now one shared `app/resolution/apply.py`); exceptions never cleared and a cleared one could never
+  return (now dismissed/reopened, audited); a retry after a failed detection detected nothing; hostile CSV/JSON caused
+  500s (cell size, nesting depth, huge integers, year overflow, NUL bytes including the JSON escape, break length
+  overflowing a 32-bit column); one write transaction per import stalled every approval (now one per employee).
+- Measured, not assumed: detection costs about 5 ms per employee (120 employees, 0.58 s).
+- Checked and fine: 6,000-day fuzz of detect/explain/grouping/apply (no crash, no stray detail key); the concurrent
+  approval race; cross-employee evidence; no HTML or eval sinks in the frontend.
+- Validation: 614 passed with TEST_DATABASE_URL on local PostgreSQL 15, 551 passed / 63 skipped without it; Ruff lint and
+  format pass.
+- Found while writing the fix, not yet fixed: the frontend audit CSV export has formula injection (separate commit, branch
+  `frontend`).
