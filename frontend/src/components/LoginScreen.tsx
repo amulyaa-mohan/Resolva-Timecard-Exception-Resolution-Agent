@@ -1,3 +1,4 @@
+import { useTranslation } from "../lib/locale";
 import { useEffect, useState } from 'react';
 import '../login.css';
 
@@ -20,6 +21,7 @@ const DEMO_PRESETS: DemoAccount[] = [
 const REMEMBERED_EMAIL_KEY = 'resolva_remembered_email';
 
 export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
+  const { tr } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
@@ -107,34 +109,28 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
         <div className="login-card">
           <header className="login-header">
             <div>
-              <span className="login-demo-pill">Demo Access Only</span>
+              <span className="login-demo-pill">{tr("Demo Access Only")}</span>
             </div>
             <h1 className="login-brand-title">
-              Resolva <span>Enterprise</span>
+              Resolva <span>{tr("Enterprise")}</span>
             </h1>
-            <p className="login-subtitle">
-              Attendance Exception Detection &amp; AI-Assisted Resolution
-            </p>
+            <p className="login-subtitle">{tr("Attendance Exception Detection & AI-Assisted Resolution")}</p>
           </header>
 
           <div className="login-body">
             <div className="login-banner login-banner-info" role="note">
-              <strong>Evaluation Environment:</strong> Authentication is simulated for team demonstration.
-              You may use any valid email format and a 6+ character password, or click a demo profile below.
-            </div>
+              <strong>{tr("Evaluation Environment:")}</strong>{" " + tr("Authentication is simulated for team demonstration. You may use any valid email format and a 6+ character password, or click a demo profile below.") + ""}</div>
 
             {showForgotNotice && (
               <div className="login-banner login-banner-alert" role="status">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
                   <div>
-                    <strong>Demo Mode Notice:</strong> Self-service password recovery is disabled in this demonstration prototype.
-                    You can sign in with any valid email and any password (6+ characters), or choose one of the quick demo profiles below.
-                  </div>
+                    <strong>{tr("Demo Mode Notice:")}</strong>{" " + tr("Self-service password recovery is disabled in this demonstration prototype. You can sign in with any valid email and any password (6+ characters), or choose one of the quick demo profiles below.") + ""}</div>
                   <button
                     type="button"
                     className="login-dismiss-btn"
                     onClick={() => setShowForgotNotice(false)}
-                    aria-label="Dismiss notice"
+                    aria-label={tr("Dismiss notice")}
                   >
                     ✕
                   </button>
@@ -144,9 +140,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
 
             <form className="login-form" onSubmit={handleSubmit} noValidate>
               <div className="login-form-group">
-                <label className="login-label" htmlFor="login-email">
-                  Work Email Address
-                </label>
+                <label className="login-label" htmlFor="login-email">{tr("Work Email Address")}</label>
                 <input
                   id="login-email"
                   type="email"
@@ -163,21 +157,19 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                 />
                 {emailError && (
                   <div id="email-error" className="login-error-text" role="alert">
-                    {emailError}
+                    {tr(emailError)}
                   </div>
                 )}
               </div>
 
               <div className="login-form-group">
-                <label className="login-label" htmlFor="login-password">
-                  Password
-                </label>
+                <label className="login-label" htmlFor="login-password">{tr("Password")}</label>
                 <div className="login-password-wrapper">
                   <input
                     id="login-password"
                     type={showPassword ? 'text' : 'password'}
                     className={`login-input ${passwordError ? 'has-error' : ''}`}
-                    placeholder="Enter demo password"
+                    placeholder={tr("Enter demo password")}
                     value={password}
                     onChange={(e) => {
                       setPassword(e.target.value);
@@ -191,14 +183,14 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                     type="button"
                     className="login-toggle-pw-btn"
                     onClick={() => setShowPassword((prev) => !prev)}
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    aria-label={tr(showPassword ? 'Hide password' : 'Show password')}
                   >
-                    {showPassword ? 'Hide' : 'Show'}
+                    {tr(showPassword ? 'Hide' : 'Show')}
                   </button>
                 </div>
                 {passwordError && (
                   <div id="password-error" className="login-error-text" role="alert">
-                    {passwordError}
+                    {tr(passwordError)}
                   </div>
                 )}
               </div>
@@ -210,27 +202,23 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                     checked={rememberMe}
                     onChange={(e) => setRememberMe(e.target.checked)}
                   />
-                  <span>Remember my email</span>
+                  <span>{tr("Remember my email")}</span>
                 </label>
 
                 <button
                   type="button"
                   className="login-forgot-link"
                   onClick={() => setShowForgotNotice(true)}
-                >
-                  Forgot password?
-                </button>
+                >{tr("Forgot password?")}</button>
               </div>
 
-              <button type="submit" className="login-submit-btn">
-                Sign In to Resolva
-              </button>
+              <button type="submit" className="login-submit-btn">{tr("Sign In to Resolva")}</button>
             </form>
 
             <div className="login-presets-section">
               <div className="login-presets-header">
-                <span>Quick Demo Accounts</span>
-                <span className="mono" style={{ fontSize: '10px' }}>Click to Autofill</span>
+                <span>{tr("Quick Demo Accounts")}</span>
+                <span className="mono" style={{ fontSize: '10px' }}>{tr("Click to Autofill")}</span>
               </div>
               <div className="login-presets-list">
                 {DEMO_PRESETS.map((preset) => (
@@ -244,16 +232,13 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                       <span className="login-preset-name">{preset.name}</span>
                       <span className="muted" style={{ marginLeft: 6 }}>({preset.email})</span>
                     </div>
-                    <span className="login-preset-role">{preset.role}</span>
+                    <span className="login-preset-role">{tr(preset.role)}</span>
                   </button>
                 ))}
               </div>
             </div>
 
-            <p className="login-disclaimer">
-              This is a prototype demonstration environment for team evaluation.
-              No production identity provider (SSO / SAML / OAuth) is connected.
-            </p>
+            <p className="login-disclaimer">{tr("This is a prototype demonstration environment for team evaluation. No production identity provider (SSO / SAML / OAuth) is connected.")}</p>
           </div>
         </div>
       </div>
