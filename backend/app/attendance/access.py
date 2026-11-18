@@ -37,6 +37,8 @@ class AttendanceSettings(BaseSettings):
     enabled: bool = False
     database_path: Path = BACKEND_DIR / "local" / "attendance.sqlite"
     credentials_path: Path = BACKEND_DIR / "local" / "manager-credentials.json"
+    # PostgreSQL DSN. When set it replaces the demo SQLite file (database_path is ignored).
+    database_url: str | None = Field(default=None, repr=False)
 
 
 def read_credentials(path: Path) -> tuple[ManagerCredential, ...]:

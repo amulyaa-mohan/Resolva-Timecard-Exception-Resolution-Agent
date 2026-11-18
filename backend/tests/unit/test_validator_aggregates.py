@@ -244,7 +244,7 @@ def test_dst_fall_back_uses_elapsed_hours(registry):
     [
         ("none", "one missing-punch action"),
         ("two", "one missing-punch action"),
-        ("adjust", "clock-in/clock-out"),
+        ("adjust", "not allowed for MISSING_PUNCH"),
         ("target", "existing punch"),
         ("break", "clock-in/clock-out"),
         ("early", "exact schedule time"),

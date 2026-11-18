@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.ai.providers import ProviderError, build_provider
 from app.attendance.access import AttendanceSettings, read_credentials
+from app.attendance.imports_router import router as imports_router
 from app.attendance.repository import DemoCaseRepository
 from app.attendance.router import router as attendance_router
 from app.core.config import Settings
@@ -33,16 +34,29 @@ def create_app(
     app.state.attendance_repository = None
     app.state.attendance_credentials = ()
     if attendance_settings.enabled:
-        # Missing provisioning fails startup instead of silently creating an empty database.
-        if not attendance_settings.database_path.is_file():
-            raise ValueError("Provision the attendance demo database before enabling it.")
         app.state.attendance_credentials = read_credentials(attendance_settings.credentials_path)
-        app.state.attendance_repository = DemoCaseRepository(attendance_settings.database_path)
-        app.state.resolution_store = ResolutionStore(
-            attendance_settings.database_path, PolicyRegistry.from_directory(settings.policies_dir)
-        )
+        registry = PolicyRegistry.from_directory(settings.policies_dir)
+        if attendance_settings.database_url:
+            # PostgreSQL: the schema must already be migrated (scripts/migrate_postgres.py).
+            from app.attendance.postgres import PostgresBackend, PostgresCaseRepository
+
+            app.state.attendance_repository = PostgresCaseRepository(
+                attendance_settings.database_url
+            )
+            app.state.resolution_store = ResolutionStore(
+                PostgresBackend(attendance_settings.database_url), registry
+            )
+        else:
+            # Missing provisioning fails startup instead of silently creating an empty database.
+            if not attendance_settings.database_path.is_file():
+                raise ValueError("Provision the attendance demo database before enabling it.")
+            app.state.attendance_repository = DemoCaseRepository(attendance_settings.database_path)
+            app.state.resolution_store = ResolutionStore(
+                attendance_settings.database_path, registry
+            )
     app.include_router(attendance_router)
     app.include_router(resolution_router)
+    app.include_router(imports_router)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[origin.strip() for origin in settings.cors_origins.split(",")],

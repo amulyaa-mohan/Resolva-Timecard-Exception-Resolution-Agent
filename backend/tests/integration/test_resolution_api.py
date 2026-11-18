@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import sqlite3
 from datetime import UTC, date, datetime, timedelta
 
@@ -25,6 +26,7 @@ def evidenced(exception_id="X-1", employee="E-001") -> CaseContext:
     data["exception_id"] = exception_id
     data["employee"]["employee_id"] = employee
     data["schedule"]["employee_id"] = employee
+    data["schedule"]["shift_id"] = f"S-{employee}"
     data["punches"] = [
         PunchRecord(
             punch_id=f"{exception_id}-P{i}",
@@ -54,10 +56,71 @@ def seed_totals(store, employee="E-001", weekday_hours=8.0):
         day += timedelta(days=1)
 
 
-@pytest.fixture
-def env(tmp_path, settings):
-    database = tmp_path / "cases.sqlite"
-    repo = DemoCaseRepository(database)
+class Db:
+    """Direct database access for assertions, for either backend."""
+
+    def __init__(self, kind, target):
+        self.kind, self.target = kind, target
+
+    def connect(self):
+        if self.kind == "sqlite":
+            return sqlite3.connect(self.target, isolation_level=None)
+        import psycopg
+
+        from app.attendance.postgres import PgConnection
+
+        return PgConnection(psycopg.connect(self.target, autocommit=True))
+
+    def scalar(self, sql, params=()):
+        connection = self.connect()
+        try:
+            return connection.execute(sql, params).fetchone()
+        finally:
+            (connection.raw if self.kind == "postgres" else connection).close()
+
+    def raw_punch_count(self, exception_id):
+        if self.kind == "sqlite":
+            row = self.scalar(
+                "SELECT evidence_json FROM demo_case_snapshots WHERE exception_id=?",
+                (exception_id,),
+            )
+            return len(json.loads(row[0])["punches"])
+        return self.scalar(
+            "SELECT count(*) FROM exception_punches WHERE exception_id=?", (exception_id,)
+        )[0]
+
+
+def _postgres_dsn():
+    dsn = os.environ.get("TEST_DATABASE_URL")
+    if not dsn:
+        pytest.skip("set TEST_DATABASE_URL to a disposable *_test PostgreSQL database")
+    if not dsn.rsplit("/", 1)[-1].split("?")[0].endswith("_test"):
+        pytest.fail("TEST_DATABASE_URL must name a database ending in _test (it is wiped)")
+    import psycopg
+
+    from app.attendance.postgres import apply_migrations
+
+    with psycopg.connect(dsn, autocommit=True) as connection:
+        connection.execute("DROP SCHEMA public CASCADE")
+        connection.execute("CREATE SCHEMA public")
+    apply_migrations(dsn)
+    return dsn
+
+
+@pytest.fixture(params=["sqlite", "postgres"])
+def env(request, tmp_path, settings):
+    if request.param == "postgres":
+        from app.attendance.postgres import PostgresCaseRepository
+
+        dsn = _postgres_dsn()
+        repo = PostgresCaseRepository(dsn)
+        db = Db("postgres", dsn)
+        storage = {"database_url": dsn}
+    else:
+        database = tmp_path / "cases.sqlite"
+        repo = DemoCaseRepository(database)
+        db = Db("sqlite", database)
+        storage = {"database_path": database}
     repo.seed_case(evidenced(), manager_id="M-1")
     repo.seed_case(evidenced("X-2", "E-002"), manager_id="M-1")  # no totals provisioned
     repo.seed_case(evidenced("X-3", "E-003"), manager_id="M-2")
@@ -78,14 +141,16 @@ def env(tmp_path, settings):
     app = create_app(
         settings,
         attendance_settings=AttendanceSettings(
-            _env_file=None, enabled=True, database_path=database, credentials_path=credentials
+            _env_file=None, enabled=True, credentials_path=credentials, **storage
         ),
     )
     store = app.state.resolution_store
     store.clock = lambda: NOW
     seed_totals(store)
+    for employee in ("E-002", "E-003"):  # employees must exist; X-2 has no totals on purpose
+        assert db.scalar("SELECT count(*) FROM day_totals WHERE employee_id=?", (employee,))[0] == 0
     with TestClient(app) as client:
-        yield client, store, database
+        yield client, store, db
 
 
 def auth(token="token-one"):
@@ -137,20 +202,15 @@ def test_approval_resolves_records_correction_and_audit(env):
     assert all(c["passed"] for c in payload["checks"]) and len(payload["checks"]) == 6
     listing = client.get("/exceptions", headers=auth()).json()["items"]
     assert {i["exception_id"]: i["status"] for i in listing} == {"X-1": "resolved", "X-2": "open"}
-    with sqlite3.connect(database) as db:
-        assert db.execute("SELECT count(*) FROM corrections").fetchone()[0] == 1
-        raw = json.loads(
-            db.execute(
-                "SELECT evidence_json FROM demo_case_snapshots WHERE exception_id='X-1'"
-            ).fetchone()[0]
-        )
-        assert len(raw["punches"]) == 3  # raw punches untouched
-        worked = db.execute(
-            "SELECT worked_hours, source FROM day_totals WHERE employee_id='E-001' AND work_date=?",
-            (WORK_DATE.isoformat(),),
-        ).fetchone()
-        assert worked[0] == 8.0 and worked[1].startswith("correction:DEC-")
-        assert verify_chain(db)
+    assert database.scalar("SELECT count(*) FROM corrections")[0] == 1
+    assert database.raw_punch_count("X-1") == 3  # raw punches untouched
+    worked = database.scalar(
+        "SELECT worked_hours, source FROM day_totals WHERE employee_id='E-001' AND work_date=?",
+        (WORK_DATE.isoformat(),),
+    )
+    assert worked[0] == 8.0 and worked[1].startswith("correction:DEC-")
+    connection = database.connect()
+    assert verify_chain(connection)
 
 
 def test_stale_evidence_rejected_without_side_effects(env):
@@ -278,18 +338,26 @@ def test_authorization_is_server_side(env):
 def test_records_are_append_only_and_tamper_evident(env):
     client, _, database = env
     client.post("/exceptions/X-1/decisions", json=approve_body(client), headers=auth())
-    with sqlite3.connect(database) as db:
-        for statement in [
-            "UPDATE audit_events SET actor_id='someone-else'",
-            "DELETE FROM audit_events",
-            "UPDATE decisions SET decision='reject'",
-            "DELETE FROM corrections",
-        ]:
-            with pytest.raises(sqlite3.IntegrityError, match="append-only"):
-                db.execute(statement)
-        db.execute("DROP TRIGGER audit_events_no_update")  # out-of-band tampering
-        db.execute("UPDATE audit_events SET actor_id='someone-else'")
-        assert not verify_chain(db)
+    statements = [
+        "UPDATE audit_events SET actor_id='someone-else'",
+        "DELETE FROM audit_events",
+        "UPDATE decisions SET decision='reject'",
+        "DELETE FROM corrections",
+    ]
+    if database.kind == "postgres":
+        statements += ["UPDATE punches SET ts = ts", "TRUNCATE audit_events"]
+    for statement in statements:
+        with pytest.raises(Exception, match="append-only"):
+            database.scalar(statement)
+    connection = database.connect()
+    trigger = (
+        "DROP TRIGGER audit_events_append_only ON audit_events"
+        if database.kind == "postgres"
+        else "DROP TRIGGER audit_events_no_update"
+    )
+    connection.execute(trigger)  # out-of-band tampering by someone with DDL rights
+    connection.execute("UPDATE audit_events SET actor_id='someone-else'")
+    assert not verify_chain(connection)
 
 
 def test_failure_mid_approval_rolls_everything_back(env, monkeypatch):
@@ -303,9 +371,8 @@ def test_failure_mid_approval_rolls_everything_back(env, monkeypatch):
     with pytest.raises(RuntimeError):
         client.post("/exceptions/X-1/decisions", json=approve_body(client), headers=auth())
     monkeypatch.undo()
-    with sqlite3.connect(database) as db:
-        for table in ("decisions", "corrections", "audit_events"):
-            assert db.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
+    for table in ("decisions", "corrections", "audit_events"):
+        assert database.scalar(f"SELECT count(*) FROM {table}")[0] == 0
     assert version(client) == before
 
 
@@ -394,3 +461,59 @@ def test_loader_uses_worked_hours_once_day_is_complete(tmp_path, registry, polic
 )
 def test_quarter_bounds(day, start, end):
     assert totals.quarter_bounds(day) == (start, end)
+
+
+# ---- A-06 bulk decisions
+
+
+def test_bulk_decisions_are_independent_per_item(env):
+    client, *_ = env
+    good = approve_body(client, key="bulk-key-1")
+    items = [
+        {**good, "exception_id": "X-1"},
+        # No totals for E-002: insufficient evidence, so this item fails on its own.
+        {
+            **approve_body(client, key="bulk-key-2", evidence_version=version(client, "X-2")),
+            "exception_id": "X-2",
+        },
+        {**approve_body(client, key="bulk-key-3"), "exception_id": "X-3"},  # another manager's
+        {**good, "idempotency_key": "bulk-key-4", "exception_id": "X-1"},  # now stale
+    ]
+    response = client.post("/exceptions/bulk-decisions", json={"items": items}, headers=auth())
+    assert response.status_code == 200, response.text
+    results = response.json()
+    assert [(r["exception_id"], r["status_code"]) for r in results] == [
+        ("X-1", 200),
+        ("X-2", 422),
+        ("X-3", 404),
+        ("X-1", 409),
+    ]
+    assert results[0]["result"]["status"] == "resolved"
+    overtime = next(c for c in results[1]["checks"] if c["code"] == "OVERTIME_RISK")
+    assert overtime["outcome"] == "insufficient_evidence"
+    assert audit_types(client) == ["DECISION_APPROVED"]
+    assert audit_types(client, "X-2") == ["APPROVAL_BLOCKED"]
+
+
+def test_bulk_request_validation(env):
+    client, *_ = env
+    item = {**approve_body(client, key="same-key-1"), "exception_id": "X-1"}
+    duplicate_keys = client.post(
+        "/exceptions/bulk-decisions",
+        json={"items": [item, {**item, "exception_id": "X-2"}]},
+        headers=auth(),
+    )
+    assert duplicate_keys.status_code == 422
+    assert (
+        client.post("/exceptions/bulk-decisions", json={"items": []}, headers=auth()).status_code
+        == 422
+    )
+    too_many = [{**item, "idempotency_key": f"key-{i:04d}"} for i in range(51)]
+    assert (
+        client.post(
+            "/exceptions/bulk-decisions", json={"items": too_many}, headers=auth()
+        ).status_code
+        == 422
+    )
+    assert client.post("/exceptions/bulk-decisions", json={"items": [item]}).status_code == 401
+    assert audit_types(client) == []

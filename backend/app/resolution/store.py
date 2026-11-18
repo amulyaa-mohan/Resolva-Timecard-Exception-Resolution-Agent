@@ -14,6 +14,7 @@ import json
 import sqlite3
 import uuid
 from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -113,14 +114,11 @@ class ValidationRejected(Exception):
         self.checks = checks
 
 
-class ResolutionStore:
-    def __init__(
-        self,
-        path: Path,
-        registry: PolicyRegistry,
-        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
-    ):
-        self.path, self.registry, self.clock = path, registry, clock
+class SqliteBackend:
+    """Demo SQLite file shared with DemoCaseRepository (tests and offline demo)."""
+
+    def __init__(self, path: Path):
+        self.path = path
         # executescript manages its own transaction; requires DemoCaseRepository tables first.
         connection = sqlite3.connect(path)
         try:
@@ -128,27 +126,23 @@ class ResolutionStore:
         finally:
             connection.close()
 
-    def _transaction(self, *, immediate: bool = True):
-        store = self
+    @contextmanager
+    def transaction(self, *, immediate: bool = True):
+        # BEGIN IMMEDIATE takes the write lock up front, serializing concurrent decisions.
+        connection = sqlite3.connect(self.path, isolation_level=None)
+        try:
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
+            try:
+                yield connection
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
+            connection.execute("COMMIT")
+        finally:
+            connection.close()
 
-        class _Tx:
-            def __enter__(self):
-                self.connection = sqlite3.connect(store.path, isolation_level=None)
-                self.connection.execute("PRAGMA foreign_keys = ON")
-                self.connection.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
-                return self.connection
-
-            def __exit__(self, kind, exc, tb):
-                try:
-                    self.connection.execute("ROLLBACK" if kind else "COMMIT")
-                finally:
-                    self.connection.close()
-
-        return _Tx()
-
-    # ---------------------------------------------------------------- reads
-
-    def _load(self, connection, exception_id: str, manager_id: str) -> tuple[CaseContext, int]:
+    def load_case(self, connection, exception_id: str, manager_id: str, *, lock: bool):
         row = connection.execute(
             "SELECT c.evidence_json, c.correction_revision FROM demo_case_snapshots c "
             "JOIN demo_employee_managers m ON m.employee_id=c.employee_id "
@@ -157,10 +151,41 @@ class ResolutionStore:
         ).fetchone()
         if row is None:
             raise CaseAccessDenied("case unavailable for this manager")
-        revision = row[1]
-        case = build_verified_case(
-            CaseContext.model_validate_json(row[0]), correction_revision=revision
-        )
+        return CaseContext.model_validate_json(row[0]), row[1]
+
+    def mark_resolved(self, connection, exception_id: str, old: int, new: int) -> None:
+        updated = connection.execute(
+            "UPDATE demo_case_snapshots SET correction_revision=? "
+            "WHERE exception_id=? AND correction_revision=?",
+            (new, exception_id, old),
+        ).rowcount
+        if updated != 1:
+            raise DecisionConflict("evidence revision changed during the decision")
+
+
+class ResolutionStore:
+    """Decision logic shared by every backend. A backend supplies transactions (with `?`
+    placeholders), authorized case loading (row-locked when asked) and the revision bump."""
+
+    def __init__(
+        self,
+        backend,
+        registry: PolicyRegistry,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ):
+        self.backend = SqliteBackend(backend) if isinstance(backend, Path) else backend
+        self.registry, self.clock = registry, clock
+
+    def _transaction(self, *, immediate: bool = True):
+        return self.backend.transaction(immediate=immediate)
+
+    # ---------------------------------------------------------------- reads
+
+    def _load(
+        self, connection, exception_id: str, manager_id: str, *, lock: bool = False
+    ) -> tuple[CaseContext, int]:
+        case, revision = self.backend.load_case(connection, exception_id, manager_id, lock=lock)
+        case = build_verified_case(case, correction_revision=revision)
         return case.model_copy(update={"as_of": self.clock().astimezone(UTC)}), revision
 
     def resolved_ids(self, exception_ids: list[str]) -> set[str]:
@@ -198,7 +223,7 @@ class ResolutionStore:
         ).hexdigest()
         blocked: ValidationRejected | None = None
         with self._transaction() as connection:
-            case, revision = self._load(connection, exception_id, manager_id)
+            case, revision = self._load(connection, exception_id, manager_id, lock=True)
             prior = connection.execute(
                 "SELECT request_hash, response_json FROM decisions WHERE idempotency_key=?",
                 (request.idempotency_key,),
@@ -206,7 +231,8 @@ class ResolutionStore:
             if prior:
                 if prior[0] != request_hash:
                     raise DecisionConflict("idempotency key reused for a different request")
-                return DecisionResult.model_validate_json(prior[1]).model_copy(
+                stored = prior[1] if isinstance(prior[1], str) else json.dumps(prior[1])
+                return DecisionResult.model_validate_json(stored).model_copy(
                     update={"replayed": True}
                 )
             if request.evidence_version != case.evidence_version:
@@ -357,11 +383,7 @@ class ResolutionStore:
                     ),
                 )
                 # Raw evidence_json is untouched; the revision makes older proposals stale.
-                connection.execute(
-                    "UPDATE demo_case_snapshots SET correction_revision=? "
-                    "WHERE exception_id=? AND correction_revision=?",
-                    (new_revision, exception_id, revision),
-                )
+                self.backend.mark_resolved(connection, exception_id, revision, new_revision)
                 # Later days' weekly totals must see the corrected hours.
                 worked = net_worked_hours(corrected)
                 if worked is not None and case.schedule is not None:

@@ -1,7 +1,8 @@
 # Decisions, corrections and audit (A-03)
 
 Track A. Code: `backend/app/resolution/` (store, totals loader, routes) and `backend/app/audit/events.py`.
-Storage: the demo SQLite file shared with `DemoCaseRepository`, NOT the final schema (A-01 / database team).
+Storage: PostgreSQL when `ATTENDANCE_DATABASE_URL` is set (schema in `backend/database/migrations`), otherwise the demo SQLite file.
+The same `ResolutionStore` logic runs on both (tests run the API suite against each).
 Enable it the same way as the read API (see ATTENDANCE_API.md); the seed script also provisions day totals.
 
 ## Endpoints
@@ -69,8 +70,25 @@ or any finished day of the quarter is missing or incomplete. Days from local tod
 
 ## Limits
 
-- Demo SQLite store and static demo tokens; final schema, migrations and identity provider are pending.
+- Static demo tokens, not an identity provider. PostgreSQL is not yet in Docker or CI (see the Track B request below).
 - Only `add_punch` corrections can pass validation today.
 - Approval does not require a stored proposal; the server re-validates whatever actions are submitted.
 - The corrected punch is stored as a correction row; detail reads still show raw punches plus the resolved status.
 - No bulk decisions (A-06) and no escalation persistence yet.
+
+## PostgreSQL setup
+
+```bash
+pip install -e "./backend[postgres]"
+.venv/bin/python backend/scripts/migrate_postgres.py "postgresql://user@host:5432/resolva"
+.venv/bin/python backend/scripts/seed_attendance_demo.py --database-url "postgresql://user@host:5432/resolva"
+```
+
+Then set `ATTENDANCE_ENABLED=true` and `ATTENDANCE_DATABASE_URL` in `backend/.env`. Never commit the URL if it contains a password.
+Tests: `TEST_DATABASE_URL=postgresql://.../resolva_test pytest backend/tests` runs the PostgreSQL variants.
+The database name must end in `_test`, because the fixture drops and recreates its `public` schema.
+
+Requested from Track B (owner of CI and Docker):
+- a `postgres:15` service in `.github/workflows/ci.yml`, plus `pip install -e ".[dev,postgres]"` and `TEST_DATABASE_URL`;
+- a `postgres` service (profile) in `docker-compose.yml`;
+- `psycopg[binary]` pinned in `requirements-dev.lock` if CI should install it.

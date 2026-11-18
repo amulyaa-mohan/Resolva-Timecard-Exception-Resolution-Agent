@@ -54,7 +54,7 @@ def seed_day_totals(store: ResolutionStore, case: CaseContext) -> None:
         day += timedelta(days=1)
 
 
-def seed(directory: Path):
+def seed(directory: Path, database_url: str | None = None):
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     credentials = directory / "manager-credentials.json"
     token_path = directory / "manager-token.json"
@@ -98,9 +98,24 @@ def seed(directory: Path):
             "evidence_version": "seed-pending",
         }
     )
-    database = directory / "attendance.sqlite"
-    DemoCaseRepository(database).seed_case(case, manager_id="M-DEMO-1")
-    seed_day_totals(ResolutionStore(database, PolicyRegistry.from_directory(POLICIES)), case)
+    registry = PolicyRegistry.from_directory(POLICIES)
+    if database_url:
+        # PostgreSQL: migrate, then seed the normalized tables (never a shared database).
+        from app.attendance.postgres import (
+            PostgresBackend,
+            PostgresCaseRepository,
+            apply_migrations,
+        )
+
+        apply_migrations(database_url)
+        PostgresCaseRepository(database_url).seed_case(
+            case, manager_id="M-DEMO-1", manager_timezone="Asia/Kolkata"
+        )
+        seed_day_totals(ResolutionStore(PostgresBackend(database_url), registry), case)
+    else:
+        database = directory / "attendance.sqlite"
+        DemoCaseRepository(database).seed_case(case, manager_id="M-DEMO-1")
+        seed_day_totals(ResolutionStore(database, registry), case)
     token = secrets.token_urlsafe(32)
     private_json(
         credentials,
@@ -123,4 +138,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--directory", type=Path, default=Path(__file__).resolve().parents[1] / "local"
     )
-    seed(parser.parse_args().directory)
+    parser.add_argument(
+        "--database-url",
+        help="Seed PostgreSQL (migrated first) instead of the demo SQLite file. "
+        "Credentials are still written to --directory.",
+    )
+    arguments = parser.parse_args()
+    seed(arguments.directory, arguments.database_url)

@@ -50,3 +50,20 @@ Append entries; preserve other developers' history. Use repository-relative path
 - Combined suite: 244 passing tests; includes invalid/expired credentials, assignment isolation, hidden unauthorized records and filtering.
 - Final normalized attendance/aggregate source and correction/audit transactions remain database integration tasks.
 - Publication: local only.
+
+### 2026-11-18 — C V Jayanth — DB-01/DB-02 — PostgreSQL schema and migrations
+
+- Branch: backend; status REVIEW; local only until committed. The team chose PostgreSQL.
+  Built by Track A because the database work was not yet pushed. Reconcile with Soumya's work when it arrives.
+- Files: database/migrations/0001_initial.sql, database/schema/ER_DESIGN.md, app/attendance/postgres.py
+  (migration runner, case repository, decision backend), scripts/migrate_postgres.py.
+  The seed script gains `--database-url`.
+- Tooling: psycopg 3 as the optional extra `postgres`; plain numbered SQL migrations with checksums. No ORM.
+- Verified on a disposable local PostgreSQL 15 (`*_test` database):
+  - fresh migrate, then a no-op re-run; an edited applied migration is refused;
+  - FK, CHECK and unique constraints; append-only triggers including TRUNCATE;
+  - seed idempotency and conflict refusal; an ended assignment removes access;
+  - a 4-thread approval race gives exactly 1 winner with an intact audit chain;
+  - the full decision API suite passes on both SQLite and PostgreSQL (417 passed with TEST_DATABASE_URL).
+- Rollback: forward-only; no destructive down migrations.
+- Not done: Docker/CI PostgreSQL service (Track B owns these files); proposals/llm_traces tables; production identity.

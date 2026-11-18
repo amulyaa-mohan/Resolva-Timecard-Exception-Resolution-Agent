@@ -269,3 +269,118 @@ def test_week_start_comes_from_policy(policy):
     )
     assert sunday(case, [out_at(18, 0)], sunday_policy).passed
     assert timedelta(0) <= case.work_date - date(2026, 11, 8) < timedelta(days=7)
+
+
+# ---- adjust_punch (item 7) and unsupported action types
+
+
+def complete_day(events, code, notes=()):
+    data = case_with(notes=notes).model_dump()
+    data["punches"] = [
+        PunchRecord(
+            punch_id=f"P-{i}",
+            employee_id="E-001",
+            ts=datetime(2026, 11, 12, h, m, tzinfo=IST),
+            type=kind,
+            source=PunchSource.KIOSK,
+        ).model_dump()
+        for i, (kind, h, m) in enumerate(events)
+    ]
+    data["code"] = code
+    data["severity"] = "problem" if code == ExceptionCode.SPREAD_OVER_BREACH else "warning"
+    return CaseContext.model_validate(data)
+
+
+DAY = [("in", 9, 0), ("break_start", 13, 0), ("break_end", 14, 0), ("out", 18, 0)]
+
+
+def adjust(punch_id, hour, minute, note="N-0"):
+    return ProposedAction(
+        type=ActionType.ADJUST_PUNCH,
+        punch_id=punch_id,
+        new_ts=datetime(2026, 11, 12, hour, minute, tzinfo=IST),
+        evidence_ref=None if note is None else EvidenceRef(kind=EvidenceKind.NOTE, id=note),
+    )
+
+
+def late_case(note="I actually arrived at 9:05, the kiosk was down"):
+    events = [("in", 9, 25), *DAY[1:]]  # recorded 25 min late
+    return complete_day(events, ExceptionCode.SCHEDULE_DEVIATION, notes=(note,))
+
+
+def test_adjust_backed_by_employee_note_resolves(policy):
+    result = validator(late_case(), [adjust("P-0", 9, 5)], policy)
+    assert result.passed, [c.reason for c in result.checks if not c.passed]
+
+
+@pytest.mark.parametrize(
+    "action,needle",
+    [
+        (adjust("P-0", 9, 0, note=None), "note evidence_ref"),  # schedule alone is not proof
+        (adjust("P-0", 9, 12), "more than 5 min"),  # note says 9:05
+        (adjust("P-9", 9, 5), "own punches"),  # not in this case
+        (adjust("P-0", 9, 5, note="N-404"), "does not resolve"),
+        (adjust("P-0", 9, 15), "more than 5 min"),  # inside the window, 10 min from note
+    ],
+)
+def test_adjust_rejections(action, needle, policy):
+    result = validator(late_case(), [action], policy)
+    assert not result.passed and needle in result.checks[0].reason
+    assert {c.outcome for c in result.checks} == {RuleOutcome.VIOLATION}
+
+
+def test_adjust_window_and_type_and_duplicates(policy):
+    far = late_case("I came in at 8:30")
+    assert "further than" in validator(far, [adjust("P-0", 8, 30)], policy).checks[0].reason
+    retyped = adjust("P-0", 9, 5).model_copy(update={"punch_type": PunchType.OUT})
+    assert "type" in validator(late_case(), [retyped], policy).checks[0].reason
+    twice = [adjust("P-0", 9, 5), adjust("P-0", 9, 6)]
+    assert "same punch" in validator(late_case(), twice, policy).checks[0].reason
+
+
+def test_adjust_that_leaves_a_violation_is_blocked(policy):
+    # Moving the clock-in still leaves the shift 25+ min short at the end: not resolved.
+    events = [("in", 9, 25), ("break_start", 13, 0), ("break_end", 14, 0), ("out", 17, 30)]
+    case = complete_day(events, ExceptionCode.SCHEDULE_DEVIATION, notes=("arrived 9:05",))
+    result = validator(case, [adjust("P-0", 9, 5)], policy)
+    failed = {c.code for c in result.checks if not c.passed}
+    assert failed == {ExceptionCode.SCHEDULE_DEVIATION}
+
+
+def test_two_adjustments_fix_spread(policy):
+    events = [("in", 6, 0), ("break_start", 10, 0), ("break_end", 11, 0), ("out", 18, 20)]
+    case = complete_day(
+        events, ExceptionCode.SPREAD_OVER_BREACH, notes=("I started at 6:25 and left 18:05",)
+    )
+    # 6:00-18:20 is 12h20 > 12h; the note's times give 11h40.
+    result = validator(case, [adjust("P-0", 6, 25), adjust("P-3", 18, 5)], policy)
+    failed = {c.code: c.reason for c in result.checks if not c.passed}
+    assert ExceptionCode.SPREAD_OVER_BREACH not in failed  # the targeted rule is fixed
+    # ...but the day still breaks other rules (7 h after the break, 10h40 net, early start),
+    # so the correction cannot be approved as-is.
+    assert not result.passed
+    assert {
+        ExceptionCode.MEAL_BREAK_BREACH,
+        ExceptionCode.OVERTIME_RISK,
+        ExceptionCode.SCHEDULE_DEVIATION,
+    } <= set(failed)
+
+
+@pytest.mark.parametrize(
+    "code,action_type",
+    [
+        (ExceptionCode.SCHEDULE_DEVIATION, ActionType.ACKNOWLEDGE),
+        (ExceptionCode.MEAL_BREAK_BREACH, ActionType.FLAG_PREMIUM),
+        (ExceptionCode.OVERTIME_RISK, ActionType.SUGGEST_SCHEDULE_SWAP),
+    ],
+)
+def test_actions_without_agreed_semantics_are_refused(code, action_type, policy):
+    case = complete_day(DAY, code)
+    action = ProposedAction(type=action_type)
+    result = validator(case, [action], policy)
+    assert not result.passed and "not supported yet" in result.checks[0].reason
+
+
+def test_action_not_allowed_for_code(policy):
+    result = validator(late_case(), [out_at(18, 0)], policy)
+    assert "not allowed for SCHEDULE_DEVIATION" in result.checks[0].reason

@@ -19,10 +19,12 @@ CREATE TABLE IF NOT EXISTS day_totals (
     work_date TEXT NOT NULL,
     worked_hours REAL NOT NULL CHECK (worked_hours >= 0),
     scheduled_hours REAL NOT NULL CHECK (scheduled_hours >= 0),
+    evidence_final INTEGER NOT NULL CHECK (evidence_final IN (0, 1)),
     complete INTEGER NOT NULL CHECK (complete IN (0, 1)),
     source TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    PRIMARY KEY (employee_id, work_date)
+    PRIMARY KEY (employee_id, work_date),
+    CHECK (evidence_final OR NOT complete)
 );
 """
 
@@ -51,7 +53,9 @@ def load_aggregates(
 ) -> AggregateEvidence | None:
     """Totals as of `now`, or None when any required day is missing or incomplete.
 
-    Past days (before the employee's local today) must be complete. A day that is today
+    The work date must be evidence-final (its punches are all in; its hours come from the
+    case itself, so they may still be unpaired). Every other past day must be complete:
+    final AND its hours known. An unpaired other day is unknown, never zero. A day that is today
     or later counts its scheduled hours as remaining work. The case work date is excluded
     from every sum: the rules engine computes it from the case's own punches.
     """
@@ -61,16 +65,22 @@ def load_aggregates(
     q_start, q_end = quarter_bounds(work_date, policy.rules.quarter_start_month)
     first, last = min(week, q_start), max(week + timedelta(days=7), q_end)
     rows = {
-        date.fromisoformat(r[0]): (r[1], r[2], bool(r[3]))
+        (r[0] if isinstance(r[0], date) else date.fromisoformat(r[0])): (
+            r[1],
+            r[2],
+            bool(r[3]),
+            bool(r[4]),
+        )
         for r in connection.execute(
-            "SELECT work_date, worked_hours, scheduled_hours, complete FROM day_totals "
+            "SELECT work_date, worked_hours, scheduled_hours, complete, evidence_final "
+            "FROM day_totals "
             "WHERE employee_id=? AND work_date>=? AND work_date<?",
             (case.employee.employee_id, first.isoformat(), last.isoformat()),
         )
     }
     current = rows.get(work_date)
-    if current is None or not current[2]:
-        return None  # the work date itself is not certified complete
+    if current is None or not current[3]:
+        return None  # the work date's evidence is not final
     week_other = remaining = 0.0
     for offset in range(7):
         day = week + timedelta(days=offset)
@@ -79,7 +89,7 @@ def load_aggregates(
         row = rows.get(day)
         if row is None:
             return None
-        worked, scheduled, complete = row
+        worked, scheduled, complete, _final = row
         if complete:
             week_other += worked
         elif day < today:
@@ -116,20 +126,27 @@ def upsert_day_total(
     scheduled_hours: float,
     complete: bool,
     source: str,
+    evidence_final: bool | None = None,
     now: datetime,
 ) -> None:
-    """Trusted server-side write only (provisioning, imports, approved corrections)."""
+    """Trusted server-side write only (provisioning, imports, approved corrections).
+
+    evidence_final defaults to `complete` (a complete day is necessarily final)."""
+    final = complete if evidence_final is None else evidence_final
     connection.execute(
-        "INSERT INTO day_totals VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "INSERT INTO day_totals (employee_id, work_date, worked_hours, scheduled_hours, "
+        "evidence_final, complete, source, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(employee_id, work_date) DO UPDATE SET worked_hours=excluded.worked_hours, "
         "scheduled_hours=excluded.scheduled_hours, complete=excluded.complete, "
+        "evidence_final=excluded.evidence_final, "
         "source=excluded.source, updated_at=excluded.updated_at",
         (
             employee_id,
             work_date.isoformat(),
             worked_hours,
             scheduled_hours,
-            int(complete),
+            bool(final),
+            bool(complete),
             source,
             now.astimezone(UTC).isoformat(),
         ),

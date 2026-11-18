@@ -374,3 +374,44 @@ Never include credentials, private employee data, or invented test results.
 - Limits: demo SQLite store, not final migrations; only add_punch corrections; no bulk decisions or escalation persistence.
 - Open: should an evidence-backed late clock-out (SCHEDULE_DEVIATION, warning) escalate rather than block?
 - Next step: commit and push; Amulya swaps the real validator plus a totals fixture into evals; SHARED-02 review.
+
+### 2026-11-18 — C V Jayanth — A-DB-PG-01 — PostgreSQL persistence
+
+- Branch: backend; status REVIEW; local until committed. Decision: PostgreSQL (team call), built by Track A now.
+- Changed:
+  - ResolutionStore now runs over a backend: SqliteBackend (demo/tests) or PostgresBackend (normalized schema).
+    Shared decision, audit and totals code.
+  - AttendanceSettings.database_url selects PostgreSQL.
+  - Optional extra `postgres` (psycopg 3) in pyproject.toml.
+  - Migration runner and script; the seed script supports `--database-url`.
+- Found by PostgreSQL, fixed:
+  - the audit event referenced its decision before the decision row existed (FK now DEFERRABLE INITIALLY DEFERRED);
+  - the seed silently kept a conflicting shift, so seeding now refuses id clashes.
+- Validation:
+  - 390 passed / 27 skipped without PostgreSQL; 417 passed with TEST_DATABASE_URL on local PostgreSQL 15.
+  - Ruff lint and format pass; `evals.run --gates ci` 8/8 PASS (stand-in validator, mock provider).
+  - PostgreSQL end-to-end smoke: seed -> list/detail -> pipeline ELIGIBLE -> approve 200 resolved -> audit,
+    with the row status resolved at revision 1.
+- Needs Track B: a PostgreSQL service in CI and Docker (see RESOLUTION_API.md). Until then CI skips the PostgreSQL tests.
+- Next step: review with Soumya when her database work is pushed; commit and push on approval.
+
+### 2026-11-18 — C V Jayanth — A-05, detection, A-06, adjust_punch
+
+- Branch: backend; status REVIEW (A-06 attendance event updates still pending). Local only; not committed (held with the PostgreSQL work pending Soumya's review).
+- A-05 import: app/attendance/importer.py (pure preview) and imports_router.py (POST /imports/preview, POST /imports; PostgreSQL only).
+  It handles field mapping, type aliases, naive local times in the employee's timezone, DST gap/overlap refusal,
+  in-file and database duplicates, deterministic ids (re-import is a no-op), manager scope, and allow_partial.
+- Detection: app/rules/detection.py (work-date sessions, the same evaluate_rule_outcomes; violations only)
+  and app/attendance/ingest.py (effective timecard = raw + approved corrections, deterministic exception ids,
+  EXCEPTION_DETECTED audit, whole-week day totals).
+- day_totals now separates evidence_final from complete. Without it, a detected missing punch could never be approved:
+  the work date needs final evidence, while other days need known hours.
+- A-06: POST /exceptions/bulk-decisions (1-50 items; each authorized, validated and committed independently).
+- Item 7: adjust_punch for OVERLAPPING_SHIFT, SPREAD_OVER_BREACH and SCHEDULE_DEVIATION (note-evidence only, bounded move).
+  Other action types are refused until their semantics are agreed (questions in TRACK_A_CONTRACT_RESPONSE.md).
+- Validation:
+  - 429 passed / 31 skipped without PostgreSQL; 460 passed with TEST_DATABASE_URL (local PostgreSQL 15). Ruff passes.
+  - `evals.run --gates ci` 8/8 PASS (stand-in validator, mock provider).
+  - The SHARED-02 path on PostgreSQL is tested end to end: import shifts and punches -> detection (exactly one MISSING_PUNCH)
+    -> re-import no-op -> list/detail -> generate_proposal ELIGIBLE with derived totals -> approve -> audit -> re-detection quiet.
+- Next step: review with Soumya's database work; Amulya answers the adjust/acknowledge questions and adds PostgreSQL to CI.

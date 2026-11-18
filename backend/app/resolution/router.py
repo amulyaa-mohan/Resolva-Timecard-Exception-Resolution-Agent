@@ -3,7 +3,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.attendance.access import ManagerCredential, authenticated_manager
 from app.attendance.repository import CaseAccessDenied
@@ -66,6 +66,86 @@ def decide(
         return problem(409, str(exc), title="Decision conflict", errors=[{"type": "conflict"}])
     except ValidationRejected as exc:
         return problem(422, str(exc), title="Validation failed", errors=exc.checks)
+
+
+class BulkItem(DecisionRequest):
+    exception_id: str = Field(min_length=1, max_length=128)
+
+
+class BulkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[BulkItem] = Field(min_length=1, max_length=50)
+
+
+class BulkItemResult(BaseModel):
+    exception_id: str
+    ok: bool
+    status_code: int
+    result: DecisionResult | None = None
+    error: str | None = None
+    checks: list[dict] | None = None
+
+
+@router.post("/bulk-decisions", response_model=list[BulkItemResult])
+def bulk_decide(
+    body: BulkRequest,
+    request: Request,
+    manager: Annotated[ManagerCredential, Depends(authenticated_manager)],
+) -> list[BulkItemResult]:
+    """Each item is authorized, validated and committed on its own (A-06).
+
+    One item failing never rolls back or blocks another; nothing is approved without
+    passing every check. Results are returned in request order.
+    """
+    store = request.app.state.resolution_store
+    if len({i.idempotency_key for i in body.items}) != len(body.items):
+        raise HTTPException(422, "Each bulk item needs its own idempotency_key.")
+    results = []
+    for item in body.items:
+        decision = DecisionRequest(**item.model_dump(exclude={"exception_id"}))
+        try:
+            result = store.decide(item.exception_id, manager.manager_id, decision)
+            results.append(
+                BulkItemResult(
+                    exception_id=item.exception_id, ok=True, status_code=200, result=result
+                )
+            )
+        except CaseAccessDenied:
+            results.append(
+                BulkItemResult(
+                    exception_id=item.exception_id,
+                    ok=False,
+                    status_code=404,
+                    error="Exception not found.",
+                )
+            )
+        except StaleEvidence as exc:
+            results.append(
+                BulkItemResult(
+                    exception_id=item.exception_id,
+                    ok=False,
+                    status_code=409,
+                    error=f"stale_evidence; current {exc.current}",
+                )
+            )
+        except DecisionConflict as exc:
+            results.append(
+                BulkItemResult(
+                    exception_id=item.exception_id, ok=False, status_code=409, error=str(exc)
+                )
+            )
+        except ValidationRejected as exc:
+            results.append(
+                BulkItemResult(
+                    exception_id=item.exception_id,
+                    ok=False,
+                    status_code=422,
+                    error=str(exc),
+                    checks=exc.checks,
+                )
+            )
+    return results
 
 
 @router.get("/{exception_id}/audit", response_model=list[AuditEvent])

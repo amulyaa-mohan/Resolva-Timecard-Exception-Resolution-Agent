@@ -108,3 +108,19 @@ Until 0.2.0 adds week_start and quarter_start_month to the policy, the period ch
   The loader derives both periods from the policy.
 - Note: a correction backed by evidence but more than `late_tolerance_min` after the scheduled end introduces
   a SCHEDULE_DEVIATION violation, so it is not eligible as-is (tested).
+
+## Correction types (2026-11-18)
+
+| Action | Allowed for (contract) | Status |
+| --- | --- | --- |
+| `add_punch` | MISSING_PUNCH | Supported (one action; schedule or evidence_ref anchored) |
+| `adjust_punch` | OVERLAPPING_SHIFT, SPREAD_OVER_BREACH, SCHEDULE_DEVIATION | Supported (1-2 actions) |
+| `acknowledge`, `add_break`, `void_shift`, `flag_premium`, `suggest_schedule_swap` | per contract | Refused: "not supported yet" until their semantics are agreed |
+
+`adjust_punch` rules:
+- It must target one of the case's own punches (`punch_id`). The type cannot change, and two actions cannot target the same punch.
+- The move is at most `missing_punch_window_min`, and never past `as_of`.
+- A recorded punch is evidence. It can only be moved to a time the employee stated: `evidence_ref.kind = note`,
+  within `evidence_tolerance_min`. Schedule and history refs are refused for adjustments,
+  so a late arrival cannot be silently moved to the scheduled start.
+- After simulation every rule is re-evaluated. Fixing the target rule while another rule still fails stays blocked.
