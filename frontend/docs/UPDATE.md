@@ -79,3 +79,35 @@ Append entries; preserve other developers' history. Use repository-relative path
 - Removed Kannada from the frontend language picker. Hindi applies across page controls and representative demo labels, with a persisted preference and document language.
 - Both languages use the same responsive header grid. Name, identifier, and original evidence values are preserved.
 - Validation: TypeScript and Vite production build passed. Git whitespace checked before commit. Browser breakpoint and native-speaker review pending.
+
+### 2026-11-18 — Soumya — FE-09 (FE-07) — Phase 1: P0 Exception Review & Escalations UI/UX Improvements
+
+- Branch and status: frontend; REVIEW.
+- Changed files and behavior:
+  - `frontend/src/components/ResolutionPanel.tsx`:
+    - Replaced clipped action button layout with wrapping flex action bar; ensured "Draft with AI" and "Re-check evidence" are always fully visible.
+    - Restructured exception information hierarchy: human-readable exception title (`getHumanExceptionTitle`), employee name, and work date placed prominently at top.
+    - Moved technical IDs, prompt/model hashes, canonical codes, and raw source records into an expandable `<details>` section with 1-click clipboard copy buttons.
+    - Implemented 7 distinct proposal & readiness states (`no_draft`, `generating`, `eligible`, `blocked`, `escalated`, `stale`, `resolved`) with clear semantic badges, descriptions, and explicit disabled reasons on the approval button.
+    - Provided empty state handling distinguishing between system-wide empty escalations vs. filter-excluded results.
+  - `frontend/src/components/PunchTimeline.tsx`:
+    - Fixed overlapping event markers and labels by implementing dynamic tier staggering (tier 0 vs tier 1 with connector stems) for events occurring within 40 minutes of each other.
+    - Computed dynamic time window based on actual punches and schedules, displaying actual hours and employee timezone on the axis.
+    - Added keyboard navigation focusability (`tabIndex={0}`) on timeline pins with live tooltips.
+    - Added an accessible chronological event details table for screen readers and keyboard users.
+  - `frontend/src/main.tsx`:
+    - Fixed stale-selection bug: selection automatically reconciles whenever tabs or filters change; empty Escalations tab clears the detail panel with no residual inbox selection or decision controls.
+    - Added table empty state distinction ("No escalations" when none exist vs "No cases match these filters" with a "Clear Filters" button).
+    - Hardened keyboard shortcuts: `A`, `E`, `R` validate against currently visible results and are disabled when no item is selected or visible.
+    - Enhanced KPI strip with an explicit description of Pay-Period Readiness.
+    - Displayed human-readable exception types and concise summaries in table rows.
+  - `frontend/src/styles.css`:
+    - Added responsive styles preventing horizontal scrolling on desktop, tablet, mobile, and 200% zoom.
+    - Added visible `:focus-visible` accessibility focus rings across buttons, inputs, summaries, and timeline pins.
+- Contracts and cross-team dependencies: No backend or database schema modifications; preserved all existing live/synthetic API boundaries.
+- Validation:
+  - Executed `npm --prefix frontend run build`: passed with 0 errors.
+  - Executed `git diff --check`: passed with 0 errors.
+  - Executed `node scratch/verify_phase1.mjs`: verified selection reconciliation, empty escalations handling, 7 proposal states, and timeline marker staggering.
+- Blockers and next step: Phase 1 complete. Awaiting review before starting Phase 2.
+- Publication: local only.
