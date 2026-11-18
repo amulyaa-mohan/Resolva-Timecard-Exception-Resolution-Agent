@@ -4,8 +4,9 @@ Usage (from backend/):  python scripts/live_check.py --provider ollama [--embedd
                         python scripts/live_check.py --provider groq      (GROQ_API_KEY in .env)
 
 This is a quick six-case smoke check; the evaluation suite is `python -m evals.run` (B-05).
-The validator is the stand-in from evals/stub_validator.py until Track A's validate_correction
-(A-02) exists.
+Proposals are validated by Track A's real rules (`make_validator`) with complete evidence: a
+recorded meal break, an evaluation time after the shift, and trusted in-limit weekly/quarterly
+totals whose periods come from the policy pack.
 """
 
 from __future__ import annotations
@@ -32,7 +33,9 @@ from app.core.contracts import (  # noqa: E402
     Severity,
 )
 from app.policies.registry import PolicyRegistry, resolve_policy  # noqa: E402
-from evals.stub_validator import window_validator as window_stub_validator  # noqa: E402
+from app.rules.engine import AggregateEvidence  # noqa: E402
+from app.rules.validator import make_validator  # noqa: E402
+from evals.aggregates import quarter_start, week_start  # noqa: E402
 
 IST = timezone(timedelta(hours=5, minutes=30))
 CST = timezone(timedelta(hours=-6))
@@ -53,6 +56,19 @@ def build_case(
         if punch_type == PunchType.IN
         else day.replace(hour=18, minute=4)
     )
+    punches = [
+        PunchRecord(punch_id="P-1", employee_id="E-LIVE", ts=ts, type=punch_type, source="kiosk")
+    ]
+    punches += [  # an observed meal break, so the meal-break rule can be decided
+        PunchRecord(
+            punch_id=f"P-{kind.value}",
+            employee_id="E-LIVE",
+            ts=day.replace(hour=hour),
+            type=kind,
+            source="kiosk",
+        )
+        for kind, hour in ((PunchType.BREAK_START, 13), (PunchType.BREAK_END, 14))
+    ]
     return CaseContext(
         exception_id=name,
         code=ExceptionCode.MISSING_PUNCH,
@@ -65,11 +81,7 @@ def build_case(
         ),
         work_date=day.date(),
         rule_version="rules@stub",
-        punches=[
-            PunchRecord(
-                punch_id="P-1", employee_id="E-LIVE", ts=ts, type=punch_type, source="kiosk"
-            )
-        ],
+        punches=punches,
         schedule=ScheduledShift(
             shift_id="S-1",
             employee_id="E-LIVE",
@@ -84,6 +96,7 @@ def build_case(
         else [],
         detection_details={"unmatched_punch_id": "P-1"},
         evidence_version=f"ev-{name}",
+        as_of=day + timedelta(days=1, hours=12),
     )
 
 
@@ -127,12 +140,26 @@ def main() -> int:
     print(f"provider={provider.name} model={provider.model_id} reachable={provider.is_reachable()}")
     registry = PolicyRegistry.from_directory(settings.policies_dir)
 
+    def trusted_totals(case: CaseContext) -> AggregateEvidence:
+        rules = resolve_policy(case.employee, case.work_date, registry).rules
+        return AggregateEvidence(
+            work_date_complete=True,
+            week_other_worked_hours=16.0,
+            week_remaining_scheduled_hours=8.0,
+            quarter_other_overtime_hours=4.0,
+            week_start=week_start(case.work_date, rules.week_start),
+            quarter_start=quarter_start(case.work_date, rules.quarter_start_month),
+            as_of=case.as_of,
+        )
+
+    validator = make_validator(trusted_totals)
+
     failures, latencies = 0, []
     for name, case, expected in CASES:
         policy = resolve_policy(case.employee, case.work_date, registry)
         started = time.perf_counter()
         result = generate_proposal(
-            case, policy, provider=provider, validator=window_stub_validator, settings=settings
+            case, policy, provider=provider, validator=validator, settings=settings
         )
         latencies.append(time.perf_counter() - started)
         actions = [

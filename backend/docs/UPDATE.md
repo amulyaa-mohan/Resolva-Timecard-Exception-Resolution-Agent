@@ -485,3 +485,14 @@ Never include credentials, private employee data, or invented test results.
   pass; `evals.run --gates ci` 9/9 PASS. Demo seed re-run: six exceptions, now listed with names.
 - Next step: Soumya reworks her branch onto this schema (DB-06); Track A adds structured
   `detection_details` keys.
+
+### 2026-11-18 — Amulya Mohan — B-05 — Committed live report on Track A's real validator
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed: `backend/evals/reports/ollama-qwen2.5-7b-instruct-propose_v2-real-validator.{md,json}` generated from a clean checkout of dcccc0c; results added to `docs/MODEL_CARD.md` and CLAUDE.md. `scripts/live_check.py` now validates with Track A's `make_validator` (complete evidence: observed break, as_of, trusted in-limit totals with policy periods). The stand-in's report label now reads "comparison only".
+- Results: all six live gates pass; 45 cases, proposal accuracy 100% under both validators, every category 100%, citation validity 100%, no repair retries, p50 4.78 s, p95 5.17 s. On the 6 rules-only cases the real rules made 0 eligible and the stand-in would have made 6. Live smoke check 6/6 (p50 5.0 s).
+- Contracts: none.
+- Validation: report run above (clean tree); live smoke check above; `live_check.py --provider mock` 6/6; ruff clean; pytest and CI eval unchanged.
+- Next step: extend proposals beyond MISSING_PUNCH (SCHEDULE_DEVIATION adjust_punch, OVERLAPPING_SHIFT, SPREAD_OVER_BREACH).
+- Publication: committed and pushed to `backend` (authorised by the owner).

@@ -95,6 +95,29 @@ setup as above, prompt v2, plus the B-04 language sets.
   manager saw a partial or "not understood" reply, never a wrong one. "Parity 50%" in the
   report means 2 of 4 paraphrases gave identical results in all three languages.
 
+## Evaluation with Track A's real validator (2026-11-18, commit dcccc0c)
+
+Report: `backend/evals/reports/ollama-qwen2.5-7b-instruct-propose_v2-real-validator.md`, generated
+from a clean checkout of dcccc0c. Same model, embeddings and GPU as above; prompt v2. Proposals are
+validated by Track A's attendance rules (`attendance-rules@0.4-draft` via `make_validator`) with
+complete evidence (observed meal break, trusted weekly/quarterly totals, evaluation time). The
+stand-in window validator judges the same model outputs as a comparison column.
+
+- 45 labelled cases (36 earlier + 9 evidence-gap cases). All six live gates pass: 0 unsafe
+  eligible under either validator, 100% injection resistance, 100% harness block rate (20 cases),
+  no wrong-version leakage, 100% language parity, 100% write refusal.
+- Proposal accuracy 100%, escalation recall and precision 100%, every category 100% (clear,
+  ambiguous, adversarial, jurisdiction, evidence); citation validity 100%; no repair retries;
+  latency p50 4.78 s, p95 5.17 s over 33 model calls.
+- What the real rules add: on the 6 rules-only cases (no or short meal break, totals missing or
+  for the wrong week, work date not certified, weekly overtime) the real rules made 0 of 6
+  eligible; the stand-in would have made 6 of 6 eligible. Missing evidence escalates to the
+  manager (`insufficient_evidence`); broken rules block (`violation`).
+- Live smoke check (`scripts/live_check.py`, now on the real validator): 6/6 as expected, p50
+  5.0 s.
+- Scope: MISSING_PUNCH proposals only; other exception codes are covered by retrieval cases and
+  Track A's rule tests until their correction semantics are agreed.
+
 ## Known limitations
 
 - Model confidence is self-reported and uncalibrated; it is gated but never sufficient on its own.
