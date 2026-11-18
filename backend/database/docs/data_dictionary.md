@@ -123,6 +123,7 @@ Join tables holding the evidence a detection used. PK on both columns, both FKs 
 | `evidence_version` | text | the evidence hash it was drafted against |
 | `policy_pack_id`, `policy_version`, `rule_version` | text | reconstructability |
 | `proposal_json`, `validation_json`, `gate_checks_json`, `reasons_json` | text | canonical JSON |
+| `created_at` | timestamptz | when the draft was stored |
 
 JSON is stored as text, not jsonb, so one code path serves both this store and the demo SQLite
 store; query it in the application.
@@ -130,12 +131,13 @@ store; query it in the application.
 ### 2.12 `llm_traces` (append-only)
 | Column | Type | Notes |
 | --- | --- | --- |
-| `trace_id` | text PK | |
+| `trace_id` | text PK | `<request trace id>:<proposal id>`; the request trace id (from `X-Trace-Id`) is the prefix, so a reused header never collides (audit A3) |
 | `proposal_id` | text FK | RESTRICT |
 | `provider`, `model_id`, `prompt_version`, `prompt_hash` | text | which model and prompt ran |
 | `retrieved_chunk_ids` | text | JSON array of clause ids |
 | `attempts`, `latency_ms` | integer | |
 | `error` | text | null on success |
+| `created_at` | timestamptz | |
 
 ### 2.12a `llm_raw_outputs`
 | Column | Type | Notes |

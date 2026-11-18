@@ -624,3 +624,13 @@ Never include credentials, private employee data, or invented test results.
 
 - Reproduced an approval that increased projected weekly hours from 49 to 50 against a 48-hour limit.
 - The validator keeps an existing overtime warning blocking if a correction increases net worked hours. Corrections that leave hours unchanged or reduce them retain the existing carry-over behavior.
+
+### 2026-11-18 — Amulya Mohan — Database check against the backend
+
+- Branch: `backend` (merged `main` with Track A's PR #14 first, so the check ran against current code).
+- Status: REVIEW.
+- Checked (PostgreSQL 15, in a Linux container because Windows blocks the psycopg DLL): fresh migrate of 0001-0004, re-run applies nothing, edited migration refused by checksum; enums match `contracts.py`; all 14 positional INSERTs match their table's column count and every named column exists; all 25 foreign keys RESTRICT; append-only triggers on punches, decisions, corrections, proposals, llm_traces and audit_events. After a seeded demo week went through the API (demo story and 49/49 HTTP checks, 0 server errors): `db_maintenance verify` 0 problems, audit chain valid, stored exception status equals derived status, row counts consistent, and the timecard's corrections query uses indexes.
+- Changed: `backend/database/docs/data_dictionary.md` documents `proposals.created_at`, `llm_traces.created_at` and the `<request trace id>:<proposal id>` trace key. All 19 tables now match the live schema.
+- Left for later: TRUNCATE guards exist only on punches and audit_events (decisions, corrections, proposals and llm_traces block row UPDATE/DELETE but not TRUNCATE), so a later migration can add them. The migrations run as savepoints in one outer transaction, not one transaction each as the comment says; harmless.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
