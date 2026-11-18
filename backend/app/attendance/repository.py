@@ -92,6 +92,10 @@ class DemoCaseRepository:
             raise CaseAccessDenied("case unavailable for this manager")
         return CaseContext.model_validate_json(row[0]), row[1]
 
+    def display_names(self, employee_ids: list[str]) -> dict[str, str]:
+        """The demo snapshot store keeps no personal data, so names are never shown."""
+        return {}
+
     def list_for_manager(self, manager_id: str) -> list[CaseContext]:
         with self._connect() as connection:
             rows = connection.execute(

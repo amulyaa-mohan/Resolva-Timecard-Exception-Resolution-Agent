@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.attendance.access import ManagerCredential, authenticated_manager
 from app.attendance.context import CaseService
@@ -20,6 +20,9 @@ router = APIRouter(prefix="/exceptions", tags=["attendance"])
 class ExceptionSummary(BaseModel):
     exception_id: str
     employee_id: str
+    employee_name: str | None = Field(
+        default=None, description="Display only; null when the store keeps no personal data."
+    )
     code: ExceptionCode
     severity: Severity
     work_date: date
@@ -58,6 +61,9 @@ def list_exceptions(
         raise HTTPException(422, "date_from must not follow date_to.")
     cases = request.app.state.attendance_repository.list_for_manager(manager.manager_id)
     state = request.app.state.resolution_store.statuses([c.exception_id for c in cases])
+    names = request.app.state.attendance_repository.display_names(
+        sorted({c.employee.employee_id for c in cases})
+    )
     filtered = [
         c
         for c in cases
@@ -75,6 +81,7 @@ def list_exceptions(
             ExceptionSummary(
                 exception_id=c.exception_id,
                 employee_id=c.employee.employee_id,
+                employee_name=names.get(c.employee.employee_id),
                 code=c.code,
                 severity=c.severity,
                 work_date=c.work_date,

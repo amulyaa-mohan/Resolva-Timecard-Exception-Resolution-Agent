@@ -471,3 +471,17 @@ Never include credentials, private employee data, or invented test results.
   types awaiting contract 0.3.0 are still refused.
 - Next step: Amulya drafts 0.3.0 (add_break new_end_ts, void_shift target_punch_ids); Track A adds
   structured detection_details and the remaining action types.
+
+### 2026-11-18 — C V Jayanth — DB-03 — Display fields from the database branch review
+
+- Branch: backend; status REVIEW. Reviewed Soumya's `origin/database` 48b2a1a: it cannot be merged
+  as it stands (old layout, SQLite/SQLModel, naive timestamps, no immutability triggers, cascade
+  deletes, several contract mismatches). Details in `backend/database/docs/UPDATE.md`.
+- The one real gap it exposed is fixed: migration 0003 adds `organizations`, `locations` and
+  employee `full_name` / `job_title` / `pay_type`, and `GET /exceptions` now returns
+  `employee_name`, so a manager sees who an exception belongs to. Display only; detection and
+  validation are verified to work with every one of those columns null.
+- Validation: 491 passed with PostgreSQL (454 passed / 36 skipped without it); Ruff lint and format
+  pass; `evals.run --gates ci` 9/9 PASS. Demo seed re-run: six exceptions, now listed with names.
+- Next step: Soumya reworks her branch onto this schema (DB-06); Track A adds structured
+  `detection_details` keys.

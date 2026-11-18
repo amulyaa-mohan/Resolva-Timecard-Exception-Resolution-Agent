@@ -214,6 +214,21 @@ class PostgresCaseRepository:
                 cases.append(build_verified_case(case, correction_revision=revision))
             return cases
 
+    def display_names(self, employee_ids: list[str]) -> dict[str, str]:
+        """Employee id -> full name, for display only. Missing names are simply absent."""
+        if not employee_ids:
+            return {}
+        with self.backend.transaction(immediate=False) as c:
+            marks = ",".join("?" * len(employee_ids))
+            return {
+                row[0]: row[1]
+                for row in c.execute(
+                    f"SELECT employee_id, full_name FROM employees "
+                    f"WHERE employee_id IN ({marks}) AND full_name IS NOT NULL",
+                    employee_ids,
+                )
+            }
+
     def seed_case(self, case: CaseContext, *, manager_id: str, manager_timezone: str = "UTC"):
         """Trusted provisioning of synthetic data. Idempotent; refuses to change evidence."""
         if not manager_id.strip():
@@ -226,7 +241,8 @@ class PostgresCaseRepository:
                 (manager_id, manager_timezone),
             )
             c.execute(
-                "INSERT INTO employees VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                "INSERT INTO employees (employee_id, location_id, jurisdiction, timezone, "
+                "worker_category) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
                 (e.employee_id, e.location_id, e.jurisdiction, e.timezone, e.worker_category),
             )
             owner = c.execute(

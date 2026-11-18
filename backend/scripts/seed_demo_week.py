@@ -36,6 +36,14 @@ def private_json(path: Path, payload) -> None:
 MANAGER = "M-DEMO-1"
 TIMEZONE = "Asia/Kolkata"
 EMPLOYEES = {"E-DEMO-1": TIMEZONE, "E-DEMO-2": TIMEZONE, "E-DEMO-3": TIMEZONE}
+ORGANIZATION = ("ORG-DEMO", "Resolva Demo Operations")
+LOCATION = ("BLR-DEMO", "ORG-DEMO", "Bengaluru Development Centre", "Bengaluru", "India")
+# Display only: no rule, validator or authorization check reads these. Synthetic people.
+PEOPLE = {
+    "E-DEMO-1": ("Aarav Sharma", "Support Associate", "hourly"),
+    "E-DEMO-2": ("Diya Nair", "Warehouse Operator", "hourly"),
+    "E-DEMO-3": ("Rohan Gupta", "Support Associate", "hourly"),
+}
 
 # (employee, weekday offset from Monday, shift start/end, punches, what it demonstrates)
 PLAN = [
@@ -168,11 +176,23 @@ def seed(dsn: str, directory: Path) -> None:
     backend = PostgresBackend(dsn)
     with backend.transaction() as c:
         c.execute("INSERT INTO managers VALUES (?, ?) ON CONFLICT DO NOTHING", (MANAGER, TIMEZONE))
+        c.execute(
+            "INSERT INTO organizations (org_id, name) VALUES (?, ?) ON CONFLICT DO NOTHING",
+            ORGANIZATION,
+        )
+        c.execute(
+            "INSERT INTO locations (location_id, org_id, name, city, country, timezone) "
+            "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+            (*LOCATION, TIMEZONE),
+        )
         for employee, zone in EMPLOYEES.items():
+            name, job, pay_type = PEOPLE[employee]
             c.execute(
-                "INSERT INTO employees VALUES (?, 'BLR-DEMO', 'IN-KA', ?, NULL) "
-                "ON CONFLICT DO NOTHING",
-                (employee, zone),
+                "INSERT INTO employees (employee_id, location_id, jurisdiction, timezone, "
+                "full_name, job_title, pay_type) VALUES (?, ?, 'IN-KA', ?, ?, ?, ?) "
+                "ON CONFLICT (employee_id) DO UPDATE SET full_name = excluded.full_name, "
+                "job_title = excluded.job_title, pay_type = excluded.pay_type",
+                (employee, LOCATION[0], zone, name, job, pay_type),
             )
             c.execute(
                 "INSERT INTO manager_assignments (manager_id, employee_id, valid_from) "

@@ -67,3 +67,25 @@ Append entries; preserve other developers' history. Use repository-relative path
   - the full decision API suite passes on both SQLite and PostgreSQL (417 passed with TEST_DATABASE_URL).
 - Rollback: forward-only; no destructive down migrations.
 - Not done: Docker/CI PostgreSQL service (Track B owns these files); proposals/llm_traces tables; production identity.
+
+### 2026-11-18 — C V Jayanth — DB-03 — Reference data, display fields and review of the database branch
+
+- Branch: backend; status REVIEW; local until committed.
+- Migration `0003_organization_and_display_fields.sql`: `organizations`, `locations`, and
+  `employees.full_name` / `job_title` / `pay_type`. Display only: no rule, validator or
+  authorization check reads them, and detection is verified to work with all of them null.
+  No foreign key from `employees.location_id` yet, because existing rows predate `locations`.
+- Reviewed `origin/database` 48b2a1a (Soumya). Not merged, and nothing imports it, so nothing is
+  broken today. Blocking issues: based on the pre-reorganisation layout, so its files land in a root
+  `database/` that duplicates `backend/database/`; SQLite-only DDL (AUTOINCREMENT, PRAGMA, DATETIME)
+  while the team chose PostgreSQL; requires `sqlmodel`/`sqlalchemy`, which the project does not
+  depend on; naive timestamps; zero immutability triggers despite the specification; cascade deletes
+  on exceptions, proposals and shifts. Contract mismatches: integer surrogate keys with no business
+  id, wrong severity and punch-source values, no `source_event_id` for import dedupe, no
+  `evidence_version`, no decisions table, no day totals, no manager assignment validity.
+- Taken from that branch: this migration's reference tables and the documentation set, which is
+  better than ours and should be adapted into `backend/database/docs/`.
+- Validation: 491 passed with TEST_DATABASE_URL on PostgreSQL 15; fresh migrate 0001-0003 and the
+  demo seed verified; the exception list now shows employee names.
+- Next step: agree the reconciliation with Soumya, then give her DB-04 (integrity checks) and
+  retention for `llm_traces.raw_outputs` against this schema.
