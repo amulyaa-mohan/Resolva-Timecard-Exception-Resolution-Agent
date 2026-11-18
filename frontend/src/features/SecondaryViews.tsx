@@ -159,6 +159,7 @@ export function AuditView({
   role?: Role;
   onOpenCase?: (exceptionId: string) => void;
 }) {
+  const { tr } = useTranslation();
   const [scope, setScope] = useState<'case' | 'all'>(selectedCase ? 'case' : 'all');
   const [serverCaseEvents, setServerCaseEvents] = useState<AuditEvent[] | null>(null);
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
@@ -230,21 +231,21 @@ export function AuditView({
         <div className="audit-header">
           <div className="audit-header-main">
             <h1 id={headingId} className="page-title">
-              Audit trail
+              {tr("Audit trail")}
             </h1>
 
             {scope === 'case' && selectedCase ? (
               <p className="audit-scope-line">
                 <strong>{selectedCase.employee_name}</strong>
-                <span aria-hidden="true"> Â· </span>
+                <span aria-hidden="true"> · </span>
                 <span>{caseReasonLabel}</span>
-                <span aria-hidden="true"> Â· </span>
+                <span aria-hidden="true"> · </span>
                 <span>Work date: {caseWorkDateLabel}</span>
                 <span className="audit-scope-code">({selectedCase.id})</span>
               </p>
             ) : (
               <p className="audit-scope-line">
-                All workspace activity ({events.length} {events.length === 1 ? 'event' : 'events'}) Â· Times shown in {tzInfo.shortLabel}
+                All workspace activity ({events.length} {events.length === 1 ? 'event' : 'events'}) · Times shown in {tzInfo.shortLabel}
               </p>
             )}
           </div>
@@ -272,11 +273,11 @@ export function AuditView({
             )}
             {selectedCase && onOpenCase && (
               <button type="button" className="btn-secondary" onClick={() => onOpenCase(selectedCase.id)}>
-                Open case
+                {tr("Open case")}
               </button>
             )}
             <button type="button" className="btn-secondary" disabled={displayedEvents.length === 0} onClick={exportCsv}>
-              Export CSV
+              {tr("Export CSV")}
             </button>
           </div>
         </div>
@@ -332,8 +333,8 @@ export function AuditView({
                           aria-controls={drawerId}
                           onClick={() => toggleDetails(ev.id)}
                         >
-                          <span>Technical details</span>
-                          <span aria-hidden="true">{isOpen ? 'â–¾' : 'â–¸'}</span>
+                          <span>{tr("Technical details")}</span>
+                          <span aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
                         </button>
                       </div>
                     </div>
@@ -501,6 +502,7 @@ export function ImportPreviewView({
   role?: Role;
   onOpenException?: (exceptionId: string) => void;
 }) {
+  const { tr } = useTranslation();
   const [kind, setKind] = useState<ImportKind>('punches');
   const [rawInput, setRawInput] = useState('');
   const [isSampleLoaded, setIsSampleLoaded] = useState(false);
@@ -577,13 +579,13 @@ export function ImportPreviewView({
   const blockedReason = useMemo(() => {
     if (!preview) return null;
     if (!canWrite) {
-      return `Import unavailable for role â€œ${role}â€. Switch to manager or admin to commit attendance records.`;
+      return `Import unavailable for role “${role}”. Switch to manager or admin to commit attendance records.`;
     }
     if (preview.valid === 0) {
       return 'Import unavailable because there are 0 valid rows. Fix the row errors above and preview again.';
     }
     if (preview.invalid > 0 && !allowPartial) {
-      return `Import blocked because ${preview.invalid} ${preview.invalid === 1 ? 'row is' : 'rows are'} invalid. Select â€œImport valid rows onlyâ€ or fix the invalid rows and preview again.`;
+      return `Import blocked because ${preview.invalid} ${preview.invalid === 1 ? 'row is' : 'rows are'} invalid. Select “Import valid rows only” or fix the invalid rows and preview again.`;
     }
     return null;
   }, [preview, canWrite, role, allowPartial]);
@@ -625,20 +627,20 @@ export function ImportPreviewView({
 
   const renderRowCells = (row: ImportPreviewItem) => {
     const empDisplay = row.employee_name
-      ? `${row.employee_name} (${row.employee_id || 'â€”'})`
-      : row.employee_id || 'â€”';
+      ? `${row.employee_name} (${row.employee_id || '—'})`
+      : row.employee_id || '—';
 
     if (kind === 'punches') {
       const eventText = row.event_code
         ? FRIENDLY_PUNCH_EVENT[row.event_code] ?? row.event_code
-        : 'â€”';
+        : '—';
       return (
         <>
           <td className="tnum">{row.row_number}</td>
           <td>
             <strong>{empDisplay}</strong>
           </td>
-          <td className="tnum">{row.local_time || 'â€”'}</td>
+          <td className="tnum">{row.local_time || '—'}</td>
           <td>{eventText}</td>
         </>
       );
@@ -651,8 +653,8 @@ export function ImportPreviewView({
           <td>
             <strong>{empDisplay}</strong>
           </td>
-          <td className="tnum">{row.shift_window || 'â€”'}</td>
-          <td className="tnum">{typeof row.planned_break_min === 'number' ? `${row.planned_break_min} min` : 'â€”'}</td>
+          <td className="tnum">{row.shift_window || '—'}</td>
+          <td className="tnum">{typeof row.planned_break_min === 'number' ? `${row.planned_break_min} min` : '—'}</td>
         </>
       );
     }
@@ -663,8 +665,8 @@ export function ImportPreviewView({
         <td>
           <strong>{empDisplay}</strong>
         </td>
-        <td className="tnum">{row.local_time || 'â€”'}</td>
-        <td className="import-note-cell">{row.note_excerpt || 'â€”'}</td>
+        <td className="tnum">{row.local_time || '—'}</td>
+        <td className="import-note-cell">{row.note_excerpt || '—'}</td>
       </>
     );
   };
@@ -674,18 +676,18 @@ export function ImportPreviewView({
       <div className="import-header">
         <div>
           <h1 id={headingId} className="page-title">
-            Import attendance
+            {tr("Import attendance")}
           </h1>
-          <p className="import-subtitle">Paste CSV or JSON and preview the rows before importing.</p>
+          <p className="import-subtitle">{tr("Paste CSV or JSON and preview the rows before importing.")}</p>
         </div>
 
         <ol className="import-stepper" aria-label="Import progress">
           <li className={currentStep === 1 ? 'step-item active' : 'step-item done'} aria-current={currentStep === 1 ? 'step' : undefined}>
-            1. Paste data
+            {tr("1. Paste data")}
           </li>
           <li aria-hidden="true" className="step-sep">â†’</li>
           <li className={currentStep === 2 ? 'step-item active' : currentStep > 2 ? 'step-item done' : 'step-item'} aria-current={currentStep === 2 ? 'step' : undefined}>
-            2. Review rows
+            {tr("2. Review rows")}
           </li>
           <li aria-hidden="true" className="step-sep">â†’</li>
           <li className={currentStep === 3 ? 'step-item active' : 'step-item'} aria-current={currentStep === 3 ? 'step' : undefined}>
@@ -698,7 +700,7 @@ export function ImportPreviewView({
         <div className="import-controls-bar">
           <div className="import-type-group">
             <label htmlFor="import-kind-select" className="import-inline-label">
-              Import type
+              {tr("Import type")}
             </label>
             <select
               id="import-kind-select"
@@ -706,9 +708,9 @@ export function ImportPreviewView({
               value={kind}
               onChange={(e) => handleKindChange(e.target.value as ImportKind)}
             >
-              <option value="punches">Clock punches</option>
-              <option value="shifts">Scheduled shifts</option>
-              <option value="notes">Employee notes</option>
+              <option value="punches">{tr("Clock punches")}</option>
+              <option value="shifts">{tr("Scheduled shifts")}</option>
+              <option value="notes">{tr("Employee notes")}</option>
             </select>
             {isSampleLoaded && <span className="badge-neutral">Sample data loaded</span>}
           </div>
@@ -720,7 +722,7 @@ export function ImportPreviewView({
               </button>
             )}
             <button type="button" className="btn-secondary" onClick={handleLoadSample}>
-              Load sample
+              {tr("Load sample")}
             </button>
           </div>
         </div>
@@ -729,7 +731,7 @@ export function ImportPreviewView({
           <div className="import-editor-col">
             <div className="import-field-header">
               <label htmlFor="import-data-editor" className="import-field-label">
-                Attendance data (CSV or JSON)
+                {tr("Attendance data (CSV or JSON)")}
               </label>
               {rawInput.trim() && (
                 <span className="mono badge-neutral">{detectedFormat.toUpperCase()}</span>
@@ -749,14 +751,14 @@ export function ImportPreviewView({
           </div>
 
           <aside className="import-guidance-box" aria-label="Format help">
-            <div className="import-guidance-title">Format help</div>
+            <div className="import-guidance-title">{tr("Format help")}</div>
             <p className="import-guidance-text">
-              Times without an offset use the employeeâ€™s timezone.
+              Times without an offset use the employee’s timezone.
             </p>
-            <div className="import-guidance-sub">Supported columns</div>
+            <div className="import-guidance-sub">{tr("Supported columns")}</div>
             <code className="mono import-columns-code">{FORMAT_GUIDANCE[kind].columns}</code>
             <p className="import-guidance-text" style={{ marginTop: 8 }}>
-              Paste a CSV table with a header row or a JSON array of objects.
+              {tr("Paste a CSV table with a header row or a JSON array of objects.")}
             </p>
           </aside>
         </div>
@@ -768,10 +770,10 @@ export function ImportPreviewView({
             disabled={!rawInput.trim() || previewing}
             onClick={handlePreview}
           >
-            {previewing ? 'Previewingâ€¦' : 'Preview rows'}
+            {previewing ? 'Previewing”¦' : 'Preview rows'}
           </button>
           {!rawInput.trim() && (
-            <span className="small muted">Paste CSV or JSON above, or click â€œLoad sampleâ€.</span>
+            <span className="small muted">Paste CSV or JSON above, or click “Load sample”.</span>
           )}
         </div>
       </div>
@@ -783,9 +785,9 @@ export function ImportPreviewView({
               <h2 className="card-heading">Preview summary</h2>
               <p className="import-counts-line tnum">
                 <span className="count-valid">{preview.valid} valid</span>
-                <span aria-hidden="true"> Â· </span>
+                <span aria-hidden="true"> · </span>
                 <span className="count-dup">{preview.duplicates} {preview.duplicates === 1 ? 'duplicate' : 'duplicates'}</span>
-                <span aria-hidden="true"> Â· </span>
+                <span aria-hidden="true"> · </span>
                 <span className="count-invalid">{preview.invalid} invalid</span>
               </p>
             </div>
@@ -850,7 +852,7 @@ export function ImportPreviewView({
                             onClick={() => toggleRowDetails(row.row_number)}
                           >
                             <span>Details</span>
-                            <span aria-hidden="true">{isExpanded ? 'â–¾' : 'â–¸'}</span>
+                            <span aria-hidden="true">{isExpanded ? '▾' : '▸'}</span>
                           </button>
                         </td>
                       </tr>
@@ -930,7 +932,7 @@ export function ImportPreviewView({
                 onClick={handleCommit}
               >
                 {committing
-                  ? 'Importingâ€¦'
+                  ? 'Importing”¦'
                   : `Import ${preview.valid} ${preview.valid === 1 ? 'row' : 'rows'}`}
               </button>
             </div>
@@ -958,10 +960,10 @@ export function ImportPreviewView({
             </strong>
             <span>
               {' '}
-              Â· Skipped {commitResult.skipped} ({commitResult.duplicates}{' '}
+              · Skipped {commitResult.skipped} ({commitResult.duplicates}{' '}
               {commitResult.duplicates === 1 ? 'duplicate' : 'duplicates'}, {commitResult.invalid} invalid)
             </span>
-            <span className="muted"> Â· Batch </span>
+            <span className="muted"> · Batch </span>
             <code className="mono">{commitResult.batch_id}</code>
           </div>
 
@@ -1036,8 +1038,8 @@ export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: Excep
         exception_id: id,
         decision: 'propose',
         actions: [{ type: 'add_punch', new_ts: '2026-11-17T18:00:00+05:30', note: 'Infer scheduled shift end 18:00 IST.' }],
-        rationale: `Detected unpaired clock-in at ${punchTime} IST on scheduled 09:00Ã”Ã‡Ã´18:00 IST shift. Proposed 18:00 IST out-punch passes all 6 deterministic rules.`,
-        citations: [{ chunk_id: 'IN-KA@2025.1#sec-4.2', quote: 'Missing out-punches may be inferred within â”¬â–’30 minutes of scheduled shift end.' }],
+        rationale: `Detected unpaired clock-in at ${punchTime} IST on scheduled 09:00–18:00 IST shift. Proposed 18:00 IST out-punch passes all 6 deterministic rules.`,
+        citations: [{ chunk_id: 'IN-KA@2025.1#sec-4.2', quote: 'Missing out-punches may be inferred within ±30 minutes of scheduled shift end.' }],
         confidence: 0.91,
         missing_information: [],
         model_id: 'qwen2.5-7b-instruct',
@@ -1058,8 +1060,8 @@ export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: Excep
   };
 
   return (
-    <div className="panel-card" style={{ maxWidth: 640, padding: 20 }}>
-      <h2 style={{ marginTop: 0 }}>{tr("Kiosk Punch Simulator (Live Event Demo)")}</h2>
+    <div className="panel-card kiosk-card">
+      <h2 className="kiosk-title">{tr("Kiosk Punch Simulator (Live Event Demo)")}</h2>
       <p className="muted">{tr("Simulates a raw immutable punch event entering the deterministic rules detector and routing an AI-drafted proposal into the Manager Inbox.")}</p>
       <form onSubmit={handleIngest} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <label className="field-label">{tr("Employee ID:")}<input className="input-field mono" value={empId} onChange={(e) => setEmpId(e.target.value)} required />
@@ -1132,7 +1134,7 @@ export function PolicySettingsView({
                   <td className="mono"><strong>{p.id}@{p.version}</strong></td>
                   <td>{tr(p.jurisdiction)}</td>
                   <td>{p.daily_regular_hours}{tr(" hours")} / {p.weekly_regular_hours}{tr(" hours")}</td>
-                  <td>{p.overtime_rate}â”œÃ¹ ({p.quarterly_ot_cap ? `${p.quarterly_ot_cap}${tr(" hours per quarter")}` : tr("no cap")})</td>
+                  <td>{p.overtime_rate}× ({p.quarterly_ot_cap ? `${p.quarterly_ot_cap}${tr(" hours per quarter")}` : tr("no cap")})</td>
                   <td>{p.rest_minutes}{tr(" min after ")}{p.rest_after_hours}{tr(" hours")}</td>
                   <td>{p.max_spread_hours ? `${p.max_spread_hours}${tr(" hours")}` : tr('N/A')}</td>
                 </tr>

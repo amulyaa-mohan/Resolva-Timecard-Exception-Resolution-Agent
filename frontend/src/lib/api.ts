@@ -604,7 +604,7 @@ export async function submitDecisionWithFallback(params: {
 
   try {
     const proposalId = params.item.proposal?.id ?? params.item.id;
-    const res = await fetch(`/api/proposals/${proposalId}/decision`, {
+    const res = await fetch(`/api/proposals/${encodeURIComponent(proposalId)}/decision`, {
       method: 'POST',
       headers: authHeaders(params.role),
       body: JSON.stringify({
