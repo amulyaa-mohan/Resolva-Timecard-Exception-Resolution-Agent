@@ -385,12 +385,12 @@ function App() {
               <div className="kpi-card kpi-red">
                 <div className="kpi-label">{t.kpiProblems}</div>
                 <div className="kpi-value">{openProblems}</div>
-                <div className="kpi-subtext small muted">Unpaired punches or statutory compliance issues</div>
+                <div className="kpi-subtext small muted">{tr("Unpaired punches or statutory compliance issues")}</div>
               </div>
               <div className="kpi-card kpi-amber">
                 <div className="kpi-label">{t.kpiWarnings}</div>
                 <div className="kpi-value">{openWarnings}</div>
-                <div className="kpi-subtext small muted">Non-blocking schedule or meal deviations</div>
+                <div className="kpi-subtext small muted">{tr("Non-blocking schedule or meal deviations")}</div>
               </div>
               <div className="kpi-card kpi-violet">
                 <div className="kpi-label">{t.kpiReady}</div>
@@ -401,7 +401,7 @@ function App() {
                 <div className="kpi-label">{t.kpiReadiness}</div>
                 <div className="kpi-value">{readinessPct}%</div>
                 <div className="kpi-subtext small muted">
-                  <strong>Payroll readiness:</strong> % of total period cases resolved
+                  <strong>{tr("Payroll readiness:")}</strong> {tr("% of total period cases resolved")}
                 </div>
               </div>
             </section>

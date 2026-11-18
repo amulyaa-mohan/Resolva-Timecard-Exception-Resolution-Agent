@@ -159,6 +159,7 @@ export function AuditView({
   role?: Role;
   onOpenCase?: (exceptionId: string) => void;
 }) {
+  const { tr } = useTranslation();
   const [scope, setScope] = useState<'case' | 'all'>(selectedCase ? 'case' : 'all');
   const [serverCaseEvents, setServerCaseEvents] = useState<AuditEvent[] | null>(null);
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
@@ -230,7 +231,7 @@ export function AuditView({
         <div className="audit-header">
           <div className="audit-header-main">
             <h1 id={headingId} className="page-title">
-              Audit trail
+              {tr("Audit trail")}
             </h1>
 
             {scope === 'case' && selectedCase ? (
@@ -272,11 +273,11 @@ export function AuditView({
             )}
             {selectedCase && onOpenCase && (
               <button type="button" className="btn-secondary" onClick={() => onOpenCase(selectedCase.id)}>
-                Open case
+                {tr("Open case")}
               </button>
             )}
             <button type="button" className="btn-secondary" disabled={displayedEvents.length === 0} onClick={exportCsv}>
-              Export CSV
+              {tr("Export CSV")}
             </button>
           </div>
         </div>
@@ -332,7 +333,7 @@ export function AuditView({
                           aria-controls={drawerId}
                           onClick={() => toggleDetails(ev.id)}
                         >
-                          <span>Technical details</span>
+                          <span>{tr("Technical details")}</span>
                           <span aria-hidden="true">{isOpen ? 'â–¾' : 'â–¸'}</span>
                         </button>
                       </div>
@@ -501,6 +502,7 @@ export function ImportPreviewView({
   role?: Role;
   onOpenException?: (exceptionId: string) => void;
 }) {
+  const { tr } = useTranslation();
   const [kind, setKind] = useState<ImportKind>('punches');
   const [rawInput, setRawInput] = useState('');
   const [isSampleLoaded, setIsSampleLoaded] = useState(false);
@@ -577,13 +579,13 @@ export function ImportPreviewView({
   const blockedReason = useMemo(() => {
     if (!preview) return null;
     if (!canWrite) {
-      return `Import unavailable for role â€œ${role}â€. Switch to manager or admin to commit attendance records.`;
+      return `Import unavailable for role “${role}”. Switch to manager or admin to commit attendance records.`;
     }
     if (preview.valid === 0) {
       return 'Import unavailable because there are 0 valid rows. Fix the row errors above and preview again.';
     }
     if (preview.invalid > 0 && !allowPartial) {
-      return `Import blocked because ${preview.invalid} ${preview.invalid === 1 ? 'row is' : 'rows are'} invalid. Select â€œImport valid rows onlyâ€ or fix the invalid rows and preview again.`;
+      return `Import blocked because ${preview.invalid} ${preview.invalid === 1 ? 'row is' : 'rows are'} invalid. Select “Import valid rows only” or fix the invalid rows and preview again.`;
     }
     return null;
   }, [preview, canWrite, role, allowPartial]);
@@ -625,20 +627,20 @@ export function ImportPreviewView({
 
   const renderRowCells = (row: ImportPreviewItem) => {
     const empDisplay = row.employee_name
-      ? `${row.employee_name} (${row.employee_id || 'â€”'})`
-      : row.employee_id || 'â€”';
+      ? `${row.employee_name} (${row.employee_id || '—'})`
+      : row.employee_id || '—';
 
     if (kind === 'punches') {
       const eventText = row.event_code
         ? FRIENDLY_PUNCH_EVENT[row.event_code] ?? row.event_code
-        : 'â€”';
+        : '—';
       return (
         <>
           <td className="tnum">{row.row_number}</td>
           <td>
             <strong>{empDisplay}</strong>
           </td>
-          <td className="tnum">{row.local_time || 'â€”'}</td>
+          <td className="tnum">{row.local_time || '—'}</td>
           <td>{eventText}</td>
         </>
       );
@@ -651,8 +653,8 @@ export function ImportPreviewView({
           <td>
             <strong>{empDisplay}</strong>
           </td>
-          <td className="tnum">{row.shift_window || 'â€”'}</td>
-          <td className="tnum">{typeof row.planned_break_min === 'number' ? `${row.planned_break_min} min` : 'â€”'}</td>
+          <td className="tnum">{row.shift_window || '—'}</td>
+          <td className="tnum">{typeof row.planned_break_min === 'number' ? `${row.planned_break_min} min` : '—'}</td>
         </>
       );
     }
@@ -663,8 +665,8 @@ export function ImportPreviewView({
         <td>
           <strong>{empDisplay}</strong>
         </td>
-        <td className="tnum">{row.local_time || 'â€”'}</td>
-        <td className="import-note-cell">{row.note_excerpt || 'â€”'}</td>
+        <td className="tnum">{row.local_time || '—'}</td>
+        <td className="import-note-cell">{row.note_excerpt || '—'}</td>
       </>
     );
   };
@@ -674,18 +676,18 @@ export function ImportPreviewView({
       <div className="import-header">
         <div>
           <h1 id={headingId} className="page-title">
-            Import attendance
+            {tr("Import attendance")}
           </h1>
-          <p className="import-subtitle">Paste CSV or JSON and preview the rows before importing.</p>
+          <p className="import-subtitle">{tr("Paste CSV or JSON and preview the rows before importing.")}</p>
         </div>
 
         <ol className="import-stepper" aria-label="Import progress">
           <li className={currentStep === 1 ? 'step-item active' : 'step-item done'} aria-current={currentStep === 1 ? 'step' : undefined}>
-            1. Paste data
+            {tr("1. Paste data")}
           </li>
           <li aria-hidden="true" className="step-sep">â†’</li>
           <li className={currentStep === 2 ? 'step-item active' : currentStep > 2 ? 'step-item done' : 'step-item'} aria-current={currentStep === 2 ? 'step' : undefined}>
-            2. Review rows
+            {tr("2. Review rows")}
           </li>
           <li aria-hidden="true" className="step-sep">â†’</li>
           <li className={currentStep === 3 ? 'step-item active' : 'step-item'} aria-current={currentStep === 3 ? 'step' : undefined}>
@@ -698,7 +700,7 @@ export function ImportPreviewView({
         <div className="import-controls-bar">
           <div className="import-type-group">
             <label htmlFor="import-kind-select" className="import-inline-label">
-              Import type
+              {tr("Import type")}
             </label>
             <select
               id="import-kind-select"
@@ -706,9 +708,9 @@ export function ImportPreviewView({
               value={kind}
               onChange={(e) => handleKindChange(e.target.value as ImportKind)}
             >
-              <option value="punches">Clock punches</option>
-              <option value="shifts">Scheduled shifts</option>
-              <option value="notes">Employee notes</option>
+              <option value="punches">{tr("Clock punches")}</option>
+              <option value="shifts">{tr("Scheduled shifts")}</option>
+              <option value="notes">{tr("Employee notes")}</option>
             </select>
             {isSampleLoaded && <span className="badge-neutral">Sample data loaded</span>}
           </div>
@@ -720,7 +722,7 @@ export function ImportPreviewView({
               </button>
             )}
             <button type="button" className="btn-secondary" onClick={handleLoadSample}>
-              Load sample
+              {tr("Load sample")}
             </button>
           </div>
         </div>
@@ -729,7 +731,7 @@ export function ImportPreviewView({
           <div className="import-editor-col">
             <div className="import-field-header">
               <label htmlFor="import-data-editor" className="import-field-label">
-                Attendance data (CSV or JSON)
+                {tr("Attendance data (CSV or JSON)")}
               </label>
               {rawInput.trim() && (
                 <span className="mono badge-neutral">{detectedFormat.toUpperCase()}</span>
@@ -749,14 +751,14 @@ export function ImportPreviewView({
           </div>
 
           <aside className="import-guidance-box" aria-label="Format help">
-            <div className="import-guidance-title">Format help</div>
+            <div className="import-guidance-title">{tr("Format help")}</div>
             <p className="import-guidance-text">
-              Times without an offset use the employeeâ€™s timezone.
+              Times without an offset use the employee’s timezone.
             </p>
-            <div className="import-guidance-sub">Supported columns</div>
+            <div className="import-guidance-sub">{tr("Supported columns")}</div>
             <code className="mono import-columns-code">{FORMAT_GUIDANCE[kind].columns}</code>
             <p className="import-guidance-text" style={{ marginTop: 8 }}>
-              Paste a CSV table with a header row or a JSON array of objects.
+              {tr("Paste a CSV table with a header row or a JSON array of objects.")}
             </p>
           </aside>
         </div>
@@ -768,10 +770,10 @@ export function ImportPreviewView({
             disabled={!rawInput.trim() || previewing}
             onClick={handlePreview}
           >
-            {previewing ? 'Previewingâ€¦' : 'Preview rows'}
+            {previewing ? 'Previewing”¦' : 'Preview rows'}
           </button>
           {!rawInput.trim() && (
-            <span className="small muted">Paste CSV or JSON above, or click â€œLoad sampleâ€.</span>
+            <span className="small muted">Paste CSV or JSON above, or click “Load sample”.</span>
           )}
         </div>
       </div>
@@ -930,7 +932,7 @@ export function ImportPreviewView({
                 onClick={handleCommit}
               >
                 {committing
-                  ? 'Importingâ€¦'
+                  ? 'Importing”¦'
                   : `Import ${preview.valid} ${preview.valid === 1 ? 'row' : 'rows'}`}
               </button>
             </div>
