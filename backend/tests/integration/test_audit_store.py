@@ -12,7 +12,12 @@ import pytest
 from app.ai.providers import MockProvider
 from app.core.contracts import GateStatus
 from app.resolution.store import DecisionConflict
-from tests.integration.test_resolution_api import auth, env, propose  # noqa: F401 (fixture)
+from tests.integration.test_resolution_api import (  # noqa: F401 (env is a fixture)
+    auth,
+    env,
+    propose,
+    seed_totals,
+)
 
 
 class ModelThatWritesMeanwhile:
@@ -108,7 +113,10 @@ def test_a3_reused_trace_id_does_not_crash(env):  # noqa: F811
 
 
 def _late_arrival_case():
-    """SCHEDULE_DEVIATION for E-001 (totals seeded): in 09:25, break 13-14, out 18:00."""
+    """SCHEDULE_DEVIATION for its own employee E-LATE: in 09:25, break 13-14, out 18:00.
+
+    Its own employee, because the PostgreSQL store reads the employee's whole workday: sharing
+    E-001's day with X-1 would put two sets of break punches on the same instants."""
     from datetime import datetime
 
     from app.core.contracts import (
@@ -122,13 +130,13 @@ def _late_arrival_case():
     from tests.factories import IST
     from tests.integration.test_resolution_api import evidenced
 
-    data = evidenced("X-LATE").model_dump()
+    data = evidenced("X-LATE", "E-LATE").model_dump()
     data["code"] = ExceptionCode.SCHEDULE_DEVIATION
     data["severity"] = DEFAULT_SEVERITY[ExceptionCode.SCHEDULE_DEVIATION]
     data["punches"] = [
         PunchRecord(
             punch_id=f"X-LATE-P{i}",
-            employee_id="E-001",
+            employee_id="E-LATE",
             ts=datetime(2026, 11, 12, h, m, tzinfo=IST),
             type=kind,
             source=PunchSource.KIOSK,
@@ -152,6 +160,7 @@ def test_approving_an_adjustment_applies_it_once(env):  # noqa: F811
     # Found in the live demo: approval treated adjust_punch as an added punch and crashed.
     client, store, database = env
     client.app.state.attendance_repository.seed_case(_late_arrival_case(), manager_id="M-1")
+    seed_totals(store, employee="E-LATE")
     version = client.get("/exceptions/X-LATE", headers=auth()).json()["evidence_version"]
     body = {
         "decision": "approve",
@@ -175,14 +184,15 @@ def test_approving_an_adjustment_applies_it_once(env):  # noqa: F811
     assert card["net_worked_hours"] == pytest.approx(7 + 55 / 60)  # 09:05-18:00 minus 1 h
     worked = database.scalar(
         "SELECT worked_hours FROM day_totals WHERE employee_id=? AND work_date=?",
-        ("E-001", "2026-11-12"),
+        ("E-LATE", "2026-11-12"),
     )[0]
     assert worked == pytest.approx(7 + 55 / 60)  # the day total uses the corrected hours
 
 
 def test_timecard_reports_every_time_in_the_employee_zone(env):  # noqa: F811
-    client, *_ = env
+    client, store, _ = env
     client.app.state.attendance_repository.seed_case(_late_arrival_case(), manager_id="M-1")
+    seed_totals(store, employee="E-LATE")
     version = client.get("/exceptions/X-LATE", headers=auth()).json()["evidence_version"]
     body = {
         "decision": "approve",

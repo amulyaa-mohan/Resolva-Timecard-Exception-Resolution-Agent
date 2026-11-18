@@ -72,6 +72,8 @@ trigger, edits a row and asserts the chain fails.
 | Event | Written when |
 | --- | --- |
 | `EXCEPTION_DETECTED` | detection creates an exception |
+| `EXCEPTION_CLEARED` / `EXCEPTION_REOPENED` | detection finds the rule now passes after new evidence, or the problem returns |
+| `EVIDENCE_ATTACHED` | a note or new punches join a live exception (changes its evidence version) |
 | `PROPOSAL_GENERATED` | the AI drafts a correction (actor `ai`, with the trace id) |
 | `APPROVAL_BLOCKED` | an approval failed validation; committed even though the request returns 422 |
 | `DECISION_APPROVED` | with the actions, the checks and the totals used |

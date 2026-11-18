@@ -104,7 +104,7 @@ class DemoCaseRepository:
                 marks = ",".join("?" * len(cases))
                 status_by_id = dict(
                     connection.execute(
-                        f"SELECT exception_id, {status_expression('e')} FROM demo_case_snapshots e "
+                        f"SELECT exception_id, {status_expression('e', dismissible=False)} FROM demo_case_snapshots e "
                         f"WHERE exception_id IN ({marks})",
                         [c.exception_id for c in cases],
                     ).fetchall()

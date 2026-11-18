@@ -27,7 +27,7 @@ class ExceptionSummary(BaseModel):
     code: ExceptionCode
     severity: Severity
     work_date: date
-    status: Literal["open", "escalated", "resolved"] = "open"
+    status: Literal["open", "escalated", "resolved", "dismissed"] = "open"
     evidence_version: str
 
 
@@ -44,7 +44,7 @@ def list_exceptions(
     manager: Annotated[ManagerCredential, Depends(authenticated_manager)],
     exception_type: ExceptionCode | None = None,
     severity: Severity | None = None,
-    status: Literal["open", "escalated", "resolved"] | None = None,
+    status: Literal["open", "escalated", "resolved", "dismissed"] | None = None,
     employee_id: str | None = Query(None, min_length=1, max_length=128),
     exception_id: str | None = Query(None, min_length=1, max_length=128),
     date_range: DateRange | None = None,
