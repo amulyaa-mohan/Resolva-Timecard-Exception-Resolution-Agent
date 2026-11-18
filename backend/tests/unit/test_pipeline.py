@@ -284,7 +284,7 @@ def test_prompt_versions_differ_only_by_facts(case, policy, settings):
     _, v2 = build_messages(case, [], settings.prompts_dir, "propose_v2", policy)
     assert "<facts>" not in v1.content and "<facts>" in v2.content
     result = run(case, policy, settings, MockProvider())
-    assert result.trace.prompt_version == "propose_v2"  # default
+    assert result.trace.prompt_version == "propose_v3"  # default
 
 
 def test_escalation_strips_fabricated_citations(case, policy, settings):

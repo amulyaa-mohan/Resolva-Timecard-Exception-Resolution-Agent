@@ -9,7 +9,9 @@ exceptions table. Synthetic data only; never point it at a real database.
 """
 
 import argparse
+import csv
 import hashlib
+import io
 import json
 import os
 import secrets
@@ -17,8 +19,14 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from app.attendance.importer import local_dates, preview_punches, preview_shifts, read_rows
-from app.attendance.ingest import commit_import, new_batch_id, run_detection
+from app.attendance.importer import (
+    local_dates,
+    preview_notes,
+    preview_punches,
+    preview_shifts,
+    read_rows,
+)
+from app.attendance.ingest import commit_import, import_notes, new_batch_id, run_detection
 from app.attendance.postgres import PostgresBackend, apply_migrations
 from app.core.config import BACKEND_DIR
 from app.policies.registry import PolicyRegistry
@@ -99,6 +107,37 @@ PLAN = [
         "SPREAD_OVER_BREACH + OVERTIME_RISK: 12.5 h spread, 10.5 h worked",
     ),
 ]
+
+
+# What employees wrote about their own days: (employee, weekday offset, local time submitted, text).
+# These give the model something real to cite. Each states a time, because a correction to a
+# recorded punch is only accepted when it is backed by a time the employee stated.
+NOTES = [
+    ("E-DEMO-1", 1, "19:10", "I left at 6:00 pm on Tuesday but forgot to punch out."),
+    (
+        "E-DEMO-1",
+        4,
+        "19:30",
+        "The kiosk was down when I arrived, I actually got in at 9:05 and started work then.",
+    ),
+    (
+        "E-DEMO-2",
+        2,
+        "19:00",
+        "I was at the gate at 6:00 but only started at 6:30 when it opened. I finished at 6:30 pm.",
+    ),
+    ("E-DEMO-3", 3, "18:45", "I tapped in twice by mistake. My real shift was 9:00 to 6:00 pm."),
+]
+
+
+def build_notes_csv(monday: date) -> str:
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(["employee_id", "submitted_at", "text"])
+    for employee, offset, clock, text in NOTES:
+        day = (monday + timedelta(days=offset)).isoformat()
+        writer.writerow([employee, f"{day} {clock}", text])
+    return out.getvalue()
 
 
 def demo_week(today: date) -> date:
@@ -214,6 +253,11 @@ def seed(dsn: str, directory: Path) -> None:
     touched = local_dates(punches, EMPLOYEES)
     registry = PolicyRegistry.from_directory(BACKEND_DIR / "policies")
     created = run_detection(backend, registry, touched, as_of=datetime.now(UTC))
+    # Notes arrive after detection, as they do in practice: importing them attaches them.
+    notes = preview_notes(read_rows(build_notes_csv(monday), "csv"), employee_timezones=EMPLOYEES)
+    if notes.invalid:
+        raise ValueError(f"demo notes are invalid: {[r.error for r in notes.rows if r.error]}")
+    note_count, attached = import_notes(backend, notes, as_of=datetime.now(UTC))
     token_path = write_credentials(directory)
     print(
         f"Demo week of {monday.isoformat()}: {added} new records imported, "
@@ -226,6 +270,7 @@ def seed(dsn: str, directory: Path) -> None:
         print("\nWhat each day demonstrates:")
         for employee, offset, _, _, note in PLAN:
             print(f"  {employee} {(monday + timedelta(days=offset)).isoformat()}: {note}")
+    print(f"Employee notes: {note_count} imported, attached to {len(attached)} exception(s).")
     if token_path:
         print(f"\nManager {MANAGER} credential written to {token_path} (expires in 24 h).")
     else:

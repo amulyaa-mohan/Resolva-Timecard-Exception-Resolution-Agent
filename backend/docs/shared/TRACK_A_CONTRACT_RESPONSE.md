@@ -159,3 +159,58 @@ SCHEDULE_DEVIATION violation (BLOCKED). Should a warning-severity deviation inst
    `insufficient_evidence` with "Fix is evidenced but leaves a warning: manager review", so the
    pipeline escalates instead of blocking. Problem-severity remainders still block.
 5. **CI: thank you.** Track A's PostgreSQL tests now run on every build.
+
+### Track B reply (2026-11-18, Amulya): history rounding and step 2
+
+- **History refs: yes, one-sided.** Track B's gate now rounds `history_punch` times one way only
+  (a habit is not a record), as it does for notes; schedule refs stay two-sided. Your validator can
+  make history one-sided too; until then the gate is the stricter of the two, so nothing it accepts
+  can be refused by your rule for adding paid time.
+- **Step 2 is live on Track B's side:** the pipeline now drafts `adjust_punch` fixes for
+  SCHEDULE_DEVIATION, SPREAD_OVER_BREACH and OVERLAPPING_SHIFT, escalating without the model when no
+  usable stated time exists. Prompt `propose_v3` adds the adjustment rules. Eval category
+  `adjustment` (12 cases, `evals/cases/adjustment.json`) runs against your real validator.
+- **0.3.0-draft** (`new_end_ts`, `target_punch_ids`, swap never approvable) is next on Track B's list.
+
+### Track A reply to the code audit (2026-11-18, Jayanth): reviewed, confirmed, and three of your asks done
+
+I pulled `b2c7a86`, read the diff, and ran the full suite with `TEST_DATABASE_URL`: **550 passed** before my
+changes and **580** after. Thank you for the audit. No need to apologise for touching these files.
+
+**Reviewed and agreed**
+- **A1 (meal break):** correct. The walk now resets the count only after a rest of `rest_minutes`, so 13:00 out and
+  13:01 in no longer passes. The detection details I added use the same walk.
+- **A2 (propose):** correct, and a real improvement. Reading the totals once before the model call is fine
+  because a proposal is only a draft: approval re-reads totals and re-validates, and the short write re-checks the
+  revision and evidence hash. I checked that a stale result returns 409 and that nothing is persisted in that case.
+- **A3 (trace keys):** agreed; retention and the integrity check both join on the key, and the audit payload keeps
+  the raw id for display.
+- **A4 (unsupported types escalate):** agreed.
+- **A6 (`effective_to` exclusive):** agreed, now consistent with the registry.
+
+**A5 confirmed, and it was my bug.** KA-9 and US-6 define a deviation as a clock-in more than 7 minutes *after* the
+scheduled start or a clock-out more than 7 minutes *before* the scheduled end. My check was two-sided, so it also
+flagged arriving early or leaving late, which the policy text does not call a deviation. Early arrival and late
+departure are extra paid time, and OVERTIME_RISK is the right place for them. No change requested.
+One open point (also in RULE_ENGINE.md): the design README lists "an unscheduled shift" as a deviation. With no
+schedule we return `insufficient_evidence`, because we cannot tell a missing schedule import from a genuinely
+unscheduled shift. Treating it as a violation needs an agreed signal that schedules are complete for the day. Your view?
+
+**Done, as you asked**
+1. **Structured `detection_details`.** Every exception now stores the keys you listed, next to `reason`:
+   `unmatched_punch_id` / `missing_type`, `overlapping_punch_ids`, `worked_min_before_break` / `break_min`,
+   `day_hours` / `projected_week_hours` / `limit_hours`, `spread_hours`, `boundary` / `minutes_off`.
+   I added `limit_kind` (`daily`, `weekly`, `quarterly`) to OVERTIME_RISK, because three limits make `limit_hours`
+   ambiguous. They are scalars only, and an undecided finding gets none. Source: `app/rules/explain.py`.
+2. **Employee notes.** `POST /imports` now takes `kind: "notes"`. A note attaches to an open or escalated exception
+   when it was written on the work date or the day after; attaching changes `evidence_version` (so earlier drafts go
+   stale) and is audited as `EVIDENCE_ATTACHED`. A note imported before its exception exists is attached when
+   detection raises it. The demo seed imports four notes, each stating a time, one per late-arrival, spread-over,
+   overlap and forgotten-punch case. Details: `backend/docs/IMPORT_DETECTION.md`.
+   While building this I made the window too wide first (7 days), saw Friday's note attach to Tuesday's exception in
+   the seed output, and tightened it to two days. A note has no date of its own, so please keep in mind that it may
+   still be about the other day inside the window; the model should treat a note's time as a claim, as it does now.
+3. Tests: `test_explain.py` (15), the notes cases in `test_import_detection.py` and `test_import_flow_pg.py`.
+
+**Still to do together:** review contract 0.3.0-draft once you post it. Nothing in the notes or details work
+depends on it.

@@ -7,7 +7,7 @@ Only VIOLATION outcomes become exceptions. INSUFFICIENT_EVIDENCE is reported, no
 an exception, because it is not yet known to be a problem (e.g. a shift still running).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -23,6 +23,7 @@ from app.core.contracts import (
     Severity,
 )
 from app.rules.engine import AggregateEvidence, evaluate_rule_outcomes, instant
+from app.rules.explain import explain
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,8 @@ class Finding:
     code: ExceptionCode
     outcome: RuleOutcome
     reason: str
+    # Scalar facts (see app/rules/explain.py); empty for a finding that is not a violation.
+    details: dict = field(default_factory=dict)
 
 
 def group_by_work_date(punches: list[PunchRecord], timezone: str) -> dict[date, list[PunchRecord]]:
@@ -96,7 +99,14 @@ def detect(
         as_of=as_of,
     )
     return [
-        Finding(check.code, outcome, check.reason)
+        Finding(
+            check.code,
+            outcome,
+            check.reason,
+            explain(check.code, punches, schedule, policy, aggregates)
+            if outcome == RuleOutcome.VIOLATION
+            else {},
+        )
         for check, outcome in evaluate_rule_outcomes(case, policy, aggregates)
         if outcome != RuleOutcome.PASS
     ]

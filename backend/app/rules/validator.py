@@ -224,7 +224,11 @@ def _validate(
             if action.type not in SUPPORTED:
                 # acknowledge / add_break / void_shift / flag_premium / schedule swap need
                 # agreed semantics (contract) before they can be validated; never guessed.
-                return _reject(f"{action.type.value} corrections are not supported yet.")
+                # Audit A4: cannot be judged yet, which is not the same as wrong: escalate.
+                return _reject(
+                    f"{action.type.value} corrections are not supported yet; manager review.",
+                    RuleOutcome.INSUFFICIENT_EVIDENCE,
+                )
         targets = [a.punch_id for a in parsed if a.type == ActionType.ADJUST_PUNCH]
         if len(set(targets)) != len(targets):
             return _reject("Two actions target the same punch.")

@@ -100,10 +100,24 @@ class OllamaEmbedder:
         return vectors
 
 
+_SHARED_EMBEDDERS: dict[tuple[str, str], OllamaEmbedder] = {}
+
+
 def build_embedder(settings) -> Embedder:
-    """Embedder from settings. Ollama embeddings fall back to BM25-only at query time if down."""
+    """Embedder from settings. Ollama embeddings fall back to BM25-only at query time if down.
+
+    The Ollama embedder is shared per (url, model) so its HTTP connections are reused across
+    proposals (audit 2026-11-18: one new client per proposal before).
+    """
     if settings.embedding_provider == "ollama":
-        return OllamaEmbedder(
-            base_url=settings.ollama_base_url, model=settings.ollama_embedding_model
-        )
+        key = (settings.ollama_base_url, settings.ollama_embedding_model)
+        embedder = _SHARED_EMBEDDERS.get(key)
+        if embedder is None:
+            embedder = _SHARED_EMBEDDERS.setdefault(
+                key,
+                OllamaEmbedder(
+                    base_url=settings.ollama_base_url, model=settings.ollama_embedding_model
+                ),
+            )
+        return embedder
     return HashingEmbedder()

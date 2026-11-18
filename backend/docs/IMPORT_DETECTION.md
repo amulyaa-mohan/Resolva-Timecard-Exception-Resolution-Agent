@@ -49,6 +49,40 @@ Body: `{"kind": "punches"|"shifts", "format": "csv"|"json", "content": "...", "m
 Each item is authorized, validated and committed on its own. One failure never affects another.
 The response lists `{exception_id, ok, status_code (200/404/409/422), result | error, checks}` in request order.
 
+## Employee notes
+
+`POST /imports` with `kind: "notes"` (fields `employee_id`, `submitted_at`, `text`, optional `note_id`).
+
+- Text is untrusted data: stored verbatim, up to 1000 characters, never interpreted as an instruction.
+  A longer note is rejected, not truncated.
+- A naive `submitted_at` is read in the employee's timezone (DST gaps and overlaps are refused, as for punches).
+- The note id is derived from the employee and the content, so a re-import is a no-op and one employee's
+  id can never overwrite another's note.
+- A note attaches to an employee's **open or escalated** exception when it was submitted on the exception's
+  work date or the day after (local time). A note has no date of its own, so this window is the whole rule;
+  it is deliberately tight so a note about Friday is never evidence for Tuesday. A resolved exception's
+  evidence is never changed.
+- Attaching changes the case's `evidence_version`, so a draft made before the note arrived is stale, as it should
+  be. Each change is audited as `EVIDENCE_ATTACHED`. Import and attach are one transaction.
+- A note imported before its exception exists is attached when detection raises it.
+
+## Structured `detection_details`
+
+Every exception stores scalar facts next to the human-readable `reason`, for the model's facts block and the
+manager's explanation. They describe a violation the engine already found and never decide one; an
+undecided (insufficient-evidence) finding gets none. Source: `app/rules/explain.py`.
+
+| Code | Keys |
+| --- | --- |
+| MISSING_PUNCH | `unmatched_punch_id`, `missing_type` (`in` or `out`) |
+| OVERLAPPING_SHIFT | `overlapping_punch_ids` (comma-separated) |
+| MEAL_BREAK_BREACH | `worked_min_before_break` (longest stretch without a qualifying rest), `break_min` (longest break recorded) |
+| OVERTIME_RISK | `day_hours`, `projected_week_hours`, `limit_hours`, `limit_kind` (`daily`, `weekly` or `quarterly`) |
+| SPREAD_OVER_BREACH | `spread_hours` |
+| SCHEDULE_DEVIATION | `boundary` (`start` or `end`), `minutes_off` |
+
+`limit_kind` is an addition to the keys Track B listed: with three possible limits, `limit_hours` alone is ambiguous.
+
 ## Demo data
 
 ```bash
@@ -57,6 +91,7 @@ The response lists `{exception_id, ok, status_code (200/404/409/422), result | e
 
 It writes three synthetic employees and last week's shifts and punches, imports them through the
 real preview and commit path, and lets detection raise all six exception types (plus one clean day).
+It imports four employee notes through the real notes path, each stating a time (a forgotten punch-out, a kiosk outage, a late gate opening, a double tap), and each lands on exactly one exception.
 It also writes synthetic day totals from the quarter start, because one week of punches cannot
 establish a weekly or quarterly limit; without them OVERTIME_RISK is correctly undecidable.
 A manager credential is written to the ignored `backend/local/` unless one is already there.

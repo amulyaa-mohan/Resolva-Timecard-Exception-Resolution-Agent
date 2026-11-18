@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.1, ge=0, le=1)
     llm_max_repair_retries: int = Field(default=1, ge=0, le=3)
     # propose_v2 adds trusted plain-language facts; v1 kept for comparison (evals/reports).
-    prompt_version: Literal["propose_v1", "propose_v2"] = "propose_v2"
+    prompt_version: Literal["propose_v1", "propose_v2", "propose_v3"] = "propose_v3"
     ollama_base_url: str = "http://localhost:11434"
     groq_base_url: str = "https://api.groq.com/openai/v1"
     # Read from the environment only; never commit a real key. SecretStr keeps it out of logs/repr.

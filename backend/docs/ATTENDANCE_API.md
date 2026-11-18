@@ -38,7 +38,7 @@ Configuration is loaded on startup; restart after replacing credentials. This is
 - GET /exceptions/{exception_id}: authorized CaseContext with evidence_version.
 - Missing and unauthorized detail IDs both return 404 without revealing whether a case exists.
 - List responses omit employee notes and punch details; detail is restricted to the assigned manager.
-- No mutation endpoints exist. Role or manager headers do not override the token's server-provisioned identity.
+- Decisions, proposals and imports are separate endpoints (RESOLUTION_API.md, IMPORT_DETECTION.md). Role or manager headers do not override the token's server-provisioned identity.
 
 List parameters:
 
@@ -55,7 +55,7 @@ List parameters:
 These names align with Track B's ExceptionQuery. Frontend should send its non-null fields.
 Date presets use the provisioned manager's timezone, not the execution host's timezone.
 The language module's demo Monday-based weeks and half-month pay periods are reused until calendar contracts are agreed.
-Demo snapshots have status open; filtering escalated returns no rows because escalation/decision state is not persisted yet.
+Status is derived from stored decisions and escalations: resolved > escalated > open.
 Lists order problems first, then work_date and exception_id. Count is manager-scoped and calculated before pagination.
 The adapter reads assigned snapshots before filtering; this is appropriate for synthetic demo volumes, not production-scale querying.
 

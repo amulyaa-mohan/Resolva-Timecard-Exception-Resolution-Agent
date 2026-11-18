@@ -259,6 +259,16 @@ class ResolutionStore:
             for i in exception_ids
         }
 
+    @staticmethod
+    def _approved(connection, exception_id: str) -> bool:
+        return (
+            connection.execute(
+                "SELECT 1 FROM decisions WHERE exception_id=? AND decision='approve'",
+                (exception_id,),
+            ).fetchone()
+            is not None
+        )
+
     def _escalate(self, connection, exception_id: str, reason: str, source: str, now) -> None:
         connection.execute(
             "INSERT INTO escalations VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
@@ -322,30 +332,42 @@ class ResolutionStore:
         """Draft a correction for an authorized case and persist it with its model trace.
 
         Track B's generate_proposal runs the gates and calls the real validator with trusted
-        totals read inside this transaction. Nothing here approves: an eligible proposal is
-        only a draft a manager may then approve.
+        totals read in the same snapshot as the case, without holding the write lock (audit
+        A2). Nothing here approves: an eligible proposal is only a draft a manager may then
+        approve, and approval re-validates against fresh evidence and totals.
         """
         now = self.clock()
-        with self._transaction() as connection:
-            case, _revision = self._load(connection, exception_id, manager_id, lock=True)
-            if connection.execute(
-                "SELECT 1 FROM decisions WHERE exception_id=? AND decision='approve'",
-                (exception_id,),
-            ).fetchone():
+        # Audit A2: the model call (up to the LLM budget) used to run inside the write
+        # transaction, holding the global write lock, so every proposal, decision and import
+        # queued behind it. Now: (1) a short read, (2) the pipeline with no lock held, (3) a
+        # short write that re-checks the evidence before persisting.
+        with self._transaction(immediate=False) as connection:
+            case, revision = self._load(connection, exception_id, manager_id)
+            if self._approved(connection, exception_id):
                 raise DecisionConflict("exception already resolved")
             try:
                 policy = self.registry.resolve(case.employee, case.work_date)
             except PolicyResolutionError:
                 policy = None  # the pipeline escalates without an applicable policy
+            # Trusted totals, read once from the same snapshot as the case.
+            aggregates = totals.load_aggregates(connection, case, policy, now) if policy else None
 
-            def validator(c, actions, p):
-                return make_validator(
-                    lambda inner: totals.load_aggregates(connection, inner, p, now)
-                )(c, actions, p)
+        result = generate_proposal(
+            case,
+            policy,
+            provider=provider,
+            validator=make_validator(lambda _case: aggregates),
+            settings=settings,
+        )
 
-            result = generate_proposal(
-                case, policy, provider=provider, validator=validator, settings=settings
-            )
+        with self._transaction() as connection:
+            current, current_revision = self._load(connection, exception_id, manager_id, lock=True)
+            if self._approved(connection, exception_id):
+                raise DecisionConflict("exception already resolved")
+            if current_revision != revision or current.evidence_version != case.evidence_version:
+                raise DecisionConflict(
+                    "evidence changed while the proposal was drafted; request a new proposal"
+                )
             proposal_id = f"PRP-{uuid.uuid4().hex}"
             connection.execute(
                 "INSERT INTO proposals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -366,6 +388,9 @@ class ResolutionStore:
                 ),
             )
             trace = result.trace
+            # Audit A3: the request trace id comes from the client (X-Trace-Id) and repeats
+            # across retries, so it cannot be a primary key on its own.
+            trace_key = f"{trace.trace_id}:{proposal_id}"
             # The trace is immutable audit evidence; the model's own text lives in its own
             # table so a retention job can purge it without touching the trace.
             connection.execute(
@@ -373,7 +398,7 @@ class ResolutionStore:
                 "prompt_version, prompt_hash, retrieved_chunk_ids, attempts, latency_ms, error, "
                 "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    trace.trace_id,
+                    trace_key,
                     proposal_id,
                     trace.provider,
                     trace.model_id,
@@ -389,7 +414,7 @@ class ResolutionStore:
             connection.execute(
                 "INSERT INTO llm_raw_outputs VALUES (?, ?, ?, ?)",
                 (
-                    trace.trace_id,
+                    trace_key,
                     json.dumps(trace.raw_outputs),
                     json.dumps(trace.parse_errors),
                     now.astimezone(UTC).isoformat(),
@@ -417,6 +442,7 @@ class ResolutionStore:
                     "policy": f"{result.policy_pack_id}@{result.policy_version}",
                     "prompt_version": trace.prompt_version,
                     "trace_id": trace.trace_id,
+                    "trace_key": trace_key,
                     "reasons": result.reasons,
                 },
                 occurred_at=now,

@@ -51,6 +51,22 @@ Last week is used, so every day is finished and its evidence is final.
 
 All six exception types, plus one day that correctly raises nothing.
 
+## 4a. Employee notes
+
+Four notes are imported through the real notes path after detection, so the attach logic runs too.
+Each states a time, because a correction to a recorded punch is only accepted when backed by a time the
+employee stated.
+
+| Employee | Day | Note says | Attaches to |
+| --- | --- | --- | --- |
+| E-DEMO-1 | Tue | left at 6:00 pm, forgot to punch out | `MISSING_PUNCH` |
+| E-DEMO-1 | Fri | kiosk was down, actually got in at 9:05 | `SCHEDULE_DEVIATION` |
+| E-DEMO-2 | Wed | at the gate at 6:00, started at 6:30, finished at 6:30 pm | `SPREAD_OVER_BREACH`, `OVERTIME_RISK` |
+| E-DEMO-3 | Thu | tapped in twice by mistake, real shift 9:00 to 6:00 pm | `OVERLAPPING_SHIFT` |
+
+A note attaches only to an exception whose work date is the day it was written or the day before, so
+none is evidence for another day. The Wednesday meal-break exception has no note, on purpose.
+
 ## 5. Prior totals
 
 The script also writes `day_totals` from the quarter start to yesterday: 8 h weekdays, marked
