@@ -68,3 +68,8 @@ Append entries; preserve other developers' history. Use repository-relative path
   - Verified that all existing dashboard tabs (Exception Inbox, Escalations, Import Preview, Audit Trail, Kiosk Simulator, Policies & Settings), KPI cards, and resolution actions remain fully intact.
 - Blockers and next step: Ready for teammate review; future task can wire production auth provider if live authentication backend is introduced.
 - Publication: local only.
+
+### 2026-11-18 — C V Jayanth — FE-07 — Dropdown chevron spacing
+
+- Inset and centered chevrons on single-select controls. Preserved native select interaction and restored the native indicator in forced colors.
+- Validation: TypeScript/Vite production build and Git whitespace check passed.
