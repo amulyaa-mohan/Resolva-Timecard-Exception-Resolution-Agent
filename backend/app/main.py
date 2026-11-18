@@ -14,6 +14,9 @@ from app.core.contracts import CONTRACT_VERSION
 from app.core.errors import install_error_handlers
 from app.core.tracing import TRACE_HEADER, new_trace_id, set_trace_id
 from app.language.router import router as assistant_router
+from app.policies.registry import PolicyRegistry
+from app.resolution.router import router as resolution_router
+from app.resolution.store import ResolutionStore
 
 
 def create_app(
@@ -35,7 +38,11 @@ def create_app(
             raise ValueError("Provision the attendance demo database before enabling it.")
         app.state.attendance_credentials = read_credentials(attendance_settings.credentials_path)
         app.state.attendance_repository = DemoCaseRepository(attendance_settings.database_path)
+        app.state.resolution_store = ResolutionStore(
+            attendance_settings.database_path, PolicyRegistry.from_directory(settings.policies_dir)
+        )
     app.include_router(attendance_router)
+    app.include_router(resolution_router)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[origin.strip() for origin in settings.cors_origins.split(",")],

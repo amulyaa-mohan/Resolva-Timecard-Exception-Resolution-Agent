@@ -1,29 +1,30 @@
 """Deterministic demo-policy checks shared by detection and correction simulation.
 
-Every check has an explicit Outcome: PASS, VIOLATION (the timecard breaks a rule) or
-INSUFFICIENT_EVIDENCE (the rule cannot be decided). Agreed with Track B for contract
-0.2.0 as RuleCheck.outcome; until that field exists, evaluate_rule_outcomes exposes it
-and RuleCheck.passed == (outcome == PASS).
+Every check sets RuleCheck.outcome (contract 0.2.0): PASS, VIOLATION (the timecard
+breaks a rule) or INSUFFICIENT_EVIDENCE (the rule cannot be decided from the inputs).
+RuleCheck.passed == (outcome == PASS).
 No policy text, model outputs or detection_details are used as trusted aggregates.
 """
 
 from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from enum import StrEnum
 from math import isfinite
 from zoneinfo import ZoneInfo
 
 from app.attendance.context import build_verified_case
-from app.core.contracts import CaseContext, ExceptionCode, PolicySnapshot, PunchType, RuleCheck
+from app.core.contracts import (
+    CaseContext,
+    ExceptionCode,
+    PolicyRules,
+    PolicySnapshot,
+    PunchType,
+    RuleCheck,
+    RuleOutcome,
+)
 
-RULE_VERSION = "attendance-rules@0.3-draft"
-
-
-class Outcome(StrEnum):
-    PASS = "pass"
-    VIOLATION = "violation"
-    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
+RULE_VERSION = "attendance-rules@0.4-draft"
+Outcome = RuleOutcome  # the shared contract enum
 
 
 @dataclass(frozen=True)
@@ -55,10 +56,8 @@ class AggregateEvidence:
                 raise ValueError("aggregates must be finite and nonnegative")
         if self.as_of is not None and self.as_of.utcoffset() is None:
             raise ValueError("aggregate as_of must be timezone-aware")
-        if self.quarter_start is not None and (
-            self.quarter_start.day != 1 or (self.quarter_start.month - 1) % 3
-        ):
-            raise ValueError("quarter_start must be the first day of a calendar quarter")
+        if self.quarter_start is not None and self.quarter_start.day != 1:
+            raise ValueError("quarter_start must be the first day of a month")
 
 
 def instant(value: datetime) -> datetime:
@@ -73,12 +72,14 @@ def blocked_checks(
     reason: str, outcome: Outcome = Outcome.INSUFFICIENT_EVIDENCE
 ) -> list[RuleCheck]:
     return [
-        RuleCheck(code=code, passed=outcome == Outcome.PASS, reason=reason)
+        RuleCheck(code=code, passed=outcome == Outcome.PASS, reason=reason, outcome=outcome)
         for code in ExceptionCode
     ]
 
 
-def _aggregate_gap(aggregates: AggregateEvidence, case: CaseContext, quarterly: bool) -> str | None:
+def _aggregate_gap(
+    aggregates: AggregateEvidence, case: CaseContext, rules: PolicyRules
+) -> str | None:
     """Why the totals cannot be used for this work date, or None when they can."""
     a = aggregates
     if not a.work_date_complete or a.week_other_worked_hours is None:
@@ -87,16 +88,18 @@ def _aggregate_gap(aggregates: AggregateEvidence, case: CaseContext, quarterly: 
         return "remaining scheduled hours missing"
     if a.week_start is None or a.as_of is None:
         return "aggregate period or as-of time missing"
-    # Calendar fields (week_start weekday, quarter_start_month) arrive with contract 0.2.0;
-    # until then only containment of the work date is checked.
+    if a.week_start.weekday() != rules.week_start.number:
+        return f"weekly totals do not start on the policy week start ({rules.week_start.value})"
     if not a.week_start <= case.work_date < a.week_start + timedelta(days=7):
         return "weekly totals cover a different week"
-    if quarterly:
+    if rules.quarterly_ot_cap_hours is not None:
         if a.quarter_other_overtime_hours is None or a.quarter_start is None:
             return "quarterly overtime total missing"
         months = (case.work_date.year - a.quarter_start.year) * 12 + (
             case.work_date.month - a.quarter_start.month
         )
+        if (a.quarter_start.month - rules.quarter_start_month) % 3:
+            return "quarterly total does not start on a policy quarter boundary"
         if not 0 <= months <= 2:
             return "quarterly total covers a different quarter"
     return None
@@ -113,6 +116,58 @@ def _describe(aggregates: AggregateEvidence, net_hours: float, quarterly: bool) 
     if quarterly:
         text += f"; quarter from {a.quarter_start}: {a.quarter_other_overtime_hours:.2f} h other OT"
     return f"{text}; totals as of {instant(a.as_of).isoformat()}"
+
+
+def _pair(events: list) -> tuple[list, list, bool, bool, bool, bool]:
+    """FIFO work pairing and break pairing over time-sorted punches.
+
+    Returns (work, breaks, missing, break_invalid, overlap, only_open_in). only_open_in
+    means the sole pairing gap is clock-ins still awaiting a clock-out. Shared by the six
+    checks and by net_worked_hours so recorded totals use identical pairing.
+    """
+    work, breaks, pending = [], [], deque()
+    missing = False
+    break_start = None
+    break_invalid = False
+    for punch in events:
+        if punch.type == PunchType.IN:
+            pending.append(punch.ts)
+        elif punch.type == PunchType.OUT:
+            if pending:
+                work.append((pending.popleft(), punch.ts))
+            else:
+                missing = True
+        elif punch.type == PunchType.BREAK_START:
+            if break_start is not None:
+                break_invalid = True
+            break_start = punch.ts
+        elif break_start is None:
+            break_invalid = True
+        else:
+            breaks.append((break_start, punch.ts))
+            break_start = None
+    only_open_in = bool(pending) and not missing
+    missing = missing or bool(pending)
+    break_invalid = break_invalid or break_start is not None
+    overlap = any(
+        instant(right[0]) < instant(left[1]) for left, right in zip(work, work[1:], strict=False)
+    )
+    # A break must belong to exactly one worked interval, never overlapping shifts.
+    for start, end in breaks:
+        if sum(instant(ws) <= instant(start) < instant(end) <= instant(we) for ws, we in work) != 1:
+            break_invalid = True
+    return work, breaks, missing, break_invalid, overlap, only_open_in
+
+
+def net_worked_hours(punches: list) -> float | None:
+    """Net paired work minus breaks, or None when the punches cannot be paired cleanly."""
+    events = sorted(punches, key=lambda p: instant(p.ts))
+    if len({instant(p.ts) for p in events}) != len(events):
+        return None
+    work, breaks, missing, break_invalid, overlap, _ = _pair(events)
+    if missing or break_invalid or overlap or not work:
+        return None
+    return sum(hours(s, e) for s, e in work) - sum(hours(s, e) for s, e in breaks)
 
 
 def evaluate_rule_outcomes(
@@ -157,49 +212,25 @@ def evaluate_rule_outcomes(
         p.type == PunchType.IN and p.ts.astimezone(zone).date() != case.work_date for p in events
     ):
         return blocked("Clock-in outside the case's local work date; scope is ambiguous.")
-    work, breaks, pending = [], [], deque()
-    missing = False
-    break_start = None
-    break_invalid = False
-    for punch in events:
-        if punch.type == PunchType.IN:
-            pending.append(punch.ts)
-        elif punch.type == PunchType.OUT:
-            if pending:
-                work.append((pending.popleft(), punch.ts))
-            else:
-                missing = True
-        elif punch.type == PunchType.BREAK_START:
-            if break_start is not None:
-                break_invalid = True
-            break_start = punch.ts
-        elif break_start is None:
-            break_invalid = True
-        else:
-            breaks.append((break_start, punch.ts))
-            break_start = None
-    missing = missing or bool(pending)
-    break_invalid = break_invalid or break_start is not None
-    overlap = any(
-        instant(right[0]) < instant(left[1]) for left, right in zip(work, work[1:], strict=False)
-    )
-    # A break must belong to exactly one worked interval, never overlapping shifts.
-    for start, end in breaks:
-        if sum(instant(ws) <= instant(start) < instant(end) <= instant(we) for ws, we in work) != 1:
-            break_invalid = True
+    work, breaks, missing, break_invalid, overlap, only_open_in = _pair(events)
     complete = not missing and bool(work)
+    # A shift still running at as_of is not missing a clock-out yet (contract 0.2.0).
+    still_open = (
+        only_open_in
+        and case.as_of is not None
+        and case.schedule is not None
+        and instant(case.as_of) < instant(case.schedule.end)
+    )
     net_hours = sum(hours(s, e) for s, e in work) - sum(hours(s, e) for s, e in breaks)
     ok, bad, unknown = Outcome.PASS, Outcome.VIOLATION, Outcome.INSUFFICIENT_EVIDENCE
     unpaired = "Cannot evaluate: work punches are unpaired."
 
-    missing_punch = (
-        (ok, "Work punches paired.")
-        if complete
-        else (
-            bad,
-            "Unmatched or missing work punch.",
-        )
-    )
+    if complete:
+        missing_punch = (ok, "Work punches paired.")
+    elif still_open:
+        missing_punch = (unknown, "Shift still open at evaluation time; not yet missing.")
+    else:
+        missing_punch = (bad, "Unmatched or missing work punch.")
     if not complete:
         overlapping = (unknown, unpaired)
     elif overlap:
@@ -225,7 +256,7 @@ def evaluate_rule_outcomes(
                 meal = (bad, "Required break missing, short or late.")
 
     quarterly = rules.quarterly_ot_cap_hours is not None
-    gap = _aggregate_gap(aggregates, case, quarterly)
+    gap = _aggregate_gap(aggregates, case, rules)
     if not complete or overlap or break_invalid:
         overtime = (unknown, "Cannot evaluate hours: worked or break intervals are invalid.")
     elif gap:
@@ -283,7 +314,10 @@ def evaluate_rule_outcomes(
         ExceptionCode.SCHEDULE_DEVIATION: schedule,
     }
     return [
-        (RuleCheck(code=code, passed=outcome == Outcome.PASS, reason=reason), outcome)
+        (
+            RuleCheck(code=code, passed=outcome == Outcome.PASS, reason=reason, outcome=outcome),
+            outcome,
+        )
         for code, (outcome, reason) in values.items()
     ]
 

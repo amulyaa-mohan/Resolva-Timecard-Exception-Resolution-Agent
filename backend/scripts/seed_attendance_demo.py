@@ -11,10 +11,17 @@ import os
 import secrets
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from app.attendance.repository import DemoCaseRepository
+from app.core.config import BACKEND_DIR
 from app.core.contracts import CaseContext
+from app.policies.registry import PolicyRegistry
+from app.resolution.store import ResolutionStore
+from app.resolution.totals import quarter_bounds, week_start
 from app.rules.engine import RULE_VERSION
+
+POLICIES = BACKEND_DIR / "policies"
 
 
 def private_json(path: Path, payload):
@@ -22,6 +29,29 @@ def private_json(path: Path, payload):
     with os.fdopen(descriptor, "w") as stream:
         json.dump(payload, stream, indent=2)
         stream.write("\n")
+
+
+def seed_day_totals(store: ResolutionStore, case: CaseContext) -> None:
+    """Synthetic trusted history: 8 h weekdays before today, scheduled hours afterwards.
+
+    Days before the employee's local today are complete. Re-run provisioning in a fresh
+    directory on a later day, or the loader will (correctly) report incomplete history.
+    """
+    today = datetime.now(UTC).astimezone(ZoneInfo(case.employee.timezone)).date()
+    quarter_start, _ = quarter_bounds(case.work_date)
+    day, last = quarter_start, week_start(max(today, case.work_date)) + timedelta(days=6)
+    while day <= last:
+        weekday = day.weekday() < 5
+        done = day < today or day == case.work_date
+        store.seed_day_total(
+            employee_id=case.employee.employee_id,
+            work_date=day,
+            worked_hours=8.0 if weekday and done else 0.0,
+            scheduled_hours=8.0 if weekday else 0.0,
+            complete=done,
+            source="synthetic-demo-seed",
+        )
+        day += timedelta(days=1)
 
 
 def seed(directory: Path):
@@ -47,12 +77,15 @@ def seed(directory: Path):
             "rule_version": RULE_VERSION,
             "punches": [
                 {
-                    "punch_id": "P-DEMO-1",
+                    "punch_id": f"P-DEMO-{i}",
                     "employee_id": "E-DEMO-1",
-                    "ts": "2026-11-17T09:00:00+05:30",
-                    "type": "in",
+                    "ts": f"2026-11-17T{clock}:00+05:30",
+                    "type": kind,
                     "source": "import",
                 }
+                for i, (kind, clock) in enumerate(
+                    [("in", "09:00"), ("break_start", "13:00"), ("break_end", "14:00")], 1
+                )
             ],
             "schedule": {
                 "shift_id": "S-DEMO-1",
@@ -65,7 +98,9 @@ def seed(directory: Path):
             "evidence_version": "seed-pending",
         }
     )
-    DemoCaseRepository(directory / "attendance.sqlite").seed_case(case, manager_id="M-DEMO-1")
+    database = directory / "attendance.sqlite"
+    DemoCaseRepository(database).seed_case(case, manager_id="M-DEMO-1")
+    seed_day_totals(ResolutionStore(database, PolicyRegistry.from_directory(POLICIES)), case)
     token = secrets.token_urlsafe(32)
     private_json(
         credentials,

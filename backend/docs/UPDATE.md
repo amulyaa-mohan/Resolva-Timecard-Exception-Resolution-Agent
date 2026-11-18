@@ -346,3 +346,31 @@ Never include credentials, private employee data, or invented test results.
   - Live Qwen wrote `"note": null` on every x08 run; the schema rejected it, the repair retry pushed the case past the 8 s budget, and it escalated by timeout instead of being blocked by the time-evidence gate (safe either way). A null note is now read as empty.
 - Validation (actually run): clean venv from `requirements-dev.lock` (tzdata 2026f): pytest 223 passed, ruff check and format clean, 8/8 CI eval gates; real server over HTTP (`/health` reports `0.2.0-draft`, `/assistant/query`, problem+json on bad input, no server errors); probes for UTC storage, overnight note on the next day, a US DST date, `as_of` boundary to the second, wrong evidence kind; live Qwen2.5-7B: all 6 live gates, proposal accuracy 100%, 0% repair retries, p50 5.57 s, p95 6.28 s; x08 blocked by `time_evidence` in 5/5 direct runs. The same machine ran the previous commit at p50 5.66 s, so today's higher latency (vs 4.23 s yesterday) is the machine, not this change. Pipeline with Track A's real `validate_correction`: evidence ref attached, BLOCKED by its pending rules as intended.
 - Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — C V Jayanth — A-03 + A-RULES-05 — Decisions, audit, trusted totals; contract 0.2.0 adopted
+
+- Branch: backend (pulled Track B 1c4e895 fast-forward; no conflicts). Status REVIEW. Local only; not committed.
+- A-03 (demo store): POST /exceptions/{id}/decisions and GET /exceptions/{id}/audit.
+  - Each approval is one BEGIN IMMEDIATE transaction: authorize, idempotency, stale check, fresh totals,
+    real validator, then decision + correction + audit, then a revision bump.
+  - Failed validation is audited as APPROVAL_BLOCKED.
+  - Append-only triggers and a SHA-256 audit hash chain. Only one approval per exception.
+  - Rejects keep the exception open. The list endpoint shows resolved status.
+  - Details: docs/RESOLUTION_API.md.
+- Trusted totals: app/resolution/totals.py reads stored day totals by policy week and quarter.
+  An incomplete history returns None, which gives insufficient_evidence.
+  Approved corrections update that day's worked hours. The seed provisions synthetic totals and a break,
+  so the demo case is approvable.
+- Contract 0.2.0 adoption: outcome on every RuleCheck; evidence_ref tolerance (schedule, note via Track B's
+  pure note_times, history); as_of from the server clock, excluded from the hash; open shifts are not yet missing;
+  punches after as_of rejected; policy week_start and quarter_start_month. Rule version attendance-rules@0.4-draft.
+- Behaviour change: missing totals now ESCALATE instead of BLOCK (as Track B requested). A duplicate-time punch is a violation.
+- Validation:
+  - 390 pytest passed (1 existing upstream warning); Ruff lint passed; 124 files formatted.
+  - `evals.run --gates ci` 8/8 PASS on the STAND-IN validator with the mock provider.
+  - Synthetic end-to-end smoke: CaseService (as_of) -> generate_proposal with the real validator and trusted totals
+    -> ELIGIBLE with evidence_ref schedule_end -> approve 200 resolved -> audit DECISION_APPROVED.
+    That smoke used the mock provider.
+- Limits: demo SQLite store, not final migrations; only add_punch corrections; no bulk decisions or escalation persistence.
+- Open: should an evidence-backed late clock-out (SCHEDULE_DEVIATION, warning) escalate rather than block?
+- Next step: commit and push; Amulya swaps the real validator plus a totals fixture into evals; SHARED-02 review.

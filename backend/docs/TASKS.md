@@ -28,3 +28,7 @@ Record new backend-only tasks below; use a unique ID, owner, status, dependencie
 | A-RULES-03 | C V Jayanth | REVIEW | Aggregate-aware real validator via existing CorrectionValidator interface; work-date scoping; pipeline integration tests (depends on A-RULES-02) |
 
 | A-RULES-04 | C V Jayanth | REVIEW | Agreed Track B answers: per-run totals reload, recorded totals/period/as-of, internal pass/violation/insufficient_evidence outcomes (depends on A-RULES-03; field wiring waits for contract 0.2.0) |
+
+| A-RULES-05 | C V Jayanth | REVIEW | Contract 0.2.0 adopted: RuleCheck.outcome, evidence_ref tolerance, as_of, policy week/quarter (depends on Track B 1c4e895) |
+
+| A-03-DEMO | C V Jayanth | REVIEW | Decision/correction/audit API and trusted day-totals loader on the demo SQLite store; final schema remains A-01/DB-02 |

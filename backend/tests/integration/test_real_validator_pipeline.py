@@ -79,9 +79,12 @@ def test_fully_evidenced_case_is_eligible_with_real_validator(policy, settings):
     assert gates["rules_revalidation"]
 
 
-def test_default_real_validator_blocks_without_aggregates(policy, settings):
+def test_default_real_validator_escalates_without_aggregates(policy, settings):
+    # Contract 0.2.0: missing totals are insufficient evidence -> ESCALATED, never ELIGIBLE.
     result = run(evidenced_case(), policy, settings, validate_correction)
-    assert result.status == GateStatus.BLOCKED
+    assert result.status == GateStatus.ESCALATED
+    overtime = next(c for c in result.validation.checks if c.code == ExceptionCode.OVERTIME_RISK)
+    assert overtime.outcome == "insufficient_evidence"
     assert any(ExceptionCode.OVERTIME_RISK.value in r for r in result.reasons)
 
 
@@ -95,33 +98,37 @@ def test_default_real_validator_blocks_without_aggregates(policy, settings):
         ),
     ],
 )
-def test_incomplete_aggregates_block(source, policy, settings):
+def test_incomplete_aggregates_escalate(source, policy, settings):
     result = run(evidenced_case(), policy, settings, make_validator(source))
-    assert result.status == GateStatus.BLOCKED
+    assert result.status == GateStatus.ESCALATED
     assert "incomplete" in " ".join(result.reasons)
 
 
-def test_aggregate_source_crash_blocks(policy, settings):
+def test_aggregate_source_crash_escalates(policy, settings):
     def broken(_):
         raise ConnectionError("db down")
 
     result = run(evidenced_case(), policy, settings, make_validator(broken))
-    assert result.status == GateStatus.BLOCKED
+    assert result.status == GateStatus.ESCALATED
     assert "unavailable" in " ".join(result.reasons)
 
 
-def test_time_inside_pipeline_tolerance_still_blocked_by_validator(policy, settings):
-    # 18:03 passes Track B's 5-minute time-evidence gate but is not an exact verified anchor.
+@pytest.mark.parametrize(
+    "new_ts,status",
+    [
+        ("2026-11-12T18:03:00+05:30", GateStatus.ELIGIBLE),  # within 5 min of schedule end
+        ("2026-11-12T18:05:00+05:30", GateStatus.ELIGIBLE),  # exactly the tolerance
+        ("2026-11-12T18:06:00+05:30", GateStatus.BLOCKED),  # no evidence supports it
+    ],
+)
+def test_evidence_tolerance_boundary_with_real_validator(new_ts, status, policy, settings):
     result = run(
-        evidenced_case(),
-        policy,
-        settings,
-        make_validator(lambda _: COMPLETE),
-        proposal("2026-11-12T18:03:00+05:30"),
+        evidenced_case(), policy, settings, make_validator(lambda _: COMPLETE), proposal(new_ts)
     )
-    assert result.status == GateStatus.BLOCKED
-    assert {g.name: g.passed for g in result.gate_checks}["time_evidence"]
-    assert "verified evidence" in " ".join(result.reasons)
+    assert result.status == status, result.reasons
+    if status == GateStatus.ELIGIBLE:
+        ref = result.proposal.actions[0].evidence_ref
+        assert ref.kind == "schedule_end" and ref.id == "S-1"
 
 
 def test_fix_that_creates_overtime_is_blocked(policy, settings):
@@ -141,7 +148,7 @@ def test_fix_leaving_meal_break_violation_is_blocked(policy, settings):
     assert "MEAL_BREAK_BREACH" in " ".join(result.reasons)
 
 
-def test_wrong_punch_type_blocked(policy, settings):
+def test_duplicate_clock_in_blocked(policy, settings):
     result = run(
         evidenced_case(),
         policy,
