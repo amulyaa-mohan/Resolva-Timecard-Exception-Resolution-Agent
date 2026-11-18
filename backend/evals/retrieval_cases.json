@@ -1,0 +1,14 @@
+[
+  {"pack": "IN-KA", "code": "MISSING_PUNCH", "relevant": ["KA-8"]},
+  {"pack": "IN-KA", "code": "OVERLAPPING_SHIFT", "relevant": ["KA-11"]},
+  {"pack": "IN-KA", "code": "MEAL_BREAK_BREACH", "relevant": ["KA-6"]},
+  {"pack": "IN-KA", "code": "OVERTIME_RISK", "relevant": ["KA-5", "KA-2", "KA-3"]},
+  {"pack": "IN-KA", "code": "SPREAD_OVER_BREACH", "relevant": ["KA-7"]},
+  {"pack": "IN-KA", "code": "SCHEDULE_DEVIATION", "relevant": ["KA-9"]},
+  {"pack": "US-FED", "code": "MISSING_PUNCH", "relevant": ["US-5"]},
+  {"pack": "US-FED", "code": "OVERLAPPING_SHIFT", "relevant": ["US-7"]},
+  {"pack": "US-FED", "code": "MEAL_BREAK_BREACH", "relevant": ["US-4"]},
+  {"pack": "US-FED", "code": "OVERTIME_RISK", "relevant": ["US-3", "US-2"]},
+  {"pack": "US-FED", "code": "SPREAD_OVER_BREACH", "relevant": []},
+  {"pack": "US-FED", "code": "SCHEDULE_DEVIATION", "relevant": ["US-6"]}
+]

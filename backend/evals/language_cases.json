@@ -1,0 +1,151 @@
+[
+  {
+    "id": "l01",
+    "expected": {
+      "intent": "LIST_EXCEPTIONS",
+      "exception_type": "MISSING_PUNCH",
+      "date_range": "TODAY"
+    },
+    "en": "Show today's missing punches",
+    "hi": "आज के छूटे पंच दिखाओ",
+    "kn": "ಇಂದಿನ ತಪ್ಪಿದ ಪಂಚ್‌ಗಳನ್ನು ತೋರಿಸಿ"
+  },
+  {
+    "id": "l02",
+    "expected": {
+      "intent": "COUNT_EXCEPTIONS",
+      "exception_type": "MISSING_PUNCH",
+      "date_range": "TODAY"
+    },
+    "en": "How many missing punches are there today?",
+    "hi": "आज कितने छूटे पंच हैं?",
+    "kn": "ಇಂದು ಎಷ್ಟು ತಪ್ಪಿದ ಪಂಚ್‌ಗಳಿವೆ?"
+  },
+  {
+    "id": "l03",
+    "expected": {
+      "intent": "COUNT_EXCEPTIONS",
+      "exception_type": "OVERTIME_RISK",
+      "severity": "warning",
+      "date_range": "THIS_WEEK"
+    },
+    "en": "How many overtime warnings this week?",
+    "hi": "इस हफ्ते कितनी ओवरटाइम चेतावनी हैं?",
+    "kn": "ಈ ವಾರ ಎಷ್ಟು ಓವರ್‌ಟೈಮ್ ಎಚ್ಚರಿಕೆಗಳಿವೆ?"
+  },
+  {
+    "id": "l04",
+    "expected": {
+      "intent": "LIST_EXCEPTIONS",
+      "exception_type": "MEAL_BREAK_BREACH",
+      "date_range": "YESTERDAY"
+    },
+    "en": "Show yesterday's meal break breaches",
+    "hi": "बीते कल के भोजन अवकाश उल्लंघन दिखाओ",
+    "kn": "ನಿನ್ನೆಯ ಊಟದ ವಿರಾಮ ಉಲ್ಲಂಘನೆಗಳನ್ನು ತೋರಿಸಿ"
+  },
+  {
+    "id": "l05",
+    "expected": {
+      "intent": "LIST_EXCEPTIONS",
+      "severity": "problem",
+      "date_range": "THIS_PAY_PERIOD"
+    },
+    "en": "List problems in this pay period",
+    "hi": "इस वेतन अवधि की समस्या दिखाओ",
+    "kn": "ಈ ವೇತನ ಅವಧಿಯ ಸಮಸ್ಯೆಗಳನ್ನು ತೋರಿಸಿ"
+  },
+  {
+    "id": "l06",
+    "expected": {
+      "intent": "EXPLAIN_EXCEPTION",
+      "exception_id": "X-c01"
+    },
+    "en": "Why was X-c01 flagged?",
+    "hi": "X-c01 क्यों फ्लैग हुआ?",
+    "kn": "X-c01 ಯಾಕೆ ಫ್ಲ್ಯಾಗ್ ಆಯಿತು?"
+  },
+  {
+    "id": "l07",
+    "expected": {
+      "intent": "SHOW_EXCEPTION",
+      "exception_id": "X-j02"
+    },
+    "en": "Open X-j02",
+    "hi": "X-j02 दिखाओ",
+    "kn": "X-j02 ತೋರಿಸಿ"
+  },
+  {
+    "id": "l08",
+    "expected": {
+      "intent": "LIST_EXCEPTIONS",
+      "exception_type": "MISSING_PUNCH",
+      "employee_id": "E-c01"
+    },
+    "en": "Show missing punches for E-c01",
+    "hi": "E-c01 के छूटे पंच दिखाओ",
+    "kn": "E-c01 ಅವರ ತಪ್ಪಿದ ಪಂಚ್‌ಗಳನ್ನು ತೋರಿಸಿ"
+  },
+  {
+    "id": "l09",
+    "expected": {
+      "intent": "LIST_EXCEPTIONS",
+      "exception_type": "SCHEDULE_DEVIATION",
+      "date_range": "TODAY"
+    },
+    "en": "Who came late today?",
+    "hi": "आज कौन देर से आए?",
+    "kn": "ಇಂದು ಯಾರು ತಡವಾಗಿ ಬಂದರು?"
+  },
+  {
+    "id": "l10",
+    "expected": {
+      "intent": "LIST_EXCEPTIONS",
+      "status": "escalated"
+    },
+    "en": "Show escalated exceptions",
+    "hi": "एस्केलेट किए गए अपवाद दिखाओ",
+    "kn": "ಎಸ್ಕಲೇಟ್ ಮಾಡಿದ ವಿನಾಯಿತಿಗಳನ್ನು ತೋರಿಸಿ"
+  },
+  {
+    "id": "l14",
+    "expected": {
+      "intent": "COUNT_EXCEPTIONS",
+      "exception_type": "MISSING_PUNCH",
+      "date_range": "LAST_WEEK"
+    },
+    "en": "How many missing punches were there last week?",
+    "hi": "पिछले हफ्ते कितने छूटे पंच थे?",
+    "kn": "ಕಳೆದ ವಾರ ಎಷ್ಟು ತಪ್ಪಿದ ಪಂಚ್‌ಗಳಿದ್ದವು?"
+  },
+  {
+    "id": "l11",
+    "expected": {
+      "intent": "UNSUPPORTED",
+      "reason": "action_not_allowed"
+    },
+    "en": "Approve all eligible proposals",
+    "hi": "सभी प्रस्ताव मंजूर करो",
+    "kn": "ಎಲ್ಲಾ ಪ್ರಸ್ತಾಪಗಳನ್ನು ಅನುಮೋದಿಸಿ"
+  },
+  {
+    "id": "l12",
+    "expected": {
+      "intent": "UNSUPPORTED",
+      "reason": "action_not_allowed"
+    },
+    "en": "Delete the missing punch for E-c01",
+    "hi": "E-c01 का छूटा पंच हटाओ",
+    "kn": "E-c01 ಅವರ ತಪ್ಪಿದ ಪಂಚ್ ಅಳಿಸಿ"
+  },
+  {
+    "id": "l13",
+    "expected": {
+      "intent": "UNSUPPORTED",
+      "reason": "action_not_allowed"
+    },
+    "en": "Add four hours of overtime for E-c01",
+    "hi": "E-c01 के लिए चार घंटे ओवरटाइम जोड़ो",
+    "kn": "E-c01 ಗೆ ನಾಲ್ಕು ಗಂಟೆ ಓವರ್‌ಟೈಮ್ ಸೇರಿಸಿ"
+  }
+]

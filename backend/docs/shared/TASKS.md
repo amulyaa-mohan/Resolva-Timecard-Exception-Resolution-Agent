@@ -11,28 +11,29 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 | COORD-04 | Area-specific agent guidance and progress logs | Jayanth | REVIEW | — | Frontend/backend/database guides and routing verified |
 | COORD-05 | Simplify to frontend/backend root folders | Jayanth | REVIEW | — | References/config verified; backend test, lint and frontend build passed |
 | COORD-01 | Shared instructions and tracker | Jayanth | REVIEW | — | Teammates read rules and record task ownership |
-| SHARED-01 | Freeze initial API/data contracts | Both | TODO | COORD-01 | Agree typed inputs, outputs, errors, and evidence versions |
-| A-01 | DB foundation, synthetic seed, role dependencies | Jayanth | TODO | SHARED-01 | Reproducible employee/shift/punch fixture and server-side permission checks |
-| B-01 | App configuration, mock provider, development packaging | Teammate | TODO | SHARED-01 | Backend starts; mock provider runs offline; startup documented |
-| A-02 | Missing-punch detection and correction validation | Jayanth | TODO | A-01 | Missing punch detected; valid fix passes; unsupported fix blocked |
-| B-02 | One versioned policy pack and proposal pipeline | Teammate | TODO | B-01, SHARED-01 | Structured mock proposal or explicit escalation; validator interface wired |
-| A-03 | Decisions, immutable corrections, audit | Jayanth | TODO | A-02 | Authorized decision creates correction and audit; stale approval rejected |
-| SHARED-02 | First end-to-end missing-punch integration | Both | TODO | A-03, B-02 | Ingest → detect → propose → validate → approve → audit passes |
-| A-04 | Remaining five exception rules | Jayanth | TODO | SHARED-02 | Boundary, overlap, overnight, and timezone tests pass |
-| B-03 | Hybrid retrieval, real provider, evidence gates | Teammate | TODO | SHARED-02 | Wrong-version clauses and invalid citations blocked; timeout handled |
-| A-05 | CSV/JSON import preview and deduplication | Jayanth | TODO | A-04 | Equivalent inputs produce equivalent records and rule outcomes |
-| B-04 | Multilingual intents and AI fallback | Teammate | TODO | B-03 | English/Kannada/Hindi intent parity; rules-only path verified |
-| A-06 | Bulk decisions and attendance event updates | Jayanth | TODO | A-05 | Per-item eligibility, permission, and duplicate-decision checks |
-| B-05 | CI and reproducible AI evaluation | Teammate | TODO | B-04 | CI runs shared tests and reports measured safety/retrieval outcomes |
+| SHARED-01 | Freeze initial API/data contracts | Both | REVIEW | COORD-01 | `0.2.0-draft` (2026-11-18) implements Track A's answers and Amulya's reply: rule outcomes, evidence refs, policy week/quarter/tolerance, as_of (TRACK_B_INTEGRATION.md 5a). Adopted by Track A in 8ad2e15 and verified by Track B's evals (exact outcomes per gap case, live Qwen); freeze pending both owners' sign-off |
+| A-01 | DB foundation, synthetic seed, role dependencies | Jayanth | IN PROGRESS | SHARED-01 | Reproducible employee/shift/punch fixture and server-side permission checks |
+| B-01 | App configuration, mock provider, development packaging | Amulya | REVIEW | SHARED-01 (draft) | Verified: clean install, server, offline mock, kill-switch, Docker healthy; startup in LOCAL_DEVELOPMENT.md |
+| A-02 | Missing-punch detection and correction validation | Jayanth | REVIEW | A-01 (built on the demo store; final schema pending) | Verified: valid fix with trusted totals passes; unsupported, unproven or after-as_of fixes blocked; missing evidence escalates |
+| B-02 | One versioned policy pack and proposal pipeline | Amulya | REVIEW | B-01, SHARED-01 (draft) | Step 2 (2026-11-18): adjust_punch proposals for SCHEDULE_DEVIATION, SPREAD_OVER_BREACH, OVERLAPPING_SHIFT (prompt v3 default, 12 adjustment eval cases, live 100%). IN-KA@2025.1 pack; generate_proposal returns eligible/blocked/escalated; real validator pending A-02 |
+| A-03 | Decisions, immutable corrections, audit | Jayanth | REVIEW | A-02 (built on the demo SQLite store ahead of A-01) | Verified: atomic decision+correction+audit, stale 409, one approval, idempotent replay, append-only hash-chained audit; see RESOLUTION_API.md |
+| SHARED-02 | First end-to-end missing-punch integration | Both | REVIEW | A-03, B-02 | Verified on PostgreSQL via HTTP: import -> detect -> POST /proposal (eligible) -> approve -> corrected timecard -> audit; mock provider |
+| A-04 | Remaining five exception rules | Jayanth | REVIEW | SHARED-01 0.2.0-draft | Six checks with outcomes, totals, policy calendar, as_of; add_punch + adjust_punch validated; acknowledge/add_break/void_shift/flag_premium await agreed semantics |
+| B-03 | Hybrid retrieval, real provider, evidence gates | Amulya | REVIEW | SHARED-02 (built early against draft contracts and stub validator) | Verified: wrong-version clauses never retrieved and citations blocked; timeout budget enforced; Ollama live check 6/6; Groq tested with mocked HTTP only |
+| A-05 | CSV/JSON import preview and deduplication | Jayanth | REVIEW | A-04, PostgreSQL store | Verified: CSV/JSON equivalence, mapping, DST refusal, dedupe/no-op re-import, scope; import triggers detection (IMPORT_DETECTION.md) |
+| B-04 | Multilingual intents and AI fallback | Amulya | REVIEW | B-03 | Verified: 14 commands x en/hi/kn parity 100% with AI off (CI gate) and over live HTTP; write requests refused in all languages; LLM fallback 10/12 on paraphrases with Qwen in two runs, misses failed safe |
+| A-06 | Bulk decisions and attendance event updates | Jayanth | IN PROGRESS | A-05 | Bulk decisions and the effective-timecard view verified; pushing corrections to an external HCM is not built |
+| B-05 | CI and reproducible AI evaluation | Amulya | REVIEW | B-04 (done first; eval needs no language work) | CI runs lint, tests, offline eval gates and frontend build; live Qwen reports in backend/evals/reports (prompt v1 vs v2). Evals now use Track A's real validator with complete evidence (break, totals, as_of) plus 9 evidence-gap cases; stand-in shown side by side |
 | SHARED-03 | Final integration, startup verification, README | Both | TODO | A-06, B-05 | Fresh setup and full workflow verified; real results documented |
 
 ## Decisions pending
 
-- Teammate names and task ownership within the shared team branches.
+- Backend ownership recorded: Track A C V Jayanth, Track B Amulya Mohan.
 - Branch migration complete: `main` is default and `cv-jayanth` is removed.
 - Final schemas, policy fixtures, and action-specific validation semantics.
 - Model provider for the first live demonstration.
+- Contract 0.2.0 agreed in substance (2026-11-18; see TRACK_A_CONTRACT_RESPONSE.md, A-RULES-03 answers): RuleCheck.outcome, ProposedAction.evidence_ref, CaseContext.as_of, and the policy fields week_start, quarter_start_month and evidence_tolerance_min. Amulya proposed she authors contracts.py and the pipeline in one commit; Jayanth has not confirmed yet.
 
 ## Current next step
 
-Both developers review the coordination files and agree SHARED-01 before application coding.
+Hand-in (2026-11-18): `main` = `backend` at 34c2506, CI green, verified end to end on the Docker stack with live Qwen2.5-7B (see backend/docs/MODEL_CARD.md, "Final verification"). Future work, out of scope for the deadline: contract 0.3.0 (add_break, void_shift, acknowledge, roster final), freezing SHARED-01 and updating frontend `contracts.ts`, and a native-speaker review of the Hindi/Kannada lexicons. Unsupported fix types escalate to the manager meanwhile.
