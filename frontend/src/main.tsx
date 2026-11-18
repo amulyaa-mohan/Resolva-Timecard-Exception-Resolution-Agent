@@ -1,11 +1,24 @@
 import { LanguageContext, translate } from "./lib/locale";
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { LoginScreen } from './components/LoginScreen';
 import { computeProposalState, getHumanExceptionTitle, ResolutionPanel } from './components/ResolutionPanel';
 import { AuditView, ImportPreviewView, KioskView, PolicySettingsView } from './features/SecondaryViews';
-import { buildAuditRecord, checkBackendHealth, loadInitialData, submitDecisionWithFallback } from './lib/api';
-import { AuditEvent, ExceptionItem, LLMProposal, Role, UILang } from './types/contracts';
+import {
+  ApiError,
+  checkBackendHealth,
+  editedTimestamp,
+  fetchAudit,
+  fetchCase,
+  fetchExceptions,
+  hasValidSession,
+  requestProposal,
+  signOut,
+  submitDecision,
+} from './lib/api';
+import { INITIAL_POLICY_PACKS } from './lib/fixtures';
+import { DEFAULT_HARNESS_SETTINGS, loadHarnessSettings, saveHarnessSettings } from './lib/settings';
+import { AuditEvent, ExceptionItem, Role, UILang } from './types/contracts';
 import './styles.css';
 
 type Tab = 'inbox' | 'escalations' | 'import' | 'audit' | 'kiosk' | 'policies';
@@ -28,22 +41,27 @@ const LABELS: Record<UILang, {
   },
 };
 
+function describeError(error: unknown): string {
+  if (error instanceof ApiError) return error.detail;
+  return error instanceof Error ? error.message : String(error);
+}
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
-  const initial = useMemo(() => loadInitialData(), []);
-  const [exceptions, setExceptions] = useState<ExceptionItem[]>(initial.exceptions);
-  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(initial.auditEvents);
-  const [selectedId, setSelectedId] = useState<string | null>(initial.exceptions[0]?.id ?? null);
+  const [exceptions, setExceptions] = useState<ExceptionItem[]>([]);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('inbox');
   const [role, setRole] = useState<Role>('manager');
   const [lang, setLang] = useState<UILang>(() => localStorage.getItem('resolva-language') === 'hi' ? 'hi' : 'en');
-  const [aiEnabled, setAiEnabled] = useState(true);
-  const [confidenceThreshold, setConfidenceThreshold] = useState(0.75);
+  const [aiEnabled, setAiEnabled] = useState(() => loadHarnessSettings().aiEnabled);
+  const [confidenceThreshold, setConfidenceThreshold] = useState(() => loadHarnessSettings().confidenceThreshold);
   const [locationFilter, setLocationFilter] = useState('ALL');
   const [severityFilter, setSeverityFilter] = useState('ALL');
   const [healthMsg, setHealthMsg] = useState('Checking backend connection...');
-  const [toast, setToast] = useState<{ msg: string; undoItem?: ExceptionItem } | null>(null);
+  const [toast, setToast] = useState<{ msg: string } | null>(null);
 
   const t = LABELS[lang];
   const tr = (text: string) => translate(lang, text);
@@ -56,6 +74,50 @@ function App() {
   useEffect(() => {
     checkBackendHealth().then((h) => setHealthMsg(h.message));
   }, []);
+
+  // These are this browser's review preferences, not server configuration (FE-08).
+  useEffect(() => {
+    saveHarnessSettings({ ...DEFAULT_HARNESS_SETTINGS, aiEnabled, confidenceThreshold });
+  }, [aiEnabled, confidenceThreshold]);
+
+  const reload = async (): Promise<void> => {
+    try {
+      const items = await fetchExceptions();
+      // keep any detail already fetched for a case, refresh its summary fields
+      setExceptions((prev) => items.map((item) => ({ ...prev.find((p) => p.id === item.id), ...item })));
+      setLoadError(null);
+    } catch (error) {
+      setLoadError(describeError(error));
+    }
+  };
+
+  // A refresh keeps the signed-in state only if the server still accepts the stored token.
+  useEffect(() => {
+    hasValidSession().then((valid) => valid && setIsAuthenticated(true));
+  }, []);
+
+  useEffect(() => {
+    if (isAuthenticated) void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
+
+  // Load the selected case's evidence and its audit trail from the server.
+  useEffect(() => {
+    if (!isAuthenticated || !selectedId) return;
+    let cancelled = false;
+    const id = selectedId;
+    fetchCase(id)
+      .then((detail) => {
+        if (!cancelled) setExceptions((prev) => prev.map((ex) => (ex.id === id ? { ...ex, ...detail } : ex)));
+      })
+      .catch((error) => !cancelled && setToast({ msg: describeError(error) }));
+    fetchAudit(id)
+      .then((events) => !cancelled && setAuditEvents(events))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, selectedId]);
 
   const visibleItems = useMemo(() => {
     return exceptions.filter((e) => {
@@ -136,137 +198,80 @@ function App() {
     item: ExceptionItem,
     decision: 'approved' | 'edited' | 'rejected',
     details: { editedTime?: string; reasonCode?: string; comment?: string }
-  ) => {
-    const result = await submitDecisionWithFallback({
-      item,
-      decision,
-      role,
-      editedTime: details.editedTime,
-      reasonCode: details.reasonCode,
-      comment: details.comment,
-    });
-
-    if (!result.ok) {
-      setToast({ msg: result.conflict ?? 'Decision blocked by server.' });
-      return;
+  ): Promise<void> => {
+    // The server re-validates against fresh evidence and is the only thing that can approve.
+    // Anything other than a 2xx leaves the case untouched and is reported as a failure.
+    const actions =
+      decision === 'edited'
+        ? [
+            {
+              type: 'add_punch' as const,
+              punch_type: 'out' as const,
+              new_ts: editedTimestamp(item, details.editedTime ?? ''),
+              note: details.comment ?? '',
+            },
+          ]
+        : item.proposal?.actions ?? [];
+    const reason =
+      decision === 'rejected'
+        ? `${details.reasonCode ?? 'rejected'}: ${details.comment || 'no comment'}`
+        : details.comment ?? '';
+    try {
+      const result = await submitDecision({
+        item,
+        decision: decision === 'rejected' ? 'rejected' : 'approved',
+        actions,
+        reason,
+        edited: decision === 'edited',
+      });
+      setToast({ msg: `${item.id} ${result.status.toUpperCase()} — recorded by the server.` });
+      await reload();
+      setAuditEvents(await fetchAudit(item.id).catch(() => []));
+    } catch (error) {
+      // No state change: nothing was saved, so nothing may look saved.
+      setToast({ msg: describeError(error) });
     }
-
-    const snapshot = { ...item };
-    const summaryText =
-      decision === 'approved'
-        ? `Approved AI proposal (${item.proposal?.actions.map((a) => a.type).join(', ')})`
-        : decision === 'edited'
-        ? `Manager manual edit out-punch -> ${details.editedTime} (${details.comment || 're-validated'})`
-        : `Rejected (${details.reasonCode}): ${details.comment || 'No comment'}`;
-
-    const audit = buildAuditRecord({ role, item, decision, summary: summaryText });
-
-    setExceptions((prev) =>
-      prev.map((ex) =>
-        ex.id === item.id
-          ? {
-              ...ex,
-              status: decision === 'rejected' ? 'escalated' : 'resolved',
-              resolution: {
-                decision,
-                decided_by: `Priya Menon (${role})`,
-                reason_code: details.reasonCode,
-                comment: details.comment,
-                decided_at: audit.ts,
-                trace_id: audit.trace_id,
-              },
-            }
-          : ex
-      )
-    );
-    setAuditEvents((prev) => [audit, ...prev]);
-    setToast({ msg: `${item.id} ${decision.toUpperCase()} (Trace ${audit.trace_id})`, undoItem: snapshot });
   };
 
-  const handleSimulateStale = (itemId: string) => {
-    setExceptions((prev) => prev.map((ex) => (ex.id === itemId ? { ...ex, stale_warning: true } : ex)));
-    setToast({ msg: `${itemId}: New punch arrived — existing proposal marked STALE (409 guard active).` });
+  const handleCheckEvidence = async (itemId: string): Promise<void> => {
+    try {
+      const fresh = await fetchCase(itemId);
+      setExceptions((prev) =>
+        prev.map((ex) =>
+          ex.id === itemId
+            ? { ...ex, ...fresh, stale_warning: Boolean(ex.proposal && fresh.evidence_version !== ex.proposal.evidence_version) }
+            : ex
+        )
+      );
+      setToast({ msg: `${itemId}: evidence re-read from the server.` });
+    } catch (error) {
+      setToast({ msg: describeError(error) });
+    }
   };
 
-  const handleRepropose = (itemId: string) => {
-    setExceptions((prev) =>
-      prev.map((ex) =>
-        ex.id === itemId
-          ? {
-              ...ex,
-              stale_warning: false,
-              evidence_version: ex.evidence_version + 1,
-              proposal: ex.proposal
-                ? { ...ex.proposal, evidence_version: ex.evidence_version + 1, rationale: `[Re-proposed on v${ex.evidence_version + 1}] ${ex.proposal.rationale}` }
-                : undefined,
-            }
-          : ex
-      )
-    );
-    setToast({ msg: `${itemId}: Re-proposed and re-validated on latest evidence.` });
-  };
-
-  const handleDraftWithAi = (itemId: string) => {
-    setExceptions((prev) =>
-      prev.map((ex) => {
-        if (ex.id !== itemId) return ex;
-        if (ex.proposal) return ex;
-        const schedEnd = ex.schedule?.end ? ex.schedule.end : '2026-11-17T18:00:00+05:30';
-        const newProposal: LLMProposal = {
-          id: `PRP-${Math.floor(600 + Math.random() * 300)}`,
-          exception_id: ex.id,
-          decision: 'propose',
-          actions: [
-            {
-              type: 'add_punch',
-              new_ts: schedEnd,
-              note: `Add out-punch aligned with scheduled shift end (${schedEnd.slice(11, 16)}).`,
-            },
-          ],
-          rationale: `AI draft: Evaluated shift pattern and punch timeline against ${ex.policy_pack_id}. Inferred out-punch at scheduled shift end.`,
-          citations: [
-            {
-              chunk_id: `${ex.policy_pack_id}#sec-4.2`,
-              quote: 'Missing punches may be inferred from scheduled shift when corroborated by historical pattern.',
-            },
-          ],
-          confidence: 0.92,
-          missing_information: [],
-          model_id: 'qwen2.5-7b-instruct',
-          prompt_hash: 'sha256:a1b2c3d4',
-          evidence_version: ex.evidence_version,
-          validator_passed: true,
-          rule_outcomes: [
-            { rule: 'MISSING_PUNCH', passed: true, detail: 'Punches paired after draft fix.' },
-            { rule: 'OVERLAPPING_SHIFT', passed: true, detail: 'No overlap.' },
-            { rule: 'MEAL_BREAK_BREACH', passed: true, detail: 'Compliant.' },
-            { rule: 'OVERTIME_RISK', passed: true, detail: 'Within daily limits.' },
-            { rule: 'SPREAD_OVER_BREACH', passed: true, detail: 'Within statutory spread.' },
-            { rule: 'SCHEDULE_DEVIATION', passed: true, detail: 'Aligned with schedule.' },
-          ],
-        };
-        return {
-          ...ex,
-          status: 'proposed',
-          proposal: newProposal,
-        };
-      })
-    );
-    setToast({ msg: `${itemId}: Policy draft generated with AI and verified by validator.` });
-  };
-
-  const handleUndo = () => {
-    if (!toast?.undoItem) return;
-    const restored = toast.undoItem;
-    const reversalAudit = buildAuditRecord({
-      role,
-      item: restored,
-      decision: 'rejected',
-      summary: `Audited reversal of prior decision on ${restored.id}`,
-    });
-    setExceptions((prev) => prev.map((ex) => (ex.id === restored.id ? restored : ex)));
-    setAuditEvents((prev) => [reversalAudit, ...prev]);
-    setToast(null);
+  const handleRepropose = async (itemId: string): Promise<void> => {
+    try {
+      const outcome = await requestProposal(itemId);
+      setExceptions((prev) =>
+        prev.map((ex) =>
+          ex.id === itemId
+            ? {
+                ...ex,
+                stale_warning: false,
+                status: outcome.status === 'escalated' ? 'escalated' : outcome.status === 'eligible' ? 'proposed' : ex.status,
+                proposal: outcome.proposal,
+                draft_status: outcome.status,
+                draft_reasons: outcome.reasons,
+              }
+            : ex
+        )
+      );
+      const detail = outcome.reasons.length ? ` — ${outcome.reasons[0]}` : '';
+      setToast({ msg: `${itemId}: ${outcome.status.toUpperCase()}${detail}` });
+      setAuditEvents(await fetchAudit(itemId).catch(() => []));
+    } catch (error) {
+      setToast({ msg: describeError(error) });
+    }
   };
 
   const eligibleForBulk = useMemo(
@@ -282,16 +287,19 @@ function App() {
     [exceptions, aiEnabled, confidenceThreshold]
   );
 
-  const handleBulkApprove = () => {
+  const handleBulkApprove = async () => {
     if (role !== 'manager' && role !== 'admin') return;
-    eligibleForBulk.forEach((item) => handleDecide(item, 'approved', {}));
-    setToast({ msg: `Bulk approved ${eligibleForBulk.length} validator-passed proposals.` });
+    // Each one is submitted and judged on its own by the server, exactly as a single approval is.
+    for (const item of eligibleForBulk) {
+      await handleDecide(item, 'approved', {});
+    }
   };
 
   const openProblems = exceptions.filter((e) => e.status !== 'resolved' && e.severity === 'problem').length;
   const openWarnings = exceptions.filter((e) => e.status !== 'resolved' && e.severity === 'warning').length;
   const resolvedCount = exceptions.filter((e) => e.status === 'resolved').length;
-  const readinessPct = Math.round(((resolvedCount + 12) / (exceptions.length + 12)) * 100);
+  const clearedCount = resolvedCount + exceptions.filter((e) => e.status === 'dismissed').length;
+  const readinessPct = exceptions.length ? Math.round((clearedCount / exceptions.length) * 100) : 0;
 
   if (!isAuthenticated) {
     return (
@@ -318,7 +326,7 @@ function App() {
       <header className="topbar">
         <div className="brand">
           <span className="brand-title">Resolva</span>
-          <span className="fixture-pill">{tr("SYNTHETIC FIXTURES (FE-01..FE-05)")}</span>
+          <span className="fixture-pill">{tr("LIVE BACKEND")}</span>
         </div>
 
         <nav className="nav-tabs" aria-label={tr("Primary views")}>
@@ -359,6 +367,10 @@ function App() {
             className="btn-secondary sign-out-btn"
             style={{ fontSize: '12px', padding: '5px 12px' }}
             onClick={() => {
+              signOut(); // forget the token, so a refresh does not sign back in
+              setExceptions([]);
+              setAuditEvents([]);
+              setSelectedId(null);
               setIsAuthenticated(false);
               setCurrentUserEmail(null);
             }}
@@ -374,6 +386,11 @@ function App() {
       </div>
 
       <main className="container">
+        {loadError && (
+          <div className="banner banner-error" role="alert" style={{ marginBottom: 16 }}>
+            {tr(loadError)}
+          </div>
+        )}
         {!aiEnabled && (
           <div className="banner banner-warn" style={{ marginBottom: 16 }}>
             <strong>{tr("AI Unavailable / Kill-Switch Engaged:")}</strong>{" " + tr("Showing deterministic rules-only results. Manual manager edits remain active.") + ""}</div>
@@ -550,9 +567,8 @@ function App() {
                 activeTab={tab}
                 totalEscalations={totalEscalationsInSystem}
                 onClose={() => setSelectedId(null)}
-                onSimulateStale={handleSimulateStale}
+                onCheckEvidence={handleCheckEvidence}
                 onRepropose={handleRepropose}
-                onDraftWithAi={handleDraftWithAi}
                 onDecide={handleDecide}
               />
             </div>
@@ -562,10 +578,7 @@ function App() {
         {tab === 'import' && (
           <ImportPreviewView
             role={role}
-            onImportValid={(newItems) => {
-              setExceptions((prev) => [...newItems, ...prev]);
-              if (newItems[0]) setSelectedId(newItems[0].id);
-            }}
+            onImported={() => void reload()}
             onOpenException={(excId) => {
               setSelectedId(excId);
               setTab('inbox');
@@ -577,7 +590,6 @@ function App() {
           <AuditView
             events={auditEvents}
             selectedCase={selectedItem}
-            role={role}
             onOpenCase={(excId) => {
               setSelectedId(excId);
               setTab('inbox');
@@ -587,32 +599,19 @@ function App() {
 
         {tab === 'kiosk' && (
           <KioskView
-            onSimulatePunch={(newExc) => {
-              setExceptions((prev) => [newExc, ...prev]);
-              setAuditEvents((prev) => [
-                {
-                  id: `AUD-${Math.floor(4000 + Math.random() * 5000)}`,
-                  trace_id: `tr-${Math.random().toString(16).slice(2, 9)}`,
-                  actor_type: 'system',
-                  actor_name: 'KioskIngest -> RulesEngine',
-                  action: 'LIVE_PUNCH_EXCEPTION_DETECTED',
-                  entity_ref: `${newExc.id} / ${newExc.employee_id}`,
-                  before_summary: 'Raw kiosk clock-in received',
-                  after_summary: 'Flagged MISSING_PUNCH & generated validated AI draft',
-                  ts: new Date().toISOString(),
-                },
-                ...prev,
-              ]);
-              setSelectedId(newExc.id);
-              setTab('inbox');
-              setToast({ msg: `Live exception ${newExc.id} detected from Kiosk Simulator!` });
+            employees={Array.from(new Map(exceptions.map((e) => [e.employee_id, e.employee_name])).entries()).map(
+              ([id, name]) => ({ id, name })
+            )}
+            onPunchSent={(message) => {
+              setToast({ msg: message });
+              void reload();
             }}
           />
         )}
 
         {tab === 'policies' && (
           <PolicySettingsView
-            policies={initial.policies}
+            policies={INITIAL_POLICY_PACKS}
             aiEnabled={aiEnabled}
             onToggleAi={setAiEnabled}
             confidenceThreshold={confidenceThreshold}
@@ -624,9 +623,6 @@ function App() {
       {toast && (
         <div className="toast" role="status" aria-live="polite">
           <span>{tr(toast.msg)}</span>
-          {toast.undoItem && (
-            <button type="button" className="btn-secondary" style={{ padding: '4px 10px' }} onClick={handleUndo}>{tr("Undo (Audited Reversal)")}</button>
-          )}
           <button type="button" className="btn-ghost" style={{ color: '#fff' }} onClick={() => setToast(null)}>
             ✕
           </button>

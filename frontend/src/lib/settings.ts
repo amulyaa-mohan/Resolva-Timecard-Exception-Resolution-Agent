@@ -61,13 +61,3 @@ export function saveHarnessSettings(settings: HarnessSettings): { ok: boolean; e
     return { ok: false, error: err instanceof Error ? err.message : 'Storage quota exceeded or restricted' };
   }
 }
-
-export function clearAllClientStorage(): void {
-  try {
-    localStorage.removeItem(SETTINGS_STORAGE_KEY);
-    localStorage.removeItem('resolva_remembered_email');
-    localStorage.removeItem('resolva-language');
-  } catch {
-    // Ignore storage errors in restricted sandbox
-  }
-}

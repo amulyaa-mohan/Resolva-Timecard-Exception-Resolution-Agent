@@ -1,14 +1,17 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import {
-  commitImportWithFallback,
+  ApiError,
+  commitImport,
   detectImportFormat,
-  fetchCaseAuditWithFallback,
+  fetchAudit,
   ImportCommitSummary,
   ImportKind,
   ImportPreviewItem,
   ImportPreviewSummary,
-  previewImportWithFallback,
+  previewImport,
+  sendKioskPunch,
 } from '../lib/api';
+import { getHumanExceptionTitle } from '../components/ResolutionPanel';
 import { useTranslation } from '../lib/locale';
 import { AuditEvent, ExceptionItem, PolicyPack, Role } from '../types/contracts';
 
@@ -28,14 +31,6 @@ const FRIENDLY_EVENT_LABELS: Record<string, string> = {
   USER_LOGIN: 'Signed in',
 };
 
-const EXCEPTION_CODE_LABELS: Record<string, string> = {
-  MISSING_PUNCH: 'Missing clock-out',
-  SPREAD_OVER_BREACH: 'Spread-over breach',
-  MEAL_BREAK_BREACH: 'Late meal break',
-  OVERTIME_RISK: 'Overtime risk',
-  OVERLAPPING_SHIFT: 'Overlapping shift',
-  SCHEDULE_DEVIATION: 'Schedule deviation',
-};
 
 function resolveAuditTimezone(rawTz?: string): { iana: string; shortLabel: string } {
   const tz = (rawTz ?? '').trim();
@@ -151,12 +146,10 @@ async function copyTextSafe(text: string): Promise<void> {
 export function AuditView({
   events,
   selectedCase = null,
-  role = 'manager',
   onOpenCase,
 }: {
   events: AuditEvent[];
   selectedCase?: ExceptionItem | null;
-  role?: Role;
   onOpenCase?: (exceptionId: string) => void;
 }) {
   const { tr } = useTranslation();
@@ -170,11 +163,15 @@ export function AuditView({
     setScope(selectedCase ? 'case' : 'all');
     setServerCaseEvents(null);
     if (selectedCase) {
-      fetchCaseAuditWithFallback(selectedCase.id, role).then((rows) => {
-        if (rows && rows.length > 0) setServerCaseEvents(rows);
-      });
+      let cancelled = false;
+      fetchAudit(selectedCase.id)
+        .then((rows) => !cancelled && setServerCaseEvents(rows))
+        .catch(() => undefined); // the loaded events stay on screen; nothing is invented
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [selectedCase?.id, role]);
+  }, [selectedCase?.id]);
 
   const caseFilteredEvents = useMemo(() => {
     if (!selectedCase) return events;
@@ -221,7 +218,7 @@ export function AuditView({
   };
 
   const caseReasonLabel = selectedCase
-    ? EXCEPTION_CODE_LABELS[selectedCase.code] ?? selectedCase.code.replace(/_/g, ' ')
+    ? getHumanExceptionTitle(selectedCase.code)
     : '';
   const caseWorkDateLabel = selectedCase ? formatWorkDateLabel(selectedCase.work_date, tzInfo.iana) : '';
 
@@ -494,11 +491,12 @@ const FRIENDLY_PUNCH_EVENT: Record<string, string> = {
 };
 
 export function ImportPreviewView({
-  onImportValid,
+  onImported,
   role = 'manager',
   onOpenException,
 }: {
-  onImportValid: (items: ExceptionItem[]) => void;
+  /** Called after the server accepted an import, so the inbox can reload what it detected. */
+  onImported: () => void;
   role?: Role;
   onOpenException?: (exceptionId: string) => void;
 }) {
@@ -557,15 +555,14 @@ export function ImportPreviewView({
     setPreviewing(true);
     setCommitError(null);
     setCommitResult(null);
-    const summary = await previewImportWithFallback({
-      kind,
-      format: detectedFormat,
-      content: rawInput,
-      role,
-    });
-    setPreview(summary);
-    setAllowPartial(false);
-    setPreviewing(false);
+    try {
+      setPreview(await previewImport({ kind, format: detectedFormat, content: rawInput }));
+      setAllowPartial(false);
+    } catch (error) {
+      setCommitError(error instanceof ApiError ? error.detail : 'The preview could not be loaded.');
+    } finally {
+      setPreviewing(false);
+    }
   };
 
   const hasCoexistingValidAndInvalid = Boolean(preview && preview.valid > 0 && preview.invalid > 0);
@@ -594,22 +591,14 @@ export function ImportPreviewView({
     if (!preview || !canCommit || committing) return;
     setCommitting(true);
     setCommitError(null);
-    const outcome = await commitImportWithFallback({
-      kind,
-      format: detectedFormat,
-      content: rawInput,
-      allowPartial,
-      preview,
-      role,
-    });
-    setCommitting(false);
-    if (!outcome.ok || !outcome.result) {
-      setCommitError(outcome.error ?? 'Import could not be completed.');
-      return;
-    }
-    setCommitResult(outcome.result);
-    if (outcome.result.created_exceptions.length > 0) {
-      onImportValid(outcome.result.created_exceptions);
+    try {
+      setCommitResult(await commitImport({ kind, format: detectedFormat, content: rawInput, allowPartial }));
+      onImported();
+    } catch (error) {
+      // Nothing was saved, so nothing is shown as saved.
+      setCommitError(error instanceof ApiError ? error.detail : 'Import could not be completed. Nothing was saved.');
+    } finally {
+      setCommitting(false);
     }
   };
 
@@ -685,11 +674,11 @@ export function ImportPreviewView({
           <li className={currentStep === 1 ? 'step-item active' : 'step-item done'} aria-current={currentStep === 1 ? 'step' : undefined}>
             {tr("1. Paste data")}
           </li>
-          <li aria-hidden="true" className="step-sep">â†’</li>
+          <li aria-hidden="true" className="step-sep">→</li>
           <li className={currentStep === 2 ? 'step-item active' : currentStep > 2 ? 'step-item done' : 'step-item'} aria-current={currentStep === 2 ? 'step' : undefined}>
             {tr("2. Review rows")}
           </li>
-          <li aria-hidden="true" className="step-sep">â†’</li>
+          <li aria-hidden="true" className="step-sep">→</li>
           <li className={currentStep === 3 ? 'step-item active' : 'step-item'} aria-current={currentStep === 3 ? 'step' : undefined}>
             3. Import
           </li>
@@ -770,12 +759,17 @@ export function ImportPreviewView({
             disabled={!rawInput.trim() || previewing}
             onClick={handlePreview}
           >
-            {previewing ? 'Previewing”¦' : 'Preview rows'}
+            {previewing ? tr('Previewing…') : tr('Preview rows')}
           </button>
           {!rawInput.trim() && (
-            <span className="small muted">Paste CSV or JSON above, or click “Load sample”.</span>
+            <span className="small muted">{tr('Paste CSV or JSON above, or click “Load sample”.')}</span>
           )}
         </div>
+        {!preview && commitError && (
+          <div className="banner banner-error" role="alert" style={{ marginTop: 10 }}>
+            {commitError}
+          </div>
+        )}
       </div>
 
       {preview && (
@@ -932,7 +926,7 @@ export function ImportPreviewView({
                 onClick={handleCommit}
               >
                 {committing
-                  ? 'Importing”¦'
+                  ? 'Importing…'
                   : `Import ${preview.valid} ${preview.valid === 1 ? 'row' : 'rows'}`}
               </button>
             </div>
@@ -960,7 +954,7 @@ export function ImportPreviewView({
             </strong>
             <span>
               {' '}
-              · Skipped {commitResult.skipped} ({commitResult.duplicates}{' '}
+              · Skipped {commitResult.invalid + commitResult.duplicates} ({commitResult.duplicates}{' '}
               {commitResult.duplicates === 1 ? 'duplicate' : 'duplicates'}, {commitResult.invalid} invalid)
             </span>
             <span className="muted"> · Batch </span>
@@ -976,7 +970,7 @@ export function ImportPreviewView({
                   className="btn-secondary"
                   onClick={() => onOpenException(excId)}
                 >
-                  Open {excId} in Inbox â†’
+                  Open {excId} in Inbox →
                 </button>
               ))}
             </div>
@@ -986,94 +980,82 @@ export function ImportPreviewView({
     </section>
   );
 }
-export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: ExceptionItem) => void }) {
+export function KioskView({
+  employees,
+  onPunchSent,
+}: {
+  employees: { id: string; name: string }[];
+  onPunchSent: (message: string) => void;
+}) {
   const { tr } = useTranslation();
-  const [empId, setEmpId] = useState('EMP-BLR-07');
-  const [empName, setEmpName] = useState('Meera Krishnan');
+  const [empId, setEmpId] = useState('');
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [punchTime, setPunchTime] = useState('09:05');
-  const [editedNote, setNote] = useState<string>();
-  const note = editedNote ?? tr('Clocked in at Bengaluru store kiosk; forgot evening out-punch.');
+  const [kind, setKind] = useState<'in' | 'out' | 'break_start' | 'break_end'>('in');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const selected = empId || employees[0]?.id || '';
 
-  const handleIngest = (e: React.FormEvent) => {
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    const id = `EXC-${Math.floor(106 + Math.random() * 890)}`;
-    const newExc: ExceptionItem = {
-      id,
-      code: 'MISSING_PUNCH',
-      severity: 'problem',
-      employee_id: empId,
-      employee_name: empName,
-      job: 'Cashier',
-      location: 'Bengaluru (BLR-01)',
-      timezone: 'IST (UTC+05:30)',
-      policy_pack_id: 'IN-KA@2025.1',
-      work_date: '2026-11-17',
-      status: 'proposed',
-      evidence_version: 1,
-      summary: `Live kiosk clock-in at ${punchTime} IST without matching clock-out punch.`,
-      employee_note: note,
-      schedule: {
-        id: 'SHD-912',
-        employee_id: empId,
-        start: '2026-11-17T09:00:00+05:30',
-        end: '2026-11-17T18:00:00+05:30',
-        planned_break_min: 60,
-        location: 'Bengaluru (BLR-01)',
-        job: 'Cashier',
-      },
-      punches: [
-        {
-          id: `PNC-${Math.floor(9200 + Math.random() * 700)}`,
-          employee_id: empId,
-          ts: `2026-11-17T${punchTime}:00+05:30`,
-          type: 'in',
-          source: 'kiosk',
-          device_id: 'KIOSK-BLR-01',
-        },
-      ],
-      before_hours: { regular_hours: '0.00 h', overtime_hours: '0.00 h', pay_status: 'Blocked (unpaired in-punch)' },
-      after_hours: { regular_hours: '8.92 h', overtime_hours: '0.00 h', pay_status: 'Payable (Regular)' },
-      proposal: {
-        id: `PRP-${Math.floor(600 + Math.random() * 300)}`,
-        exception_id: id,
-        decision: 'propose',
-        actions: [{ type: 'add_punch', new_ts: '2026-11-17T18:00:00+05:30', note: 'Infer scheduled shift end 18:00 IST.' }],
-        rationale: `Detected unpaired clock-in at ${punchTime} IST on scheduled 09:00–18:00 IST shift. Proposed 18:00 IST out-punch passes all 6 deterministic rules.`,
-        citations: [{ chunk_id: 'IN-KA@2025.1#sec-4.2', quote: 'Missing out-punches may be inferred within ±30 minutes of scheduled shift end.' }],
-        confidence: 0.91,
-        missing_information: [],
-        model_id: 'qwen2.5-7b-instruct',
-        prompt_hash: 'sha256:9f82c1a4',
-        evidence_version: 1,
-        validator_passed: true,
-        rule_outcomes: [
-          { rule: 'MISSING_PUNCH', passed: true, detail: 'Paired with 18:00 IST proposed out-punch.' },
-          { rule: 'OVERLAPPING_SHIFT', passed: true, detail: 'No overlap.' },
-          { rule: 'MEAL_BREAK_BREACH', passed: true, detail: 'Within policy.' },
-          { rule: 'OVERTIME_RISK', passed: true, detail: 'Within 9h daily limit.' },
-          { rule: 'SPREAD_OVER_BREACH', passed: true, detail: 'Within 12h spread-over.' },
-          { rule: 'SCHEDULE_DEVIATION', passed: true, detail: 'Within 7 min tolerance.' },
-        ],
-      },
-    };
-    onSimulatePunch(newExc);
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await sendKioskPunch({ employeeId: selected, date, time: punchTime, type: kind });
+      const found = result.detected_exception_ids.length
+        ? `Detection raised ${result.detected_exception_ids.length} exception(s).`
+        : 'Detection raised nothing new.';
+      onPunchSent(result.inserted ? `Punch stored. ${found}` : 'That punch was already on file, so nothing changed.');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : 'The punch was not sent.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <div className="panel-card kiosk-card">
-      <h2 className="kiosk-title">{tr("Kiosk Punch Simulator (Live Event Demo)")}</h2>
-      <p className="muted">{tr("Simulates a raw immutable punch event entering the deterministic rules detector and routing an AI-drafted proposal into the Manager Inbox.")}</p>
-      <form onSubmit={handleIngest} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <label className="field-label">{tr("Employee ID:")}<input className="input-field mono" value={empId} onChange={(e) => setEmpId(e.target.value)} required />
-        </label>
-        <label className="field-label">{tr("Employee Name:")}<input className="input-field" value={empName} onChange={(e) => setEmpName(e.target.value)} required />
-        </label>
-        <label className="field-label">{tr("Clock-In Time (IST):")}<input type="time" className="input-field mono" value={punchTime} onChange={(e) => setPunchTime(e.target.value)} required />
-        </label>
-        <label className="field-label">{tr("Employee Note (Untrusted Evidence):")}<input className="input-field" value={note} onChange={(e) => setNote(e.target.value)} />
-        </label>
-        <button type="submit" className="btn-primary">{tr("Post Raw Punch & Trigger Detection")}</button>
-      </form>
+      <h2 className="kiosk-title">{tr("Kiosk Punch Simulator")}</h2>
+      <p className="muted">
+        {tr("Sends one raw clock event to the backend through the same import path a kiosk feed would use. The server stores it as an immutable punch and re-runs the rules for that day.")}
+      </p>
+      {employees.length === 0 ? (
+        <div className="banner banner-error">{tr("No employees are visible to you yet.")}</div>
+      ) : (
+        <form onSubmit={handleSend} className="kiosk-form">
+          <label className="field-label">
+            {tr("Employee:")}
+            <select className="input-field" value={selected} onChange={(e) => setEmpId(e.target.value)}>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name} ({emp.id})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field-label">
+            {tr("Local date:")}
+            <input type="date" className="input-field mono" value={date} onChange={(e) => setDate(e.target.value)} required />
+          </label>
+          <label className="field-label">
+            {tr("Local time (employee's timezone):")}
+            <input type="time" className="input-field mono" value={punchTime} onChange={(e) => setPunchTime(e.target.value)} required />
+          </label>
+          <label className="field-label">
+            {tr("Event:")}
+            <select className="input-field" value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
+              <option value="in">{tr("Clock in")}</option>
+              <option value="out">{tr("Clock out")}</option>
+              <option value="break_start">{tr("Break started")}</option>
+              <option value="break_end">{tr("Break ended")}</option>
+            </select>
+          </label>
+          {error && <div className="banner banner-error" role="alert">{tr(error)}</div>}
+          <button type="submit" className="btn-primary" disabled={busy}>
+            {busy ? tr("Sending...") : tr("Send punch to backend")}
+          </button>
+        </form>
+      )}
     </div>
   );
 }

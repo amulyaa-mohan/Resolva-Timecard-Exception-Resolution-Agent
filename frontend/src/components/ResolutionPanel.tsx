@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { previewManualEditValidation } from '../lib/api';
+import { checkEditedTime } from '../lib/api';
 import { ExceptionItem, Role, UILang } from '../types/contracts';
 import { RecordedPunchesCard } from './RecordedPunchesCard';
 import { PunchTimeline } from './PunchTimeline';
 import { useTranslation } from '../lib/locale';
 
 export const EXCEPTION_TYPE_TITLES: Record<string, string> = {
-  MISSING_PUNCH: 'Missing clock-out',
+  MISSING_PUNCH: 'Missing punch',
   SPREAD_OVER_BREACH: 'Spread-over limit exceeded',
   MEAL_BREAK_BREACH: 'Meal break compliance breach',
   OVERTIME_RISK: 'Overtime limit risk',
@@ -58,7 +58,9 @@ export function computeProposalState(
       state: 'resolved',
       label: `Resolved (${item.resolution?.decision.toUpperCase() ?? 'APPROVED'})`,
       badgeClass: 'badge-pass',
-      description: `Decided by ${item.resolution?.decided_by ?? 'Manager'} (Trace ${item.resolution?.trace_id ?? 'N/A'}).`,
+      description: item.resolution
+        ? `Decided by ${item.resolution.decided_by} (Trace ${item.resolution.trace_id}).`
+        : 'Recorded by the server. See the audit trail for who decided and when.',
       canApprove: false,
       approvalDisabledReason: 'This exception has already been resolved.',
     };
@@ -86,6 +88,20 @@ export function computeProposalState(
     };
   }
 
+  // The backend ran the pipeline but returned no usable draft: show its own reason.
+  if (!item.proposal && (item.draft_status === 'blocked' || item.draft_status === 'escalated')) {
+    const escalated = item.draft_status === 'escalated';
+    const reason = item.draft_reasons?.[0] ?? 'The backend did not produce a draft that can be approved.';
+    return {
+      state: escalated ? 'escalated' : 'blocked',
+      label: escalated ? 'Escalated for Review' : 'Validation Blocked',
+      badgeClass: escalated ? 'badge-escalated' : 'badge-problem',
+      description: reason,
+      canApprove: false,
+      approvalDisabledReason: reason,
+    };
+  }
+
   if (!item.proposal) {
     return {
       state: 'no_draft',
@@ -104,7 +120,7 @@ export function computeProposalState(
       state: 'escalated',
       label: 'Escalated for Review',
       badgeClass: 'badge-escalated',
-      description: 'Statutory policy prohibits automated correction. Requires human manager attestation.',
+      description: item.draft_reasons?.[0] ?? 'This case needs a manager review and cannot be approved automatically.',
       canApprove: false,
       approvalDisabledReason: 'Proposal is escalated for compliance/manager review; cannot be automated.',
     };
@@ -112,7 +128,7 @@ export function computeProposalState(
 
   if (!proposal.validator_passed || proposal.confidence < confidenceThreshold) {
     const reason = !proposal.validator_passed
-      ? 'Deterministic validator checks failed.'
+      ? item.draft_reasons?.[0] ?? 'Deterministic validator checks failed.'
       : `AI confidence (${Math.round(proposal.confidence * 100)}%) is below threshold (${Math.round(confidenceThreshold * 100)}%).`;
     return {
       state: 'blocked',
@@ -142,14 +158,15 @@ export interface ResolutionPanelProps {
   activeTab?: string;
   totalEscalations?: number;
   onClose: () => void;
-  onSimulateStale: (id: string) => void;
-  onRepropose: (id: string) => void;
-  onDraftWithAi?: (id: string) => void;
+  /** Re-read the case's evidence from the server; marks the draft stale if it changed. */
+  onCheckEvidence: (id: string) => Promise<void>;
+  /** Ask the backend for a new draft on the latest evidence. */
+  onRepropose: (id: string) => Promise<void>;
   onDecide: (
     item: ExceptionItem,
     decision: 'approved' | 'edited' | 'rejected',
     details: { editedTime?: string; reasonCode?: string; comment?: string }
-  ) => void;
+  ) => Promise<void>;
 }
 
 export function ResolutionPanel({
@@ -161,9 +178,8 @@ export function ResolutionPanel({
   activeTab = 'inbox',
   totalEscalations = 0,
   onClose,
-  onSimulateStale,
+  onCheckEvidence,
   onRepropose,
-  onDraftWithAi,
   onDecide,
 }: ResolutionPanelProps) {
   const { tr } = useTranslation();
@@ -210,27 +226,17 @@ export function ResolutionPanel({
     });
   };
 
-  const handleDraftClick = () => {
+  const runBusy = async (work: () => Promise<void>) => {
     if (!item || isGenerating) return;
     setIsGenerating(true);
-    setTimeout(() => {
+    try {
+      await work();
+    } finally {
       setIsGenerating(false);
-      if (onDraftWithAi) {
-        onDraftWithAi(item.id);
-      } else {
-        onRepropose(item.id);
-      }
-    }, 450);
+    }
   };
-
-  const handleRecheckClick = () => {
-    if (!item || isGenerating) return;
-    setIsGenerating(true);
-    setTimeout(() => {
-      setIsGenerating(false);
-      onRepropose(item.id);
-    }, 400);
-  };
+  const handleDraftClick = () => runBusy(() => onRepropose(item!.id));
+  const handleRecheckClick = () => runBusy(() => onCheckEvidence(item!.id));
 
   // Empty state handling
   if (!item) {
@@ -260,17 +266,22 @@ export function ResolutionPanel({
   const canDecide = role === 'manager' || role === 'admin';
   const proposalStateInfo = computeProposalState(item, aiEnabled, confidenceThreshold, isGenerating);
   const proposal = aiEnabled ? item.proposal : undefined;
-  const editCheck = mode === 'edit' ? previewManualEditValidation(item, editedTime) : null;
-  const activeRuleOutcomes = mode === 'edit' && editCheck ? editCheck.outcomes : proposal?.rule_outcomes ?? [];
+  // Only the time format is checked here. Whether the correction is allowed is decided by the
+  // backend's deterministic validator when the decision is submitted.
+  const editCheck = mode === 'edit' ? checkEditedTime(item, editedTime) : null;
+  const activeRuleOutcomes = mode === 'edit' ? [] : proposal?.rule_outcomes ?? [];
 
-  const handleSubmit = (
+  const handleSubmit = async (
     decision: 'approved' | 'edited' | 'rejected',
     details: { editedTime?: string; reasonCode?: string; comment?: string }
   ) => {
     if (!canDecide || submitting) return;
     setSubmitting(true);
-    onDecide(item, decision, details);
-    setSubmitting(false);
+    try {
+      await onDecide(item, decision, details);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -320,22 +331,12 @@ export function ResolutionPanel({
               className="btn-secondary small action-btn-visible"
               disabled={isGenerating}
               onClick={handleRecheckClick}
-              title={tr("Re-check punch evidence against policy rules")}
+              title={tr("Re-read this case's evidence from the server")}
             >
               {tr("Re-check evidence")}
             </button>
           )}
 
-          {item.status !== 'resolved' && !item.stale_warning && (
-            <button
-              type="button"
-              className="btn-secondary small"
-              title={tr("Simulate a new punch arriving while viewing this proposal (HTTP 409 guard)")}
-              onClick={() => onSimulateStale(item.id)}
-            >
-              {tr("Simulate Stale (409)")}
-            </button>
-          )}
 
           <button
             type="button"
@@ -353,8 +354,8 @@ export function ResolutionPanel({
       {item.stale_warning && (
         <div className="banner banner-error" role="alert">
           <div>
-            <strong>{tr("Stale Proposal Blocked (HTTP 409):")}</strong> {tr("Underlying punch evidence updated to v")}{item.evidence_version + 1} {tr("after this draft was generated. Approval is blocked to prevent race conditions.")}{' '}
-            <button type="button" className="btn-primary small" style={{ marginLeft: 8 }} onClick={handleRecheckClick}>
+            <strong>{tr("Stale Proposal Blocked (HTTP 409):")}</strong> {tr("The punch evidence changed after this draft was generated. Approval is blocked until a new draft is made.")}{' '}
+            <button type="button" className="btn-primary small" style={{ marginLeft: 8 }} onClick={handleDraftClick} disabled={isGenerating}>
               {tr("Re-Propose on Latest Evidence")}
             </button>
           </div>
@@ -591,7 +592,7 @@ export function ResolutionPanel({
       {/* 9. Interactive Modes: Edit Form, Reject Form, Review Buttons */}
       {mode === 'edit' && (
         <div className="edit-box">
-          <div className="section-label">{tr("Manual Manager Correction (Live Validator Re-Check)")}</div>
+          <div className="section-label">{tr("Manual Manager Correction (validated by the server on save)")}</div>
           <label className="field-label">{tr("Corrected Out-Punch Time (")}{item.timezone}):
             <input type="time" value={editedTime} onChange={(e) => setEditedTime(e.target.value)} className="input-field tnum" />
           </label>
