@@ -36,4 +36,4 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 
 ## Current next step
 
-Contract `0.2.0-draft` is adopted by both tracks, and the evals use Track A's real validator with complete evidence and exact outcomes (2026-11-18). Next: freeze SHARED-01 (drop -draft, make `as_of` required, update frontend `contracts.ts`), then SHARED-02.
+Hand-in (2026-11-18): `main` = `backend` at 34c2506, CI green, verified end to end on the Docker stack with live Qwen2.5-7B (see backend/docs/MODEL_CARD.md, "Final verification"). Future work, out of scope for the deadline: contract 0.3.0 (add_break, void_shift, acknowledge, roster final), freezing SHARED-01 and updating frontend `contracts.ts`, and a native-speaker review of the Hindi/Kannada lexicons. Unsupported fix types escalate to the manager meanwhile.

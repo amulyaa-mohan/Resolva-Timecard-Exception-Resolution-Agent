@@ -611,3 +611,11 @@ Never include credentials, private employee data, or invented test results.
 - PostgreSQL open and escalated cases now use the effective workday for evidence snapshots, proposal validation and approval. A correction on a sibling exception changes that snapshot's evidence version, even when its exception revision stays the same.
 - Replaced the linked-punch equality guard. An outdated request still conflicts, and a refreshed request reaches the deterministic rules. Historical case and timecard raw evidence remain scoped to the exception.
 - Added a PostgreSQL regression for a clock-out added by a correction on another exception.
+
+### 2026-11-18 — Amulya Mohan — Hand-in: merged to main, final docs
+
+- Branch: `backend`, fast-forwarded to `main` 34c2506 (PR #12 from Track A, then PR #13 from `backend`).
+- Status: DONE for the deadline; future work listed in CLAUDE.md, shared TASKS.md and MODEL_CARD.md.
+- Validation on the merged code: CI on `main` green (639 tests on PostgreSQL, none skipped); Docker stack with live Qwen2.5-7B: demo story end to end, HTTP walk-through 49/49, 0 server errors; full live eval 100% in every category, 0 unsafe, p50 4.45 s.
+- Decision: contract 0.3.0 is out of scope for the deadline. Unsupported fix types escalate to the manager.
+- Publication: committed and pushed to `backend` (authorised by the owner).
