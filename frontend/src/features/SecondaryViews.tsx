@@ -236,15 +236,15 @@ export function AuditView({
             {scope === 'case' && selectedCase ? (
               <p className="audit-scope-line">
                 <strong>{selectedCase.employee_name}</strong>
-                <span aria-hidden="true"> · </span>
+                <span aria-hidden="true"> Â· </span>
                 <span>{caseReasonLabel}</span>
-                <span aria-hidden="true"> · </span>
+                <span aria-hidden="true"> Â· </span>
                 <span>Work date: {caseWorkDateLabel}</span>
                 <span className="audit-scope-code">({selectedCase.id})</span>
               </p>
             ) : (
               <p className="audit-scope-line">
-                All workspace activity ({events.length} {events.length === 1 ? 'event' : 'events'}) · Times shown in {tzInfo.shortLabel}
+                All workspace activity ({events.length} {events.length === 1 ? 'event' : 'events'}) Â· Times shown in {tzInfo.shortLabel}
               </p>
             )}
           </div>
@@ -333,7 +333,7 @@ export function AuditView({
                           onClick={() => toggleDetails(ev.id)}
                         >
                           <span>Technical details</span>
-                          <span aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
+                          <span aria-hidden="true">{isOpen ? 'â–¾' : 'â–¸'}</span>
                         </button>
                       </div>
                     </div>
@@ -577,13 +577,13 @@ export function ImportPreviewView({
   const blockedReason = useMemo(() => {
     if (!preview) return null;
     if (!canWrite) {
-      return `Import unavailable for role “${role}”. Switch to manager or admin to commit attendance records.`;
+      return `Import unavailable for role â€œ${role}â€. Switch to manager or admin to commit attendance records.`;
     }
     if (preview.valid === 0) {
       return 'Import unavailable because there are 0 valid rows. Fix the row errors above and preview again.';
     }
     if (preview.invalid > 0 && !allowPartial) {
-      return `Import blocked because ${preview.invalid} ${preview.invalid === 1 ? 'row is' : 'rows are'} invalid. Select “Import valid rows only” or fix the invalid rows and preview again.`;
+      return `Import blocked because ${preview.invalid} ${preview.invalid === 1 ? 'row is' : 'rows are'} invalid. Select â€œImport valid rows onlyâ€ or fix the invalid rows and preview again.`;
     }
     return null;
   }, [preview, canWrite, role, allowPartial]);
@@ -625,20 +625,20 @@ export function ImportPreviewView({
 
   const renderRowCells = (row: ImportPreviewItem) => {
     const empDisplay = row.employee_name
-      ? `${row.employee_name} (${row.employee_id || '—'})`
-      : row.employee_id || '—';
+      ? `${row.employee_name} (${row.employee_id || 'â€”'})`
+      : row.employee_id || 'â€”';
 
     if (kind === 'punches') {
       const eventText = row.event_code
         ? FRIENDLY_PUNCH_EVENT[row.event_code] ?? row.event_code
-        : '—';
+        : 'â€”';
       return (
         <>
           <td className="tnum">{row.row_number}</td>
           <td>
             <strong>{empDisplay}</strong>
           </td>
-          <td className="tnum">{row.local_time || '—'}</td>
+          <td className="tnum">{row.local_time || 'â€”'}</td>
           <td>{eventText}</td>
         </>
       );
@@ -651,8 +651,8 @@ export function ImportPreviewView({
           <td>
             <strong>{empDisplay}</strong>
           </td>
-          <td className="tnum">{row.shift_window || '—'}</td>
-          <td className="tnum">{typeof row.planned_break_min === 'number' ? `${row.planned_break_min} min` : '—'}</td>
+          <td className="tnum">{row.shift_window || 'â€”'}</td>
+          <td className="tnum">{typeof row.planned_break_min === 'number' ? `${row.planned_break_min} min` : 'â€”'}</td>
         </>
       );
     }
@@ -663,8 +663,8 @@ export function ImportPreviewView({
         <td>
           <strong>{empDisplay}</strong>
         </td>
-        <td className="tnum">{row.local_time || '—'}</td>
-        <td className="import-note-cell">{row.note_excerpt || '—'}</td>
+        <td className="tnum">{row.local_time || 'â€”'}</td>
+        <td className="import-note-cell">{row.note_excerpt || 'â€”'}</td>
       </>
     );
   };
@@ -683,11 +683,11 @@ export function ImportPreviewView({
           <li className={currentStep === 1 ? 'step-item active' : 'step-item done'} aria-current={currentStep === 1 ? 'step' : undefined}>
             1. Paste data
           </li>
-          <li aria-hidden="true" className="step-sep">→</li>
+          <li aria-hidden="true" className="step-sep">â†’</li>
           <li className={currentStep === 2 ? 'step-item active' : currentStep > 2 ? 'step-item done' : 'step-item'} aria-current={currentStep === 2 ? 'step' : undefined}>
             2. Review rows
           </li>
-          <li aria-hidden="true" className="step-sep">→</li>
+          <li aria-hidden="true" className="step-sep">â†’</li>
           <li className={currentStep === 3 ? 'step-item active' : 'step-item'} aria-current={currentStep === 3 ? 'step' : undefined}>
             3. Import
           </li>
@@ -751,7 +751,7 @@ export function ImportPreviewView({
           <aside className="import-guidance-box" aria-label="Format help">
             <div className="import-guidance-title">Format help</div>
             <p className="import-guidance-text">
-              Times without an offset use the employee’s timezone.
+              Times without an offset use the employeeâ€™s timezone.
             </p>
             <div className="import-guidance-sub">Supported columns</div>
             <code className="mono import-columns-code">{FORMAT_GUIDANCE[kind].columns}</code>
@@ -768,10 +768,10 @@ export function ImportPreviewView({
             disabled={!rawInput.trim() || previewing}
             onClick={handlePreview}
           >
-            {previewing ? 'Previewing…' : 'Preview rows'}
+            {previewing ? 'Previewingâ€¦' : 'Preview rows'}
           </button>
           {!rawInput.trim() && (
-            <span className="small muted">Paste CSV or JSON above, or click “Load sample”.</span>
+            <span className="small muted">Paste CSV or JSON above, or click â€œLoad sampleâ€.</span>
           )}
         </div>
       </div>
@@ -783,9 +783,9 @@ export function ImportPreviewView({
               <h2 className="card-heading">Preview summary</h2>
               <p className="import-counts-line tnum">
                 <span className="count-valid">{preview.valid} valid</span>
-                <span aria-hidden="true"> · </span>
+                <span aria-hidden="true"> Â· </span>
                 <span className="count-dup">{preview.duplicates} {preview.duplicates === 1 ? 'duplicate' : 'duplicates'}</span>
-                <span aria-hidden="true"> · </span>
+                <span aria-hidden="true"> Â· </span>
                 <span className="count-invalid">{preview.invalid} invalid</span>
               </p>
             </div>
@@ -850,7 +850,7 @@ export function ImportPreviewView({
                             onClick={() => toggleRowDetails(row.row_number)}
                           >
                             <span>Details</span>
-                            <span aria-hidden="true">{isExpanded ? '▾' : '▸'}</span>
+                            <span aria-hidden="true">{isExpanded ? 'â–¾' : 'â–¸'}</span>
                           </button>
                         </td>
                       </tr>
@@ -930,7 +930,7 @@ export function ImportPreviewView({
                 onClick={handleCommit}
               >
                 {committing
-                  ? 'Importing…'
+                  ? 'Importingâ€¦'
                   : `Import ${preview.valid} ${preview.valid === 1 ? 'row' : 'rows'}`}
               </button>
             </div>
@@ -958,10 +958,10 @@ export function ImportPreviewView({
             </strong>
             <span>
               {' '}
-              · Skipped {commitResult.skipped} ({commitResult.duplicates}{' '}
+              Â· Skipped {commitResult.skipped} ({commitResult.duplicates}{' '}
               {commitResult.duplicates === 1 ? 'duplicate' : 'duplicates'}, {commitResult.invalid} invalid)
             </span>
-            <span className="muted"> · Batch </span>
+            <span className="muted"> Â· Batch </span>
             <code className="mono">{commitResult.batch_id}</code>
           </div>
 
@@ -974,7 +974,7 @@ export function ImportPreviewView({
                   className="btn-secondary"
                   onClick={() => onOpenException(excId)}
                 >
-                  Open {excId} in Inbox →
+                  Open {excId} in Inbox â†’
                 </button>
               ))}
             </div>
@@ -1036,8 +1036,8 @@ export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: Excep
         exception_id: id,
         decision: 'propose',
         actions: [{ type: 'add_punch', new_ts: '2026-11-17T18:00:00+05:30', note: 'Infer scheduled shift end 18:00 IST.' }],
-        rationale: `Detected unpaired clock-in at ${punchTime} IST on scheduled 09:00ÔÇô18:00 IST shift. Proposed 18:00 IST out-punch passes all 6 deterministic rules.`,
-        citations: [{ chunk_id: 'IN-KA@2025.1#sec-4.2', quote: 'Missing out-punches may be inferred within ┬▒30 minutes of scheduled shift end.' }],
+        rationale: `Detected unpaired clock-in at ${punchTime} IST on scheduled 09:00Ã”Ã‡Ã´18:00 IST shift. Proposed 18:00 IST out-punch passes all 6 deterministic rules.`,
+        citations: [{ chunk_id: 'IN-KA@2025.1#sec-4.2', quote: 'Missing out-punches may be inferred within â”¬â–’30 minutes of scheduled shift end.' }],
         confidence: 0.91,
         missing_information: [],
         model_id: 'qwen2.5-7b-instruct',
@@ -1132,7 +1132,7 @@ export function PolicySettingsView({
                   <td className="mono"><strong>{p.id}@{p.version}</strong></td>
                   <td>{tr(p.jurisdiction)}</td>
                   <td>{p.daily_regular_hours}{tr(" hours")} / {p.weekly_regular_hours}{tr(" hours")}</td>
-                  <td>{p.overtime_rate}├ù ({p.quarterly_ot_cap ? `${p.quarterly_ot_cap}${tr(" hours per quarter")}` : tr("no cap")})</td>
+                  <td>{p.overtime_rate}â”œÃ¹ ({p.quarterly_ot_cap ? `${p.quarterly_ot_cap}${tr(" hours per quarter")}` : tr("no cap")})</td>
                   <td>{p.rest_minutes}{tr(" min after ")}{p.rest_after_hours}{tr(" hours")}</td>
                   <td>{p.max_spread_hours ? `${p.max_spread_hours}${tr(" hours")}` : tr('N/A')}</td>
                 </tr>
@@ -1144,129 +1144,3 @@ export function PolicySettingsView({
     </div>
   );
 }
-
-const SAMPLE_CSV = `employee_id,employee_name,work_date,in_time,out_time,location
-EMP-BLR-11,Nandini Rao,2026-11-17,09:00,,Bengaluru (BLR-01)
-EMP-BLR-12,Karthik Hegde,2026-11-17,09:15,18:10,Bengaluru (BLR-02)
-,Unknown Worker,2026-11-17,09:00,18:00,Bengaluru (BLR-01)
-EMP-AUS-09,Hannah Brooks,11/17/2026,08:00,17:00,Austin (AUS-01)`;
-
-export function ImportPreviewView({ onImportValid }: { onImportValid: (items: ExceptionItem[]) => void }) {
-  const { tr } = useTranslation();
-  const [csvInput, setCsvInput] = useState(SAMPLE_CSV);
-  const [rows, setRows] = useState<import('../types/contracts').ImportRow[]>(() =>
-    []
-  );
-
-  // Lazy parse on render/button click
-  const parsedRows = rows.length > 0 ? rows : (() => {
-    const lines = csvInput.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    if (lines.length <= 1) return [];
-    return lines.slice(1).map((line, idx) => {
-      const [employee_id = '', employee_name = '', work_date = '', in_time = '', out_time = '', location = ''] = line.split(',').map((c) => c.trim());
-      const row_num = idx + 2;
-      if (!employee_id || !employee_name) return { row_num, employee_id, employee_name, work_date, in_time, out_time, location, valid: false, error: 'Missing employee_id or employee_name.' };
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(work_date)) return { row_num, employee_id, employee_name, work_date, in_time, out_time, location, valid: false, error: 'Invalid work_date (expected YYYY-MM-DD).' };
-      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(in_time)) return { row_num, employee_id, employee_name, work_date, in_time, out_time, location, valid: false, error: 'Invalid in_time (expected HH:MM).' };
-      return { row_num, employee_id, employee_name, work_date, in_time, out_time, location: location || 'Bengaluru (BLR-01)', valid: true };
-    });
-  })();
-
-  const validMissingPunches = parsedRows.filter((r) => r.valid && !r.out_time);
-
-  const handleImport = () => {
-    const created: ExceptionItem[] = validMissingPunches.map((r, i) => ({
-      id: `EXC-${210 + i}`,
-      code: 'MISSING_PUNCH',
-      severity: 'problem',
-      employee_id: r.employee_id,
-      employee_name: r.employee_name,
-      job: 'Associate',
-      location: r.location,
-      timezone: r.location.includes('Austin') ? 'CST (UTC-06:00)' : 'IST (UTC+05:30)',
-      policy_pack_id: r.location.includes('Austin') ? 'US-FED+CA@2025.1' : 'IN-KA@2025.1',
-      work_date: r.work_date,
-      status: 'proposed',
-      evidence_version: 1,
-      summary: `Imported shift ${r.in_time} missing out-punch.`,
-      punches: [
-        { id: `PNC-IMP-${i}`, employee_id: r.employee_id, ts: `${r.work_date}T${r.in_time}:00+05:30`, type: 'in', source: 'badge', device_id: 'CSV-IMPORT' },
-      ],
-      before_hours: { regular_hours: '0.00 h', overtime_hours: '0.00 h', pay_status: 'Blocked (missing out-punch)' },
-      after_hours: { regular_hours: '8.00 h', overtime_hours: '0.00 h', pay_status: 'Payable (Regular)' },
-      proposal: {
-        id: `PRP-IMP-${i}`,
-        exception_id: `EXC-${210 + i}`,
-        decision: 'propose',
-        actions: [{ type: 'add_punch', new_ts: `${r.work_date}T18:00:00+05:30`, note: 'Inferred scheduled end 18:00.' }],
-        rationale: 'Imported CSV shift had unpaired clock-in; proposed scheduled end timestamp.',
-        citations: [{ chunk_id: 'IN-KA@2025.1#sec-4.2', quote: 'Missing out-punches may be inferred within ┬▒30 minutes of scheduled shift end.' }],
-        confidence: 0.89,
-        missing_information: [],
-        model_id: 'qwen2.5-7b-instruct',
-        prompt_hash: 'sha256:9f82c1a4',
-        evidence_version: 1,
-        validator_passed: true,
-        rule_outcomes: [{ rule: 'MISSING_PUNCH', passed: true, detail: 'Paired with 18:00 out-punch.' }],
-      },
-    }));
-    onImportValid(created);
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div className="panel-card" style={{ padding: 18 }}>
-        <h2 style={{ marginTop: 0 }}>{tr("Schedule & Punch Import Preview (FE-04)")}</h2>
-        <p className="muted small">{tr("Validates CSV/JSON rows before ingestion. Invalid rows are flagged and blocked; valid unpaired rows route to the Exception Inbox.")}</p>
-        <textarea className="input-field code-editor mono"
-          rows={6}
-          style={{ width: '100%' }}
-          value={csvInput}
-          onChange={(e) => {
-            setCsvInput(e.target.value);
-            setRows([]);
-          }}
-        />
-        <div className="button-row" style={{ marginTop: 12 }}>
-          <button type="button" className="btn-primary" disabled={validMissingPunches.length === 0} onClick={handleImport}>{tr("Import Valid Exception Rows to Inbox (")}{validMissingPunches.length})
-          </button>
-        </div>
-      </div>
-
-      <div className="panel-card">
-        <div className="toolbar">
-          <strong>{tr("Row-Level Validation Preview (")}{parsedRows.filter((r) => r.valid).length}{" " + tr("Valid /") + " "}{parsedRows.filter((r) => !r.valid).length}{" " + tr("Invalid)") + ""}</strong>
-        </div>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>{tr("Row")}</th>
-                <th>{tr("Status")}</th>
-                <th>{tr("Employee")}</th>
-                <th>{tr("Work Date & Punches")}</th>
-                <th>{tr("Validation Detail")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {parsedRows.map((r) => (
-                <tr key={r.row_num}>
-                  <td className="mono small">#{r.row_num}</td>
-                  <td>
-                    <span className={r.valid ? 'badge-pass' : 'badge-escalated'}>
-                      {tr(r.valid ? 'VALID' : 'INVALID ROW')}
-                    </span>
-                  </td>
-                  <td className="small"><strong>{r.employee_name || 'ÔÇö'}</strong> ({r.employee_id || tr('Missing ID')})</td>
-                  <td className="small">{r.work_date} | {r.in_time || tr('Not recorded')} ÔåÆ {r.out_time || tr('Not recorded')}</td>
-                  <td className="small">{r.valid ? tr('Ready for ingestion') : <span style={{ color: '#dc2626' }}>{tr(r.error ?? "")}</span>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
