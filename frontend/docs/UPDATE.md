@@ -51,3 +51,20 @@ Append entries; preserve other developers' history. Use repository-relative path
 ### 2026-11-17 (Late) - Chaithanya - FE-03, FE-04, FE-05 & Root README.md (D1)
 - Status: frontend -> main; REVIEW / DONE (stale 409 guard, CSV import preview, EN/KN/HI switcher, E/R/Esc shortcuts, Playwright E2E spec, and README.md complete).
 - Validation: `npm --prefix frontend run build` passed with 0 errors.
+
+### 2026-11-18 — Soumya — FE-06 — Login screen adaptation and dashboard integration
+
+- Branch and status: frontend; REVIEW.
+- Changed files and behavior:
+  - `frontend/src/components/LoginScreen.tsx`: Created reusable, accessible LoginScreen component featuring demo access badge/notice, email validation (format, required), password validation (required, 6+ character minimum for demo), show/hide password toggle button, Remember Me capability (persisting strictly email in localStorage), honest demo-mode Forgot Password advisory banner, and quick autofill demo presets for Priya Menon (Manager), Suresh Kumar (Compliance), and Anita Roy (Payroll Admin).
+  - `frontend/src/login.css`: Created scoped styles with `.login-` prefix adhering to Resolva enterprise theme tokens (indigo accents, neutral surfaces, responsive layouts for desktop and mobile).
+  - `frontend/src/main.tsx`: Added minimal authentication state (`isAuthenticated`, `currentUserEmail`), initialized Resolva to display the LoginScreen first, conditionally rendered the existing dashboard upon successful demo login, guarded keyboard shortcut handlers when unauthenticated, and added a Sign Out button to the topbar header returning the user to the login screen while preserving all existing dashboard hooks, tabs, and exception resolution state.
+  - `frontend/e2e/approve.spec.ts`: Updated Playwright E2E spec to incorporate initial login using demo credentials prior to verifying exception approval and audit trail.
+  - `frontend/docs/TASKS.md` & `frontend/docs/UPDATE.md`: Registered and documented FE-06 task and progress logs.
+- Contracts and cross-team dependencies: No backend or database schema modifications; authentication is explicitly labeled as demo access for team evaluation without requiring external SSO/IdP services.
+- Validation:
+  - Executed `npm --prefix frontend run build` (`tsc --noEmit && vite build`): passed with 0 errors.
+  - Verified logic with standalone unit test suite: email format validation, 6+ character password minimum, Remember Me storing only email (never password) in localStorage, removal on uncheck, and password toggle state.
+  - Verified that all existing dashboard tabs (Exception Inbox, Escalations, Import Preview, Audit Trail, Kiosk Simulator, Policies & Settings), KPI cards, and resolution actions remain fully intact.
+- Blockers and next step: Ready for teammate review; future task can wire production auth provider if live authentication backend is introduced.
+- Publication: local only.

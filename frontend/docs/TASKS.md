@@ -10,3 +10,4 @@ Shared dependencies refer to backend/docs/shared/TASKS.md; do not duplicate thei
 | FE-03 | Decision and audit flow | Chaithanya | REVIEW | FE-02, backend decision API | Server-confirmed approval/edit/reject; stale and denied states |
 | FE-04 | Import preview and language interaction | Chaithanya | REVIEW | FE-03, backend imports/intents | Invalid rows shown; language preserves canonical fields |
 | FE-05 | Accessibility and end-to-end review | Chaithanya | REVIEW | FE-04 | Keyboard, narrow layout, and full workflow verified |
+| FE-06 | Adapt and Integrate Resolva Login | Soumya | REVIEW | FE-05 | Login screen initial state, demo validation, remember email, sign-out |

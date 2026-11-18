@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { LoginScreen } from './components/LoginScreen';
 import { ResolutionPanel } from './components/ResolutionPanel';
 import { AuditView, ImportPreviewView, KioskView, PolicySettingsView } from './features/SecondaryViews';
 import { buildAuditRecord, checkBackendHealth, loadInitialData, submitDecisionWithFallback } from './lib/api';
@@ -33,6 +34,8 @@ const LABELS: Record<UILang, {
 };
 
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const initial = useMemo(() => loadInitialData(), []);
   const [exceptions, setExceptions] = useState<ExceptionItem[]>(initial.exceptions);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>(initial.auditEvents);
@@ -69,6 +72,7 @@ function App() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (!isAuthenticated) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
       if (tab !== 'inbox' && tab !== 'escalations') return;
@@ -208,6 +212,17 @@ function App() {
   const resolvedCount = exceptions.filter((e) => e.status === 'resolved').length;
   const readinessPct = Math.round(((resolvedCount + 12) / (exceptions.length + 12)) * 100);
 
+  if (!isAuthenticated) {
+    return (
+      <LoginScreen
+        onLoginSuccess={(signedInEmail) => {
+          setIsAuthenticated(true);
+          setCurrentUserEmail(signedInEmail);
+        }}
+      />
+    );
+  }
+
   return (
     <div>
       <header className="topbar">
@@ -250,6 +265,19 @@ function App() {
             <option value="payroll_admin">payroll_admin</option>
             <option value="admin">admin</option>
           </select>
+          <button
+            type="button"
+            className="btn-secondary sign-out-btn"
+            style={{ fontSize: '12px', padding: '5px 12px' }}
+            onClick={() => {
+              setIsAuthenticated(false);
+              setCurrentUserEmail(null);
+            }}
+            aria-label="Sign Out"
+            title={currentUserEmail ? `Signed in as ${currentUserEmail}` : 'Sign Out'}
+          >
+            Sign Out
+          </button>
         </div>
       </header>
 
