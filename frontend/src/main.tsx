@@ -67,8 +67,8 @@ function App() {
   }, [exceptions, tab, locationFilter, severityFilter]);
 
   const selectedItem = useMemo(
-    () => exceptions.find((e) => e.id === selectedId) ?? null,
-    [exceptions, selectedId]
+    () => visibleItems.find((e) => e.id === selectedId) ?? null,
+    [visibleItems, selectedId]
   );
 
   useEffect(() => {
@@ -326,9 +326,9 @@ function App() {
                   <div className="filter-group">
                     <select className="role-select" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} aria-label={tr("Filter by location")}>
                       <option value="ALL">{tr("All Locations")}</option>
-                      <option value="Bengaluru (BLR-01)">Bengaluru (BLR-01)</option>
-                      <option value="Bengaluru (BLR-02)">Bengaluru (BLR-02)</option>
-                      <option value="Austin (AUS-01)">Austin (AUS-01)</option>
+                      <option value="Bengaluru (BLR-01)">{tr("Bengaluru (BLR-01)")}</option>
+                      <option value="Bengaluru (BLR-02)">{tr("Bengaluru (BLR-02)")}</option>
+                      <option value="Austin (AUS-01)">{tr("Austin (AUS-01)")}</option>
                     </select>
                     <select className="role-select" value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)} aria-label={tr("Filter by severity")}>
                       <option value="ALL">{tr("All Severities")}</option>
@@ -375,10 +375,10 @@ function App() {
                               <td><span className={`badge badge-${item.severity}`}>{tr(item.severity.toUpperCase())}</span></td>
                               <td>
                                 <strong>{item.employee_name}</strong>
-                                <div className="small muted">{item.location} • {item.work_date}</div>
+                                <div className="small muted">{tr(item.location)} • {item.work_date}</div>
                               </td>
                               <td>
-                                <div className="mono small"><strong>{item.code}</strong> <span className="muted">({item.policy_pack_id})</span></div>
+                                <div className="small"><strong title={item.code}>{tr(item.code)}</strong> <span className="mono muted">({item.policy_pack_id})</span></div>
                                 <div className="small muted">{tr(item.summary)}</div>
                               </td>
                               <td>

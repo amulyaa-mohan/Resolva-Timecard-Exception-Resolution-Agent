@@ -1,5 +1,5 @@
 import { useTranslation } from "../lib/locale";
-﻿import { ExceptionItem } from '../types/contracts';
+import { ExceptionItem } from '../types/contracts';
 
 interface PunchTimelineProps {
   item: ExceptionItem;
@@ -44,6 +44,28 @@ export function PunchTimeline({ item, editedTimeHHMM }: PunchTimelineProps) {
 
   const ticks = [6, 8, 10, 12, 14, 16, 18, 20, 22];
 
+  const punchLabels = {
+    in: 'Clock in',
+    out: 'Clock out',
+    break_start: 'Break started',
+    break_end: 'Break ended',
+  };
+  const markers = item.punches.map((p) => ({
+    id: `raw-${p.id}`,
+    kind: 'raw',
+    left: toPct(isoToMinutes(p.ts)),
+    label: tr(punchLabels[p.type] ?? p.type),
+    time: p.ts.slice(11, 16),
+  }));
+  if (proposedPct !== null && proposedAction?.new_ts) {
+    markers.push({ id: 'proposed', kind: 'ai-proposed', left: proposedPct,
+      label: tr('AI Proposed'), time: proposedAction.new_ts.slice(11, 16) });
+  }
+  if (editedPct !== null && editedTimeHHMM) {
+    markers.push({ id: 'edited', kind: 'manager-edit', left: editedPct,
+      label: tr('Manager Edit'), time: editedTimeHHMM });
+  }
+
   return (
     <div className="timeline-card">
       <div className="timeline-header">
@@ -66,55 +88,19 @@ export function PunchTimeline({ item, editedTimeHHMM }: PunchTimelineProps) {
           <div
             className="timeline-schedule-bar"
             style={{ left: `${schedStart}%`, width: `${schedEnd - schedStart}%` }}
-            title={`Scheduled: ${item.schedule?.start.slice(11, 16)} – ${item.schedule?.end.slice(11, 16)}`}
+            title={`${tr("Scheduled")} ${item.schedule?.start.slice(11, 16)} – ${item.schedule?.end.slice(11, 16)}`}
           >
             <span>{"" + tr("Sched") + " "}{item.schedule?.start.slice(11, 16)}–{item.schedule?.end.slice(11, 16)}
             </span>
           </div>
         )}
 
-        {/* Raw immutable punches */}
-        {item.punches.map((p) => {
-          const left = toPct(isoToMinutes(p.ts));
-          return (
-            <div
-              key={p.id}
-              className={`timeline-marker raw-${p.type}`}
-              style={{ left: `${left}%` }}
-              title={`${p.type.toUpperCase()} at ${p.ts.slice(11, 16)} (${p.source} / ${p.device_id})`}
-            >
-              <div className="marker-pin" />
-              <div className="marker-label">
-                {tr({ in: 'Clock in', out: 'Clock out', break_start: 'Break started', break_end: 'Break ended' }[p.type] ?? p.type)}{' '}
-                {p.ts.slice(11, 16)}
-              </div>
-            </div>
-          );
-        })}
-
-        {/* AI Proposed Punch */}
-        {proposedPct !== null && proposedAction?.new_ts && (
-          <div
-            className="timeline-marker ai-proposed"
-            style={{ left: `${proposedPct}%` }}
-            title={`AI Proposed: ${proposedAction.new_ts.slice(11, 16)}`}
-          >
+        {markers.map((marker) => (
+          <div key={marker.id} className={`timeline-marker ${marker.kind}`}
+            style={{ left: `${marker.left}%` }} title={`${marker.label} ${marker.time}`}>
             <div className="marker-pin" />
-            <div className="marker-label">{"" + tr("AI") + " "}{proposedAction.new_ts.slice(11, 16)}</div>
           </div>
-        )}
-
-        {/* Manager Live Edit Marker */}
-        {editedPct !== null && editedTimeHHMM && (
-          <div
-            className="timeline-marker manager-edit"
-            style={{ left: `${editedPct}%` }}
-            title={`Manager Edit: ${editedTimeHHMM}`}
-          >
-            <div className="marker-pin" />
-            <div className="marker-label">{"" + tr("Edit") + " "}{editedTimeHHMM}</div>
-          </div>
-        )}
+        ))}
       </div>
 
       <div className="timeline-axis">
@@ -122,6 +108,15 @@ export function PunchTimeline({ item, editedTimeHHMM }: PunchTimelineProps) {
           <span key={hr}>{String(hr).padStart(2, '0')}:00</span>
         ))}
       </div>
+      {markers.length > 0 && (
+        <ul className="timeline-events">
+          {markers.map((marker) => (
+            <li key={marker.id} className={marker.kind}>
+              <span className="tnum">{marker.time}</span> {marker.label}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

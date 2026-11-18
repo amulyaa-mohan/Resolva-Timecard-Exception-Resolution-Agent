@@ -185,7 +185,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                     onClick={() => setShowPassword((prev) => !prev)}
                     aria-label={tr(showPassword ? 'Hide password' : 'Show password')}
                   >
-                    {showPassword ? 'Hide' : 'Show'}
+                    {tr(showPassword ? 'Hide' : 'Show')}
                   </button>
                 </div>
                 {passwordError && (
@@ -232,7 +232,7 @@ export function LoginScreen({ onLoginSuccess }: LoginScreenProps) {
                       <span className="login-preset-name">{preset.name}</span>
                       <span className="muted" style={{ marginLeft: 6 }}>({preset.email})</span>
                     </div>
-                    <span className="login-preset-role">{preset.role}</span>
+                    <span className="login-preset-role">{tr(preset.role)}</span>
                   </button>
                 ))}
               </div>

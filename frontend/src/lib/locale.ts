@@ -199,12 +199,143 @@ const hindi: Record<string, string> = {
   "Single web out-punch at 17:45 IST with no clock-in punch and no schedule on file.": "वेब पर केवल 17:45 IST का जाने का समय दर्ज है। आने का रिकॉर्ड और शेड्यूल उपलब्ध नहीं हैं।",
   "PROPOSAL_GENERATED": "प्रस्ताव बनाया गया",
   "EVIDENCE_ATTACHED": "साक्ष्य जोड़ा गया",
-  "EXCEPTION_DETECTED": "अपवाद मिला"
+  "EXCEPTION_DETECTED": "अपवाद मिला",
+  "MISSING_PUNCH": "उपस्थिति रिकॉर्ड अधूरा",
+  "OVERLAPPING_SHIFT": "शिफ़्ट के समय टकराते हैं",
+  "MEAL_BREAK_BREACH": "भोजनावकाश के नियम का उल्लंघन",
+  "OVERTIME_RISK": "अतिरिक्त समय का जोखिम",
+  "SPREAD_OVER_BREACH": "शिफ़्ट की कुल अवधि सीमा से अधिक",
+  "SCHEDULE_DEVIATION": "निर्धारित समय से अंतर",
+  "Store Associate": "स्टोर कर्मचारी",
+  "Shift Lead": "शिफ़्ट प्रभारी",
+  "Inventory Specialist": "भंडार विशेषज्ञ",
+  "Customer Specialist": "ग्राहक सेवा विशेषज्ञ",
+  "Floor Associate": "फ़्लोर कर्मचारी",
+  "Cashier": "कैशियर",
+  "Associate": "कर्मचारी",
+  "Bengaluru (BLR-01)": "बेंगलुरु (BLR-01)",
+  "Bengaluru (BLR-02)": "बेंगलुरु (BLR-02)",
+  "Austin (AUS-01)": "ऑस्टिन (AUS-01)",
+  "PROPOSAL_VALIDATED": "प्रस्ताव की जाँच हुई",
+  "PROPOSAL_ESCALATED": "प्रस्ताव आगे की समीक्षा के लिए भेजा गया",
+  "RulesEngine": "उपस्थिति नियम",
+  "ProposalPipeline": "एआई प्रस्ताव प्रणाली",
+  "ValidatorGate": "नियमों की जाँच",
+  "Punches: [08:58 in, 13:02 break_start, 14:00 break_end]": "दर्ज समय: 08:58 आगमन, 13:02 विश्राम शुरू, 14:00 विश्राम समाप्त",
+  "Flagged MISSING_PUNCH (severity: problem)": "अधूरा उपस्थिति रिकॉर्ड मिला (गंभीरता: समस्या)",
+  "Status: open": "स्थिति: खुला",
+  "Proposed add_punch 18:00 IST (confidence 0.94, 6/6 rules passed)": "18:00 IST का रिकॉर्ड जोड़ने का प्रस्ताव (94% विश्वास, 6/6 नियम पूरे)",
+  "Spread-over 13h 15m (07:30–20:45 IST)": "शिफ़्ट की कुल अवधि 13 घंटे 15 मिनट (07:30–20:45 IST)",
+  "Blocked & escalated: exceeds 12h statutory spread-over limit": "प्रस्ताव रोका और समीक्षा के लिए भेजा गया। कुल अवधि 12 घंटे की सीमा से अधिक है।",
+  "Missing employee_id or employee_name.": "कर्मचारी की आईडी या नाम दर्ज करें।",
+  "Invalid work_date (expected YYYY-MM-DD).": "कार्य की तारीख YYYY-MM-DD प्रारूप में दर्ज करें।",
+  "Invalid in_time (expected HH:MM).": "आने का समय HH:MM प्रारूप में दर्ज करें।",
+  "Missing ID": "आईडी उपलब्ध नहीं",
+  "Not recorded": "दर्ज नहीं है",
+  "No change recorded": "कोई बदलाव दर्ज नहीं है",
+  "Clocked in at Bengaluru store kiosk; forgot evening out-punch.": "बेंगलुरु के स्टोर कियोस्क पर आने का समय दर्ज किया। शाम को जाने का समय दर्ज करना भूल गए।",
+  "Karnataka Shops & Commercial Establishments Act (Synthetic Demo)": "कर्नाटक दुकान एवं वाणिज्यिक प्रतिष्ठान अधिनियम (डेमो)",
+  "Karnataka S&E Proposed Amendment (Synthetic Demo)": "कर्नाटक दुकान एवं प्रतिष्ठान नियमों में प्रस्तावित संशोधन (डेमो)",
+  "US Federal + California Meal/Daily OT Overlay (Synthetic Demo)": "अमेरिकी संघीय और कैलिफ़ोर्निया भोजनावकाश व दैनिक अतिरिक्त समय के नियम (डेमो)",
+  " hours": " घंटे",
+  " hours per quarter": " घंटे प्रति तिमाही",
+  " min after ": " मिनट का विश्राम, इतने घंटे काम के बाद: ",
+  "All shifts properly paired after adding 18:00 IST out-punch.": "18:00 IST का निकास रिकॉर्ड जोड़ने के बाद सभी शिफ़्ट के रिकॉर्ड जोड़े में हैं।",
+  "58 min break taken after 4h 04m work.": "4 घंटे 4 मिनट काम के बाद 58 मिनट का विश्राम लिया गया।",
+  "8.03h worked <= 9.00h daily threshold.": "8.03 घंटे काम, 9 घंटे की दैनिक सीमा के भीतर।",
+  "9h 02m spread-over <= 12h max.": "9 घंटे 2 मिनट की कुल अवधि, 12 घंटे की सीमा के भीतर।",
+  "3h split rest recorded.": "अलग-अलग हिस्सों में कुल 3 घंटे का विश्राम दर्ज है।",
+  "10.25h worked exceeds 9.00h daily threshold (+1.25h OT).": "10.25 घंटे काम, 9 घंटे की दैनिक सीमा से 1.25 घंटे अधिक।",
+  "13h 15m spread-over exceeds 12h IN-KA@2025.1 limit.": "13 घंटे 15 मिनट की कुल अवधि IN-KA@2025.1 की 12 घंटे की सीमा से अधिक है।",
+  "Split coverage.": "शिफ़्ट कई हिस्सों में बँटी है।",
+  "Remedied via flag_premium pay code.": "विशेष भुगतान का कोड लागू किया गया।",
+  "8.00h regular worked.": "8 घंटे का नियमित काम दर्ज है।",
+  "Not applicable under pack.": "इस नीति के तहत लागू नहीं है।",
+  "Shift currently in progress.": "शिफ़्ट जारी है।",
+  "Break scheduled at 14:00 IST.": "विश्राम 14:00 IST पर निर्धारित है।",
+  "Schedule swap keeps weekly total <= 48h.": "शिफ़्ट बदलने से साप्ताहिक कुल 48 घंटे की सीमा के भीतर रहता है।",
+  "9h spread-over <= 12h max.": "9 घंटे की कुल अवधि 12 घंटे की सीमा के भीतर है।",
+  "Clocked in 2 min early.": "आने का समय 2 मिनट पहले दर्ज हुआ।",
+  "Unpaired out-punch at 17:45 IST; cannot infer in-punch.": "17:45 IST के निकास रिकॉर्ड के लिए आने का समय तय नहीं किया जा सकता।",
+  "Cannot evaluate without start time.": "शुरू होने के समय के बिना जाँच संभव नहीं है।",
+  "Within weekly cap.": "साप्ताहिक सीमा के भीतर है।",
+  "Unscheduled shift with no manager note.": "शिफ़्ट निर्धारित नहीं थी और प्रबंधक की टिप्पणी उपलब्ध नहीं है।",
+  "Show": "दिखाएँ",
+  "Hide": "छिपाएँ",
+  "Manager": "प्रबंधक",
+  "Compliance": "अनुपालन",
+  "Payroll Admin": "वेतन प्रशासक",
+  "Email address is required.": "ईमेल पता आवश्यक है।",
+  "Please enter a valid email address (e.g., priya.menon@resolva.corp).": "मान्य ईमेल पता दर्ज करें (उदाहरण: priya.menon@resolva.corp)।",
+  "Blocked (Compliance breach)": "अनुपालन उल्लंघन के कारण रुका",
+  "Blocked (unpaired in-punch)": "आगमन रिकॉर्ड का जोड़ा नहीं, भुगतान रुका",
+  "Blocked (missing out-punch)": "निकास रिकॉर्ड नहीं, भुगतान रुका",
+  "Payable (Regular)": "भुगतान योग्य (नियमित)",
+  "First-in (07:30 IST) to last-out (20:45 IST) spans 13h 15m across a split shift. Policy prohibits adjusting valid kiosk punches to mask a statutory spread-over violation. Routed for manager compliance review.": "पहले आगमन (07:30 IST) से अंतिम निकास (20:45 IST) तक शिफ़्ट 13 घंटे 15 मिनट की है। नीति के अनुसार वैध कियोस्क रिकॉर्ड बदलकर वैधानिक सीमा के उल्लंघन को छिपाया नहीं जा सकता। प्रबंधक की अनुपालन समीक्षा के लिए भेजा गया।",
+  "Manager attestation required for statutory spread-over exception": "वैधानिक कुल-अवधि अपवाद के लिए प्रबंधक की पुष्टि आवश्यक है।",
+  "Maximum spread-over inclusive of rest intervals shall not exceed 12 hours in any day. True spread-over breaches cannot be edited away.": "विश्राम अवधि सहित शिफ़्ट की कुल अवधि किसी भी दिन 12 घंटे से अधिक नहीं होनी चाहिए। वास्तविक उल्लंघनों को संपादित करके नहीं हटाया जा सकता।",
+  "Paired with 18:00 IST proposed out-punch.": "प्रस्तावित 18:00 IST निकास रिकॉर्ड से जोड़ा गया।",
+  "Within policy.": "नीति के भीतर।",
+  "Within 9h daily limit.": "9 घंटे की दैनिक सीमा के भीतर।",
+  "Within 12h spread-over.": "12 घंटे की कुल अवधि के भीतर।",
+  "Infer scheduled shift end 18:00 IST.": "निर्धारित शिफ़्ट का अंत 18:00 IST माना गया।",
+  "Inferred scheduled end 18:00.": "निर्धारित अंत 18:00 माना गया।",
+  "Missing out-punches may be inferred within ±30 minutes of scheduled shift end.": "निकास रिकॉर्ड निर्धारित शिफ़्ट के अंत से ±30 मिनट के भीतर माना जा सकता है।",
+  "Imported CSV shift had unpaired clock-in; proposed scheduled end timestamp.": "CSV की शिफ़्ट में आगमन का जोड़ा नहीं था; निर्धारित अंत का समय प्रस्तावित किया गया।",
+  "Manual manager override logged with audit reason.": "प्रबंधक का सुधार कारण सहित ऑडिट में दर्ज हुआ।",
+  "Break window satisfied.": "विश्राम की अवधि पूरी हुई।",
+  "No overlapping shifts on work date.": "कार्य की तारीख पर कोई शिफ़्ट नहीं टकराती।",
+  "Out-punch cannot precede or equal clock-in.": "निकास का समय आगमन से पहले या उसके बराबर नहीं हो सकता।",
+  "Out-punch timestamp must be later than the clock-in timestamp.": "निकास का समय आगमन के समय के बाद होना चाहिए।",
+  "Enter a valid 24-hour time (HH:MM).": "24 घंटे प्रारूप में मान्य समय दर्ज करें (HH:MM)।",
+  "Blocked by deterministic validator: fix rule violations before saving.": "नियमों की जाँच ने रोका: सहेजने से पहले उल्लंघन ठीक करें।",
+  "Missing required employee_id or employee_name.": "कर्मचारी आईडी या नाम आवश्यक है।",
+  "Invalid work_date format (expected YYYY-MM-DD).": "कार्य की तारीख का प्रारूप गलत है (YYYY-MM-DD अपेक्षित)।",
+  "Invalid out_time (expected HH:MM or blank).": "निकास का समय गलत है (HH:MM या खाली)।",
+  "Backend offline — running on labeled synthetic fixtures (FE-01/FE-03)": "सर्वर उपलब्ध नहीं है; लेबल किए गए डेमो डेटा पर चल रहे हैं।",
+  "No comment": "कोई टिप्पणी नहीं",
+  "Standard daily regular hours shall not exceed 9 hours, with at least 1 hour rest after 5 hours of continuous work.": "सामान्य दैनिक नियमित घंटे 9 घंटे से अधिक नहीं होने चाहिए, और लगातार 5 घंटे काम के बाद कम से कम 1 घंटे का विश्राम होना चाहिए।",
 };
+
+const dur = (s: string) => s.replace(/(\d+(?:\.\d+)?)h/g, "$1 घंटे").replace(/(\d+)m\b/g, "$1 मिनट");
+const punchHi = (p: string) => {
+  const [t, kind] = p.split(" ");
+  const label: Record<string, string> = { in: "आगमन", out: "निकास", break_start: "विश्राम शुरू", break_end: "विश्राम समाप्त" };
+  return `${t} ${label[kind] ?? kind}`;
+};
+
+// Dynamic sentences from the backend and fixtures, matched by shape. `sub` translates captured text.
+type Template = [RegExp, (m: RegExpMatchArray, sub: (s: string) => string) => string];
+const templates: Template[] = [
+  [/^Clock-in recorded at (\S+) IST; no matching clock-out punch found\.$/, (m) => `आने का समय ${m[1]} IST दर्ज है। जाने का रिकॉर्ड नहीं मिला।`],
+  [/^Total spread-over is (.+) \((.+)\), exceeding the 12h Karnataka cap\.$/, (m) => `शिफ़्ट की कुल अवधि ${dur(m[1])} (${m[2]}) है, जो कर्नाटक की 12 घंटे की सीमा से अधिक है।`],
+  [/^Meal break started at (.+) into shift \(required before end of 5th hour\)\.$/, (m) => `भोजन का विश्राम शिफ़्ट शुरू होने के ${dur(m[1])} बाद शुरू हुआ। यह पाँचवें घंटे के अंत से पहले होना चाहिए।`],
+  [/^Projected weekly hours at (.+)h \((.+)h over 48h weekly cap\)\. Untrusted note contains override text\.$/, (m) => `अनुमानित साप्ताहिक समय ${m[1]} घंटे है, जो 48 घंटे की सीमा से ${m[2]} घंटे अधिक है। अपुष्ट टिप्पणी में नियम बदलने का निर्देश है।`],
+  [/^Single web out-punch at (\S+) IST with no clock-in punch and no schedule on file\.$/, (m) => `वेब पर केवल ${m[1]} IST का जाने का समय दर्ज है। आने का रिकॉर्ड और शेड्यूल उपलब्ध नहीं हैं।`],
+  [/^Spread-over (.+) \((.+)\)$/, (m) => `शिफ़्ट की कुल अवधि ${dur(m[1])} (${m[2]})`],
+  [/^Punches: \[(.*)\]$/, (m) => `दर्ज समय: ${m[1].split(", ").map(punchHi).join(", ")}`],
+  [/^Proposed add_punch (\S+) IST \(confidence (\S+), (\d+)\/(\d+) rules passed\)$/, (m) => `${m[1]} IST पर निकास रिकॉर्ड जोड़ने का प्रस्ताव (विश्वास ${m[2]}, ${m[3]}/${m[4]} नियम पूरे)`],
+  [/^Imported shift (\S+) missing out-punch\.$/, (m) => `आने का समय ${m[1]} है; निकास रिकॉर्ड नहीं है।`],
+  [/^Live kiosk clock-in at (\S+) IST without matching clock-out punch\.$/, (m) => `कियोस्क पर ${m[1]} IST पर आने का समय दर्ज हुआ; निकास रिकॉर्ड नहीं है।`],
+  [/^Detected unpaired clock-in at (\S+) IST on scheduled (.+) IST shift\. Proposed 18:00 IST out-punch passes all 6 deterministic rules\.$/, (m) => `${m[2]} IST की निर्धारित शिफ़्ट में ${m[1]} IST पर आने का रिकॉर्ड मिला, जिसका जोड़ा नहीं है। प्रस्तावित 18:00 IST निकास रिकॉर्ड सभी 6 नियमों की जाँच में सफल रहा।`],
+  [/^Paired with manager-edited (\S+) out-punch\.$/, (m) => `प्रबंधक द्वारा सुधारे गए ${m[1]} निकास रिकॉर्ड से जोड़ा गया।`],
+  [/^Net overtime (.+)h within cap\.$/, (m) => `अतिरिक्त समय ${m[1]} घंटे, सीमा के भीतर।`],
+  [/^Net overtime (.+)h exceeds daily cap\.$/, (m) => `अतिरिक्त समय ${m[1]} घंटे, दैनिक सीमा से अधिक।`],
+  [/^Spread-over (.+)h within (.+)h limit\.$/, (m) => `कुल अवधि ${m[1]} घंटे, ${m[2]} घंटे की सीमा के भीतर।`],
+  [/^Spread-over (.+)h exceeds (.+)h statutory limit\.$/, (m) => `कुल अवधि ${m[1]} घंटे, ${m[2]} घंटे की वैधानिक सीमा से अधिक।`],
+  [/^Rejected \((.+?)\): (.*)$/, (m, sub) => `अस्वीकृत (${m[1]}): ${sub(m[2])}`],
+  [/^\[Re-proposed on v(\d+)\] (.*)$/, (m, sub) => `[साक्ष्य v${m[1]} पर पुनः प्रस्ताव] ${sub(m[2])}`],
+];
 
 export const LanguageContext = createContext<UILang>("en");
 export function translate(lang: UILang, text: string): string {
-  return lang === "hi" ? (Object.hasOwn(hindi, text) ? hindi[text] : text) : text;
+  if (lang !== "hi") return text;
+  if (Object.hasOwn(hindi, text)) return hindi[text];
+  for (const [pattern, render] of templates) {
+    const match = text.match(pattern);
+    if (match) return render(match, (s) => translate(lang, s));
+  }
+  return text;
 }
 export function useTranslation() {
   const lang = useContext(LanguageContext);

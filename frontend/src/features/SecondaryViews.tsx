@@ -3,7 +3,10 @@ import { useTranslation } from "../lib/locale";
 import { AuditEvent, ExceptionItem, PolicyPack } from '../types/contracts';
 
 export function AuditView({ events }: { events: AuditEvent[] }) {
-  const { tr } = useTranslation();
+  const { lang, tr } = useTranslation();
+  const formatDate = new Intl.DateTimeFormat(lang, {
+    dateStyle: 'medium', timeStyle: 'medium', timeZone: 'UTC',
+  });
   const exportCsv = () => {
     const header = 'id,trace_id,actor_type,actor_name,action,entity_ref,before,after,ts\n';
     const rows = events
@@ -46,15 +49,22 @@ export function AuditView({ events }: { events: AuditEvent[] }) {
           <tbody>
             {events.map((e) => (
               <tr key={e.id}>
-                <td className="mono small">{e.ts}</td>
+                <td className="small" title={e.ts}>
+                  {Number.isFinite(Date.parse(e.ts)) ? (
+                    <time dateTime={e.ts}>{formatDate.format(new Date(e.ts))} UTC</time>
+                  ) : e.ts}
+                </td>
                 <td className="mono small">{e.trace_id}</td>
                 <td>
-                  <span className={e.actor_type === 'ai' ? 'badge-ai' : 'badge-neutral'}>{e.actor_name}</span>
+                  <span className={e.actor_type === 'ai' ? 'badge-ai' : 'badge-neutral'}>{e.actor_name.replace(/^(RulesEngine|ProposalPipeline|ValidatorGate)\b/, tr)}</span>
                 </td>
-                <td className="mono small"><strong>{tr(e.action)}</strong></td>
+                <td className="small" title={e.action}><strong>{tr(e.action)}</strong></td>
                 <td className="mono small">{e.entity_ref}</td>
                 <td className="small">
-                  <span className="muted">{e.before_summary}</span> → <strong>{e.after_summary}</strong>
+                  {e.before_summary && <span className="muted">{tr(e.before_summary)}</span>}
+                  {e.before_summary && e.after_summary && ' → '}
+                  {e.after_summary && <strong>{tr(e.after_summary)}</strong>}
+                  {!e.before_summary && !e.after_summary && tr('No change recorded')}
                 </td>
               </tr>
             ))}
@@ -70,7 +80,8 @@ export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: Excep
   const [empId, setEmpId] = useState('EMP-BLR-07');
   const [empName, setEmpName] = useState('Meera Krishnan');
   const [punchTime, setPunchTime] = useState('09:05');
-  const [note, setNote] = useState('Clocked in at Bengaluru store kiosk; forgot evening out-punch.');
+  const [editedNote, setNote] = useState<string>();
+  const note = editedNote ?? tr('Clocked in at Bengaluru store kiosk; forgot evening out-punch.');
 
   const handleIngest = (e: React.FormEvent) => {
     e.preventDefault();
@@ -210,11 +221,11 @@ export function PolicySettingsView({
               {policies.map((p) => (
                 <tr key={`${p.id}@${p.version}`}>
                   <td className="mono"><strong>{p.id}@{p.version}</strong></td>
-                  <td>{p.jurisdiction}</td>
-                  <td className="mono">{p.daily_regular_hours}{"" + tr("h /") + " "}{p.weekly_regular_hours}{tr("h")}</td>
-                  <td className="mono">{p.overtime_rate}x ({p.quarterly_ot_cap ? `${p.quarterly_ot_cap}h/qtr` : tr('no cap')})</td>
-                  <td className="mono">{p.rest_minutes}{"" + tr("m after") + " "}{p.rest_after_hours}{tr("h")}</td>
-                  <td className="mono">{p.max_spread_hours ? `${p.max_spread_hours}h` : tr('N/A')}</td>
+                  <td>{tr(p.jurisdiction)}</td>
+                  <td>{p.daily_regular_hours}{tr(" hours")} / {p.weekly_regular_hours}{tr(" hours")}</td>
+                  <td>{p.overtime_rate}× ({p.quarterly_ot_cap ? `${p.quarterly_ot_cap}${tr(" hours per quarter")}` : tr("no cap")})</td>
+                  <td>{p.rest_minutes}{tr(" min after ")}{p.rest_after_hours}{tr(" hours")}</td>
+                  <td>{p.max_spread_hours ? `${p.max_spread_hours}${tr(" hours")}` : tr('N/A')}</td>
                 </tr>
               ))}
             </tbody>
@@ -337,8 +348,8 @@ export function ImportPreviewView({ onImportValid }: { onImportValid: (items: Ex
                       {tr(r.valid ? 'VALID' : 'INVALID ROW')}
                     </span>
                   </td>
-                  <td className="small"><strong>{r.employee_name || '—'}</strong> ({r.employee_id || 'missing'})</td>
-                  <td className="mono small">{r.work_date} | {r.in_time} → {r.out_time || 'MISSING'}</td>
+                  <td className="small"><strong>{r.employee_name || '—'}</strong> ({r.employee_id || tr('Missing ID')})</td>
+                  <td className="small">{r.work_date} | {r.in_time || tr('Not recorded')} → {r.out_time || tr('Not recorded')}</td>
                   <td className="small">{r.valid ? tr('Ready for ingestion') : <span style={{ color: '#dc2626' }}>{tr(r.error ?? "")}</span>}</td>
                 </tr>
               ))}

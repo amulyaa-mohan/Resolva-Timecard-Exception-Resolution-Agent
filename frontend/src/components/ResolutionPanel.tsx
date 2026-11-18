@@ -98,7 +98,7 @@ export function ResolutionPanel({
             <span className={`badge badge-${item.severity}`}>
               {tr(item.severity === 'problem' ? 'PROBLEM (Blocks Pay)' : 'WARNING')}
             </span>
-            <span className="mono badge-neutral">{item.code}</span>
+            <span className="badge-neutral" title={item.code}>{tr(item.code)}</span>
             <span className="mono badge-neutral">{item.policy_pack_id}</span>
             <span className="mono badge-neutral">v{item.evidence_version}</span>
           </div>
@@ -106,7 +106,7 @@ export function ResolutionPanel({
             {item.employee_name} <span className="mono muted">({item.employee_id})</span>
           </h2>
           <p className="muted small">
-            {item.job} • {item.location}{" " + tr("• Work Date:") + " "}<span className="tnum">{item.work_date}</span> ({item.timezone})
+            {tr(item.job)} • {tr(item.location)}{" " + tr("• Work Date:") + " "}<span className="tnum">{item.work_date}</span> ({item.timezone})
           </p>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
@@ -189,7 +189,7 @@ export function ResolutionPanel({
                 <div key={idx} className="action-pill">
                   <code className="mono">{act.type}</code>
                   {act.new_ts && <strong className="mono"> → {act.new_ts}</strong>}
-                  <span>: {act.note}</span>
+                  <span>: {tr(act.note ?? '')}</span>
                 </div>
               ))}
             </div>
@@ -199,7 +199,7 @@ export function ResolutionPanel({
               <strong>{tr("Escalated — Missing Information:")}</strong>
               <ul>
                 {proposal.missing_information.map((m, i) => (
-                  <li key={i}>{m}</li>
+                  <li key={i}>{tr(m)}</li>
                 ))}
               </ul>
             </div>
@@ -209,7 +209,7 @@ export function ResolutionPanel({
             {proposal.citations.map((c) => (
               <div key={c.chunk_id} className="citation-item">
                 <span className="mono citation-id">{c.chunk_id}</span>
-                <p className="small">"{c.quote}"</p>
+                <p className="small">"{tr(c.quote)}"</p>
               </div>
             ))}
           </div>
@@ -223,7 +223,7 @@ export function ResolutionPanel({
             {activeRuleOutcomes.map((r) => (
               <div key={r.rule} className={`rule-row ${r.passed ? 'rule-pass' : 'rule-fail'}`}>
                 <span className="rule-icon">{tr(r.passed ? '✓ PASS' : '✕ FAIL')}</span>
-                <span className="mono rule-code">{r.rule}</span>
+                <span className="rule-code" title={r.rule}>{tr(r.rule)}</span>
                 <span className="small">{tr(r.detail)}</span>
               </div>
             ))}
@@ -240,7 +240,7 @@ export function ResolutionPanel({
           <label className="field-label">{tr("Audit Note (optional):")}<input type="text" placeholder={tr("e.g., Confirmed exit timestamp with security log")} value={comment} onChange={(e) => setComment(e.target.value)} className="input-field" />
           </label>
           {editCheck && !editCheck.valid && (
-            <div className="banner banner-error" role="alert">{editCheck.error}</div>
+            <div className="banner banner-error" role="alert">{tr(editCheck.error ?? '')}</div>
           )}
           <div className="button-row">
             <button type="button" className="btn-primary" disabled={!canDecide || !editCheck?.valid || submitting} onClick={() => handleSubmit('edited', { editedTime, comment })}>{tr("Save & Re-Validate Edit")}</button>

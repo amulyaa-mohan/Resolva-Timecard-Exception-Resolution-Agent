@@ -358,7 +358,14 @@ tr.inbox-row.selected { background: #eef2ff; }
 .marker-pin { width: 10px; height: 10px; border-radius: 50%; background: #0f172a; border: 2px solid #fff; }
 .timeline-marker.ai-proposed .marker-pin { background: var(--violet); box-shadow: 0 0 0 2px var(--violet-border); }
 .timeline-marker.manager-edit .marker-pin { background: var(--indigo); }
-.marker-label { font-size: 11px; font-variant-numeric: tabular-nums; background: rgba(255,255,255,0.92); padding: 0 4px; border-radius: 3px; white-space: nowrap; margin-top: 2px; }
+.timeline-events { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 10px 0 0; padding: 0; list-style: none; font-size: var(--text-meta-size); }
+.timeline-events li { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.timeline-events .ai-proposed { color: var(--violet); }
+.timeline-events .manager-edit { color: var(--indigo); }
+@media (max-width: 600px) {
+  .timeline-axis span:nth-child(even) { visibility: hidden; }
+}
+
 .timeline-axis { display: flex; justify-content: space-between; font-size: var(--text-meta-size); line-height: var(--text-meta-lh); color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* Recorded Punches Card (Observed Facts Redesign) */
