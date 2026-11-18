@@ -23,7 +23,7 @@ test('a manager signs in, drafts, approves, and the server records it', async ({
   await page.getByRole('button', { name: /Sign In/i }).click();
   await expect(page.getByText('LIVE BACKEND')).toBeVisible();
 
-  await page.getByText('MISSING_PUNCH').first().click();
+  await page.getByText('Missing punch').first().click();
   await page.getByRole('button', { name: /Draft with AI/i }).click();
   await expect(page.getByText(/6\/6 Passed/i)).toBeVisible();
 

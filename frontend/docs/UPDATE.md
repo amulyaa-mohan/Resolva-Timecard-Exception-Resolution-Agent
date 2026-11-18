@@ -172,3 +172,20 @@ Append entries; preserve other developers' history. Use repository-relative path
 - Verified: Policies and Kiosk screens show no untranslated sentences in Hindi.
 - Checks: `tsc --noEmit` and `vite build` pass.
 
+### 2026-11-18 — C V Jayanth — PR #17 merged with main: real backend wiring on the current UI
+
+- Kept main's UI (FE-07 review states, FE-08 settings, Hindi, layout and palette fixes) and replaced its
+  data layer with the branch's real API client (`frontend/src/lib/api.ts`): manager-token sign-in, cases
+  from `GET /exceptions`, detail and timecard, drafts from `POST /exceptions/{id}/proposal`, decisions to
+  `POST /exceptions/{id}/decisions`, per-case audit, and real import preview/commit.
+- Removed every path that reported success without the server: the decision fallback (it called a route
+  the backend does not have and treated failure as success), the local import simulation, the kiosk's
+  fabricated exception and audit event, the random "Draft with AI" proposal, the "Simulate Stale" button,
+  the local undo record and the `+12` in payroll readiness. A failed write now shows "Nothing was saved".
+- Manual edits get a format check only; the backend's validator decides on save.
+- FE-08 settings are now wired: the AI toggle and threshold persist in this browser.
+- `MISSING_PUNCH` is labelled "Missing punch" (it covers a missing clock-in too); the audit view reuses the
+  same labels. Removed dead fixtures and 93 unreferenced translation keys; added Hindi for the new text.
+- Verified: `tsc --noEmit --noUnusedLocals --noUnusedParameters`, `vite build`, and a 28-check replay of every
+  request `api.ts` makes against a seeded PostgreSQL backend (sign-in, 401, list, detail, draft, 409 stale,
+  approve, duplicate approve, audit, import preview, kiosk import, duplicate punch).

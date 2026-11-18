@@ -1,5 +1,5 @@
 import { LanguageContext, translate } from "./lib/locale";
-﻿import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { LoginScreen } from './components/LoginScreen';
 import { computeProposalState, getHumanExceptionTitle, ResolutionPanel } from './components/ResolutionPanel';
@@ -7,19 +7,18 @@ import { AuditView, ImportPreviewView, KioskView, PolicySettingsView } from './f
 import {
   ApiError,
   checkBackendHealth,
-  hasValidSession,
-  signOut,
   editedTimestamp,
   fetchAudit,
   fetchCase,
   fetchExceptions,
+  hasValidSession,
   requestProposal,
+  signOut,
   submitDecision,
 } from './lib/api';
 import { INITIAL_POLICY_PACKS } from './lib/fixtures';
+import { DEFAULT_HARNESS_SETTINGS, loadHarnessSettings, saveHarnessSettings } from './lib/settings';
 import { AuditEvent, ExceptionItem, Role, UILang } from './types/contracts';
-import { buildAuditRecord, checkBackendHealth, loadInitialData, submitDecisionWithFallback } from './lib/api';
-import { AuditEvent, ExceptionItem, LLMProposal, Role, UILang } from './types/contracts';
 import './styles.css';
 
 type Tab = 'inbox' | 'escalations' | 'import' | 'audit' | 'kiosk' | 'policies';
@@ -53,17 +52,16 @@ function App() {
   const [exceptions, setExceptions] = useState<ExceptionItem[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('inbox');
   const [role, setRole] = useState<Role>('manager');
   const [lang, setLang] = useState<UILang>(() => localStorage.getItem('resolva-language') === 'hi' ? 'hi' : 'en');
-  const [aiEnabled, setAiEnabled] = useState(true);
-  const [confidenceThreshold, setConfidenceThreshold] = useState(0.75);
+  const [aiEnabled, setAiEnabled] = useState(() => loadHarnessSettings().aiEnabled);
+  const [confidenceThreshold, setConfidenceThreshold] = useState(() => loadHarnessSettings().confidenceThreshold);
   const [locationFilter, setLocationFilter] = useState('ALL');
   const [severityFilter, setSeverityFilter] = useState('ALL');
   const [healthMsg, setHealthMsg] = useState('Checking backend connection...');
-  const [toast, setToast] = useState<{ msg: string; undoItem?: ExceptionItem } | null>(null);
+  const [toast, setToast] = useState<{ msg: string } | null>(null);
 
   const t = LABELS[lang];
   const tr = (text: string) => translate(lang, text);
@@ -73,20 +71,23 @@ function App() {
     localStorage.setItem('resolva-language', lang);
   }, [lang]);
 
+  useEffect(() => {
+    checkBackendHealth().then((h) => setHealthMsg(h.message));
+  }, []);
+
+  // These are this browser's review preferences, not server configuration (FE-08).
+  useEffect(() => {
+    saveHarnessSettings({ ...DEFAULT_HARNESS_SETTINGS, aiEnabled, confidenceThreshold });
+  }, [aiEnabled, confidenceThreshold]);
+
   const reload = async (): Promise<void> => {
-    setLoading(true);
     try {
       const items = await fetchExceptions();
-      setExceptions((prev) =>
-        // keep any detail already fetched for a case, refresh its summary fields
-        items.map((item) => ({ ...prev.find((p) => p.id === item.id), ...item }))
-      );
-      setSelectedId((current) => (current && items.some((i) => i.id === current) ? current : items[0]?.id ?? null));
+      // keep any detail already fetched for a case, refresh its summary fields
+      setExceptions((prev) => items.map((item) => ({ ...prev.find((p) => p.id === item.id), ...item })));
       setLoadError(null);
     } catch (error) {
       setLoadError(describeError(error));
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -96,8 +97,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAuthenticated) return;
-    void reload();
+    if (isAuthenticated) void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
@@ -108,9 +108,7 @@ function App() {
     const id = selectedId;
     fetchCase(id)
       .then((detail) => {
-        if (!cancelled) {
-          setExceptions((prev) => prev.map((ex) => (ex.id === id ? { ...ex, ...detail } : ex)));
-        }
+        if (!cancelled) setExceptions((prev) => prev.map((ex) => (ex.id === id ? { ...ex, ...detail } : ex)));
       })
       .catch((error) => !cancelled && setToast({ msg: describeError(error) }));
     fetchAudit(id)
@@ -120,10 +118,6 @@ function App() {
       cancelled = true;
     };
   }, [isAuthenticated, selectedId]);
-
-  useEffect(() => {
-    checkBackendHealth().then((h) => setHealthMsg(h.message));
-  }, []);
 
   const visibleItems = useMemo(() => {
     return exceptions.filter((e) => {
@@ -204,7 +198,7 @@ function App() {
     item: ExceptionItem,
     decision: 'approved' | 'edited' | 'rejected',
     details: { editedTime?: string; reasonCode?: string; comment?: string }
-  ) => {
+  ): Promise<void> => {
     // The server re-validates against fresh evidence and is the only thing that can approve.
     // Anything other than a 2xx leaves the case untouched and is reported as a failure.
     const actions =
@@ -232,15 +226,14 @@ function App() {
       });
       setToast({ msg: `${item.id} ${result.status.toUpperCase()} — recorded by the server.` });
       await reload();
-      const events = await fetchAudit(item.id).catch(() => []);
-      setAuditEvents(events);
+      setAuditEvents(await fetchAudit(item.id).catch(() => []));
     } catch (error) {
       // No state change: nothing was saved, so nothing may look saved.
       setToast({ msg: describeError(error) });
     }
   };
 
-  const handleCheckEvidence = async (itemId: string) => {
+  const handleCheckEvidence = async (itemId: string): Promise<void> => {
     try {
       const fresh = await fetchCase(itemId);
       setExceptions((prev) =>
@@ -256,10 +249,7 @@ function App() {
     }
   };
 
-  const handleRepropose = async (itemId: string) => {
-    const item = exceptions.find((e) => e.id === itemId);
-    if (!item) return;
-    setToast({ msg: `${itemId}: asking the model for a draft...` });
+  const handleRepropose = async (itemId: string): Promise<void> => {
     try {
       const outcome = await requestProposal(itemId);
       setExceptions((prev) =>
@@ -282,73 +272,6 @@ function App() {
     } catch (error) {
       setToast({ msg: describeError(error) });
     }
-  };
-
-  // A decision cannot be undone from the browser: corrections and audit events are append-only.
-  // Reversing one is a new, audited decision, which is not built yet.
-  const handleUndo = () => setToast(null);
-
-  const handleDraftWithAi = (itemId: string) => {
-    setExceptions((prev) =>
-      prev.map((ex) => {
-        if (ex.id !== itemId) return ex;
-        if (ex.proposal) return ex;
-        const schedEnd = ex.schedule?.end ? ex.schedule.end : '2026-11-17T18:00:00+05:30';
-        const newProposal: LLMProposal = {
-          id: `PRP-${Math.floor(600 + Math.random() * 300)}`,
-          exception_id: ex.id,
-          decision: 'propose',
-          actions: [
-            {
-              type: 'add_punch',
-              new_ts: schedEnd,
-              note: `Add out-punch aligned with scheduled shift end (${schedEnd.slice(11, 16)}).`,
-            },
-          ],
-          rationale: `AI draft: Evaluated shift pattern and punch timeline against ${ex.policy_pack_id}. Inferred out-punch at scheduled shift end.`,
-          citations: [
-            {
-              chunk_id: `${ex.policy_pack_id}#sec-4.2`,
-              quote: 'Missing punches may be inferred from scheduled shift when corroborated by historical pattern.',
-            },
-          ],
-          confidence: 0.92,
-          missing_information: [],
-          model_id: 'qwen2.5-7b-instruct',
-          prompt_hash: 'sha256:a1b2c3d4',
-          evidence_version: ex.evidence_version,
-          validator_passed: true,
-          rule_outcomes: [
-            { rule: 'MISSING_PUNCH', passed: true, detail: 'Punches paired after draft fix.' },
-            { rule: 'OVERLAPPING_SHIFT', passed: true, detail: 'No overlap.' },
-            { rule: 'MEAL_BREAK_BREACH', passed: true, detail: 'Compliant.' },
-            { rule: 'OVERTIME_RISK', passed: true, detail: 'Within daily limits.' },
-            { rule: 'SPREAD_OVER_BREACH', passed: true, detail: 'Within statutory spread.' },
-            { rule: 'SCHEDULE_DEVIATION', passed: true, detail: 'Aligned with schedule.' },
-          ],
-        };
-        return {
-          ...ex,
-          status: 'proposed',
-          proposal: newProposal,
-        };
-      })
-    );
-    setToast({ msg: `${itemId}: Policy draft generated with AI and verified by validator.` });
-  };
-
-  const handleUndo = () => {
-    if (!toast?.undoItem) return;
-    const restored = toast.undoItem;
-    const reversalAudit = buildAuditRecord({
-      role,
-      item: restored,
-      decision: 'rejected',
-      summary: `Audited reversal of prior decision on ${restored.id}`,
-    });
-    setExceptions((prev) => prev.map((ex) => (ex.id === restored.id ? restored : ex)));
-    setAuditEvents((prev) => [reversalAudit, ...prev]);
-    setToast(null);
   };
 
   const eligibleForBulk = useMemo(
@@ -375,8 +298,8 @@ function App() {
   const openProblems = exceptions.filter((e) => e.status !== 'resolved' && e.severity === 'problem').length;
   const openWarnings = exceptions.filter((e) => e.status !== 'resolved' && e.severity === 'warning').length;
   const resolvedCount = exceptions.filter((e) => e.status === 'resolved').length;
-  // Share of this manager's exceptions that are resolved; no padding, no invented baseline.
-  const readinessPct = exceptions.length ? Math.round((resolvedCount / exceptions.length) * 100) : 0;
+  const clearedCount = resolvedCount + exceptions.filter((e) => e.status === 'dismissed').length;
+  const readinessPct = exceptions.length ? Math.round((clearedCount / exceptions.length) * 100) : 0;
 
   if (!isAuthenticated) {
     return (
@@ -403,9 +326,7 @@ function App() {
       <header className="topbar">
         <div className="brand">
           <span className="brand-title">Resolva</span>
-          <span className="fixture-pill">LIVE BACKEND</span>
-          <span className="fixture-pill">{tr("SYNTHETIC FIXTURES (FE-01..FE-05)")}</span>
-
+          <span className="fixture-pill">{tr("LIVE BACKEND")}</span>
         </div>
 
         <nav className="nav-tabs" aria-label={tr("Primary views")}>
@@ -465,6 +386,11 @@ function App() {
       </div>
 
       <main className="container">
+        {loadError && (
+          <div className="banner banner-error" role="alert" style={{ marginBottom: 16 }}>
+            {tr(loadError)}
+          </div>
+        )}
         {!aiEnabled && (
           <div className="banner banner-warn" style={{ marginBottom: 16 }}>
             <strong>{tr("AI Unavailable / Kill-Switch Engaged:")}</strong>{" " + tr("Showing deterministic rules-only results. Manual manager edits remain active.") + ""}</div>
@@ -501,11 +427,6 @@ function App() {
               <section className="panel-card" aria-label={tr("Exception list")}>
                 <div className="toolbar">
                   <div className="filter-group">
-                    <select className="role-select" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} aria-label="Filter by location">
-                      <option value="ALL">All Locations</option>
-                      {Array.from(new Set(exceptions.map((e) => e.location).filter(Boolean))).sort().map((site) => (
-                        <option key={site} value={site}>{site}</option>
-                      ))}
                     <select className="role-select" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} aria-label={tr("Filter by location")}>
                       <option value="ALL">{tr("All Locations")}</option>
                       <option value="Bengaluru (BLR-01)">{tr("Bengaluru (BLR-01)")}</option>
@@ -613,24 +534,6 @@ function App() {
                                 <div className="small muted">{tr(item.location)} • {item.work_date}</div>
                               </td>
                               <td>
-                                <div className="mono small"><strong>{item.code}</strong> {item.policy_pack_id ? <span className="muted">({item.policy_pack_id})</span> : null}</div>
-                                <div className="small muted">{item.summary}</div>
-                              </td>
-                              <td>
-                                {!aiEnabled ? (
-                                  <span className="badge-neutral">Rules-Only</span>
-                                ) : item.stale_warning ? (
-                                  <span className="badge-escalated">Stale (409)</span>
-                                ) : passed ? (
-                                  <span className="badge-ai">AI Draft ({Math.round((item.proposal?.confidence ?? 0) * 100)}%)</span>
-                                ) : item.draft_status === 'escalated' ? (
-                                  <span className="badge-escalated" title={item.draft_reasons?.join(' ')}>Needs manager</span>
-                                ) : item.draft_status === 'blocked' ? (
-                                  <span className="badge-escalated" title={item.draft_reasons?.join(' ')}>Blocked by rules</span>
-                                ) : (
-                                  <span className="badge-neutral">No draft yet</span>
-                                )}
-
                                 <div style={{ fontWeight: 600, color: 'var(--text)' }}>
                                   {tr(getHumanExceptionTitle(item.code))}
                                 </div>
@@ -664,9 +567,8 @@ function App() {
                 activeTab={tab}
                 totalEscalations={totalEscalationsInSystem}
                 onClose={() => setSelectedId(null)}
-                onSimulateStale={handleCheckEvidence}
+                onCheckEvidence={handleCheckEvidence}
                 onRepropose={handleRepropose}
-                onDraftWithAi={handleDraftWithAi}
                 onDecide={handleDecide}
               />
             </div>
@@ -675,14 +577,8 @@ function App() {
 
         {tab === 'import' && (
           <ImportPreviewView
-            onImported={(message) => {
-              setToast({ msg: message });
-              void reload();
             role={role}
-            onImportValid={(newItems) => {
-              setExceptions((prev) => [...newItems, ...prev]);
-              if (newItems[0]) setSelectedId(newItems[0].id);
-            }}
+            onImported={() => void reload()}
             onOpenException={(excId) => {
               setSelectedId(excId);
               setTab('inbox');
@@ -694,7 +590,6 @@ function App() {
           <AuditView
             events={auditEvents}
             selectedCase={selectedItem}
-            role={role}
             onOpenCase={(excId) => {
               setSelectedId(excId);
               setTab('inbox');
@@ -704,9 +599,9 @@ function App() {
 
         {tab === 'kiosk' && (
           <KioskView
-            employees={Array.from(
-              new Map(exceptions.map((e) => [e.employee_id, e.employee_name])).entries()
-            ).map(([id, name]) => ({ id, name }))}
+            employees={Array.from(new Map(exceptions.map((e) => [e.employee_id, e.employee_name])).entries()).map(
+              ([id, name]) => ({ id, name })
+            )}
             onPunchSent={(message) => {
               setToast({ msg: message });
               void reload();
@@ -728,9 +623,6 @@ function App() {
       {toast && (
         <div className="toast" role="status" aria-live="polite">
           <span>{tr(toast.msg)}</span>
-          {toast.undoItem && (
-            <button type="button" className="btn-secondary" style={{ padding: '4px 10px' }} onClick={handleUndo}>{tr("Undo (Audited Reversal)")}</button>
-          )}
           <button type="button" className="btn-ghost" style={{ color: '#fff' }} onClick={() => setToast(null)}>
             ✕
           </button>

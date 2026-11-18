@@ -1,33 +1,17 @@
-
-﻿import { useState } from 'react';
-import { ApiError, commitImport, ImportKind, ImportPreviewResult, previewImport, sendKioskPunch } from '../lib/api';
-import { AuditEvent, ExceptionItem, PolicyPack } from '../types/contracts';
-
-/**
- * One CSV cell. Quoting alone does not stop a spreadsheet running a formula: a value that
- * starts with = + - @ (or a tab or carriage return) is executed when the file is opened, and
- * audit fields carry user-supplied text such as a manager's rejection reason. OWASP's rule is to
- * prefix such a value with an apostrophe so it is read as text.
- */
-export function csvCell(value: unknown): string {
-  let text = String(value ?? '');
-  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
-  return `"${text.replace(/"/g, '""')}"`;
-}
-
-export function AuditView({ events }: { events: AuditEvent[] }) {
-=======
 import { useEffect, useId, useMemo, useState } from 'react';
 import {
-  commitImportWithFallback,
+  ApiError,
+  commitImport,
   detectImportFormat,
-  fetchCaseAuditWithFallback,
+  fetchAudit,
   ImportCommitSummary,
   ImportKind,
   ImportPreviewItem,
   ImportPreviewSummary,
-  previewImportWithFallback,
+  previewImport,
+  sendKioskPunch,
 } from '../lib/api';
+import { getHumanExceptionTitle } from '../components/ResolutionPanel';
 import { useTranslation } from '../lib/locale';
 import { AuditEvent, ExceptionItem, PolicyPack, Role } from '../types/contracts';
 
@@ -47,14 +31,6 @@ const FRIENDLY_EVENT_LABELS: Record<string, string> = {
   USER_LOGIN: 'Signed in',
 };
 
-const EXCEPTION_CODE_LABELS: Record<string, string> = {
-  MISSING_PUNCH: 'Missing clock-out',
-  SPREAD_OVER_BREACH: 'Spread-over breach',
-  MEAL_BREAK_BREACH: 'Late meal break',
-  OVERTIME_RISK: 'Overtime risk',
-  OVERLAPPING_SHIFT: 'Overlapping shift',
-  SCHEDULE_DEVIATION: 'Schedule deviation',
-};
 
 function resolveAuditTimezone(rawTz?: string): { iana: string; shortLabel: string } {
   const tz = (rawTz ?? '').trim();
@@ -170,12 +146,10 @@ async function copyTextSafe(text: string): Promise<void> {
 export function AuditView({
   events,
   selectedCase = null,
-  role = 'manager',
   onOpenCase,
 }: {
   events: AuditEvent[];
   selectedCase?: ExceptionItem | null;
-  role?: Role;
   onOpenCase?: (exceptionId: string) => void;
 }) {
   const { tr } = useTranslation();
@@ -189,11 +163,15 @@ export function AuditView({
     setScope(selectedCase ? 'case' : 'all');
     setServerCaseEvents(null);
     if (selectedCase) {
-      fetchCaseAuditWithFallback(selectedCase.id, role).then((rows) => {
-        if (rows && rows.length > 0) setServerCaseEvents(rows);
-      });
+      let cancelled = false;
+      fetchAudit(selectedCase.id)
+        .then((rows) => !cancelled && setServerCaseEvents(rows))
+        .catch(() => undefined); // the loaded events stay on screen; nothing is invented
+      return () => {
+        cancelled = true;
+      };
     }
-  }, [selectedCase?.id, role]);
+  }, [selectedCase?.id]);
 
   const caseFilteredEvents = useMemo(() => {
     if (!selectedCase) return events;
@@ -209,16 +187,12 @@ export function AuditView({
   const displayedEvents = scope === 'case' && selectedCase ? caseFilteredEvents : events;
   const tzInfo = resolveAuditTimezone(selectedCase?.timezone);
 
-
   const exportCsv = () => {
     const header = 'id,trace_id,actor_type,actor_name,action,entity_ref,before,after,ts\n';
     const rows = displayedEvents
       .map((e) =>
         [e.id, e.trace_id, e.actor_type, e.actor_name, e.action, e.entity_ref, e.before_summary, e.after_summary, e.ts]
-          .map((v) => csvCell(v))
-
           .map(sanitizeCsvCell)
-
           .join(',')
       )
       .join('\n');
@@ -244,7 +218,7 @@ export function AuditView({
   };
 
   const caseReasonLabel = selectedCase
-    ? EXCEPTION_CODE_LABELS[selectedCase.code] ?? selectedCase.code.replace(/_/g, ' ')
+    ? getHumanExceptionTitle(selectedCase.code)
     : '';
   const caseWorkDateLabel = selectedCase ? formatWorkDateLabel(selectedCase.work_date, tzInfo.iana) : '';
 
@@ -517,11 +491,12 @@ const FRIENDLY_PUNCH_EVENT: Record<string, string> = {
 };
 
 export function ImportPreviewView({
-  onImportValid,
+  onImported,
   role = 'manager',
   onOpenException,
 }: {
-  onImportValid: (items: ExceptionItem[]) => void;
+  /** Called after the server accepted an import, so the inbox can reload what it detected. */
+  onImported: () => void;
   role?: Role;
   onOpenException?: (exceptionId: string) => void;
 }) {
@@ -580,15 +555,14 @@ export function ImportPreviewView({
     setPreviewing(true);
     setCommitError(null);
     setCommitResult(null);
-    const summary = await previewImportWithFallback({
-      kind,
-      format: detectedFormat,
-      content: rawInput,
-      role,
-    });
-    setPreview(summary);
-    setAllowPartial(false);
-    setPreviewing(false);
+    try {
+      setPreview(await previewImport({ kind, format: detectedFormat, content: rawInput }));
+      setAllowPartial(false);
+    } catch (error) {
+      setCommitError(error instanceof ApiError ? error.detail : 'The preview could not be loaded.');
+    } finally {
+      setPreviewing(false);
+    }
   };
 
   const hasCoexistingValidAndInvalid = Boolean(preview && preview.valid > 0 && preview.invalid > 0);
@@ -617,22 +591,14 @@ export function ImportPreviewView({
     if (!preview || !canCommit || committing) return;
     setCommitting(true);
     setCommitError(null);
-    const outcome = await commitImportWithFallback({
-      kind,
-      format: detectedFormat,
-      content: rawInput,
-      allowPartial,
-      preview,
-      role,
-    });
-    setCommitting(false);
-    if (!outcome.ok || !outcome.result) {
-      setCommitError(outcome.error ?? 'Import could not be completed.');
-      return;
-    }
-    setCommitResult(outcome.result);
-    if (outcome.result.created_exceptions.length > 0) {
-      onImportValid(outcome.result.created_exceptions);
+    try {
+      setCommitResult(await commitImport({ kind, format: detectedFormat, content: rawInput, allowPartial }));
+      onImported();
+    } catch (error) {
+      // Nothing was saved, so nothing is shown as saved.
+      setCommitError(error instanceof ApiError ? error.detail : 'Import could not be completed. Nothing was saved.');
+    } finally {
+      setCommitting(false);
     }
   };
 
@@ -708,11 +674,11 @@ export function ImportPreviewView({
           <li className={currentStep === 1 ? 'step-item active' : 'step-item done'} aria-current={currentStep === 1 ? 'step' : undefined}>
             {tr("1. Paste data")}
           </li>
-          <li aria-hidden="true" className="step-sep">â†’</li>
+          <li aria-hidden="true" className="step-sep">→</li>
           <li className={currentStep === 2 ? 'step-item active' : currentStep > 2 ? 'step-item done' : 'step-item'} aria-current={currentStep === 2 ? 'step' : undefined}>
             {tr("2. Review rows")}
           </li>
-          <li aria-hidden="true" className="step-sep">â†’</li>
+          <li aria-hidden="true" className="step-sep">→</li>
           <li className={currentStep === 3 ? 'step-item active' : 'step-item'} aria-current={currentStep === 3 ? 'step' : undefined}>
             3. Import
           </li>
@@ -793,12 +759,17 @@ export function ImportPreviewView({
             disabled={!rawInput.trim() || previewing}
             onClick={handlePreview}
           >
-            {previewing ? 'Previewing”¦' : 'Preview rows'}
+            {previewing ? tr('Previewing…') : tr('Preview rows')}
           </button>
           {!rawInput.trim() && (
-            <span className="small muted">Paste CSV or JSON above, or click “Load sample”.</span>
+            <span className="small muted">{tr('Paste CSV or JSON above, or click “Load sample”.')}</span>
           )}
         </div>
+        {!preview && commitError && (
+          <div className="banner banner-error" role="alert" style={{ marginTop: 10 }}>
+            {commitError}
+          </div>
+        )}
       </div>
 
       {preview && (
@@ -955,7 +926,7 @@ export function ImportPreviewView({
                 onClick={handleCommit}
               >
                 {committing
-                  ? 'Importing”¦'
+                  ? 'Importing…'
                   : `Import ${preview.valid} ${preview.valid === 1 ? 'row' : 'rows'}`}
               </button>
             </div>
@@ -983,7 +954,7 @@ export function ImportPreviewView({
             </strong>
             <span>
               {' '}
-              · Skipped {commitResult.skipped} ({commitResult.duplicates}{' '}
+              · Skipped {commitResult.invalid + commitResult.duplicates} ({commitResult.duplicates}{' '}
               {commitResult.duplicates === 1 ? 'duplicate' : 'duplicates'}, {commitResult.invalid} invalid)
             </span>
             <span className="muted"> · Batch </span>
@@ -999,7 +970,7 @@ export function ImportPreviewView({
                   className="btn-secondary"
                   onClick={() => onOpenException(excId)}
                 >
-                  Open {excId} in Inbox â†’
+                  Open {excId} in Inbox →
                 </button>
               ))}
             </div>
@@ -1009,7 +980,6 @@ export function ImportPreviewView({
     </section>
   );
 }
-
 export function KioskView({
   employees,
   onPunchSent,
@@ -1017,6 +987,7 @@ export function KioskView({
   employees: { id: string; name: string }[];
   onPunchSent: (message: string) => void;
 }) {
+  const { tr } = useTranslation();
   const [empId, setEmpId] = useState('');
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [punchTime, setPunchTime] = useState('09:05');
@@ -1024,15 +995,6 @@ export function KioskView({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selected = empId || employees[0]?.id || '';
-
-export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: ExceptionItem) => void }) {
-  const { tr } = useTranslation();
-  const [empId, setEmpId] = useState('EMP-BLR-07');
-  const [empName, setEmpName] = useState('Meera Krishnan');
-  const [punchTime, setPunchTime] = useState('09:05');
-  const [editedNote, setNote] = useState<string>();
-  const note = editedNote ?? tr('Clocked in at Bengaluru store kiosk; forgot evening out-punch.');
-
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1043,11 +1005,7 @@ export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: Excep
       const found = result.detected_exception_ids.length
         ? `Detection raised ${result.detected_exception_ids.length} exception(s).`
         : 'Detection raised nothing new.';
-      onPunchSent(
-        result.inserted
-          ? `Punch stored (immutable). ${found}`
-          : 'That punch was already on file, so nothing changed.'
-      );
+      onPunchSent(result.inserted ? `Punch stored. ${found}` : 'That punch was already on file, so nothing changed.');
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : 'The punch was not sent.');
     } finally {
@@ -1056,20 +1014,17 @@ export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: Excep
   };
 
   return (
-
-    <div className="panel-card" style={{ maxWidth: 640, padding: 20 }}>
-      <h2 style={{ marginTop: 0 }}>Kiosk Punch Simulator</h2>
+    <div className="panel-card kiosk-card">
+      <h2 className="kiosk-title">{tr("Kiosk Punch Simulator")}</h2>
       <p className="muted">
-        Sends one raw clock event to the backend through the same import path a kiosk feed would use.
-        The server stores it as an immutable punch and re-runs the rules for that day. Nothing is
-        invented here: whatever appears in the inbox was detected by the backend.
+        {tr("Sends one raw clock event to the backend through the same import path a kiosk feed would use. The server stores it as an immutable punch and re-runs the rules for that day.")}
       </p>
       {employees.length === 0 ? (
-        <div className="banner banner-error">No employees are visible to you yet.</div>
+        <div className="banner banner-error">{tr("No employees are visible to you yet.")}</div>
       ) : (
-        <form onSubmit={handleSend} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <form onSubmit={handleSend} className="kiosk-form">
           <label className="field-label">
-            Employee:
+            {tr("Employee:")}
             <select className="input-field" value={selected} onChange={(e) => setEmpId(e.target.value)}>
               {employees.map((emp) => (
                 <option key={emp.id} value={emp.id}>
@@ -1079,42 +1034,28 @@ export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: Excep
             </select>
           </label>
           <label className="field-label">
-            Local date:
+            {tr("Local date:")}
             <input type="date" className="input-field mono" value={date} onChange={(e) => setDate(e.target.value)} required />
           </label>
           <label className="field-label">
-            Local time (employee's timezone):
+            {tr("Local time (employee's timezone):")}
             <input type="time" className="input-field mono" value={punchTime} onChange={(e) => setPunchTime(e.target.value)} required />
           </label>
           <label className="field-label">
-            Event:
+            {tr("Event:")}
             <select className="input-field" value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
-              <option value="in">Clock in</option>
-              <option value="out">Clock out</option>
-              <option value="break_start">Break start</option>
-              <option value="break_end">Break end</option>
+              <option value="in">{tr("Clock in")}</option>
+              <option value="out">{tr("Clock out")}</option>
+              <option value="break_start">{tr("Break started")}</option>
+              <option value="break_end">{tr("Break ended")}</option>
             </select>
           </label>
-          {error && <div className="banner banner-error" role="alert">{error}</div>}
+          {error && <div className="banner banner-error" role="alert">{tr(error)}</div>}
           <button type="submit" className="btn-primary" disabled={busy}>
-            {busy ? 'Sending...' : 'Send punch to backend'}
+            {busy ? tr("Sending...") : tr("Send punch to backend")}
           </button>
         </form>
       )}
-    <div className="panel-card kiosk-card">
-      <h2 className="kiosk-title">{tr("Kiosk Punch Simulator (Live Event Demo)")}</h2>
-      <p className="muted">{tr("Simulates a raw immutable punch event entering the deterministic rules detector and routing an AI-drafted proposal into the Manager Inbox.")}</p>
-      <form onSubmit={handleIngest} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <label className="field-label">{tr("Employee ID:")}<input className="input-field mono" value={empId} onChange={(e) => setEmpId(e.target.value)} required />
-        </label>
-        <label className="field-label">{tr("Employee Name:")}<input className="input-field" value={empName} onChange={(e) => setEmpName(e.target.value)} required />
-        </label>
-        <label className="field-label">{tr("Clock-In Time (IST):")}<input type="time" className="input-field mono" value={punchTime} onChange={(e) => setPunchTime(e.target.value)} required />
-        </label>
-        <label className="field-label">{tr("Employee Note (Untrusted Evidence):")}<input className="input-field" value={note} onChange={(e) => setNote(e.target.value)} />
-        </label>
-        <button type="submit" className="btn-primary">{tr("Post Raw Punch & Trigger Detection")}</button>
-      </form>
     </div>
   );
 }
@@ -1173,174 +1114,17 @@ export function PolicySettingsView({
               {policies.map((p) => (
                 <tr key={`${p.id}@${p.version}`}>
                   <td className="mono"><strong>{p.id}@{p.version}</strong></td>
-                  <td>{p.jurisdiction}</td>
-                  <td className="mono">{p.daily_regular_hours}h / {p.weekly_regular_hours}h</td>
-                  <td className="mono">{p.overtime_rate}x ({p.quarterly_ot_cap ? `${p.quarterly_ot_cap}h/qtr` : 'no cap'})</td>
-                  <td className="mono">{p.rest_minutes}m after {p.rest_after_hours}h</td>
-                  <td className="mono">{p.max_spread_hours ? `${p.max_spread_hours}h` : 'N/A'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const SAMPLE_CSV = `employee_id,employee_name,work_date,in_time,out_time,location
-EMP-BLR-11,Nandini Rao,2026-11-17,09:00,,Bengaluru (BLR-01)
-EMP-BLR-12,Karthik Hegde,2026-11-17,09:15,18:10,Bengaluru (BLR-02)
-,Unknown Worker,2026-11-17,09:00,18:00,Bengaluru (BLR-01)
-EMP-AUS-09,Hannah Brooks,11/17/2026,08:00,17:00,Austin (AUS-01)`;
-
-const SAMPLES: Record<ImportKind, string> = {
-  punches:
-    'employee_id,timestamp,type,source_event_id\nE-DEMO-1,2026-11-16 09:00,in,sample-1\nE-DEMO-1,2026-11-16 13:00,break_start,sample-2\nE-DEMO-1,2026-11-16 14:00,break_end,sample-3\n',
-  shifts:
-    'employee_id,shift_id,start,end,planned_break_min\nE-DEMO-1,S-SAMPLE-1,2026-11-16 09:00,2026-11-16 18:00,60\n',
-  notes:
-    'employee_id,submitted_at,text\nE-DEMO-1,2026-11-16 19:00,"I left at 6:00 pm but forgot to punch out."\n',
-};
-
-export function ImportPreviewView({ onImported }: { onImported: (message: string) => void }) {
-  const [kind, setKind] = useState<ImportKind>('punches');
-  const [content, setContent] = useState(SAMPLES.punches);
-  const [preview, setPreview] = useState<ImportPreviewResult | null>(null);
-  const [allowPartial, setAllowPartial] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const run = async (action: () => Promise<void>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : 'The request did not complete.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handlePreview = () => run(async () => setPreview(await previewImport(kind, content)));
-
-  const handleImport = () =>
-    run(async () => {
-      const result = await commitImport(kind, content, allowPartial);
-      setPreview(null);
-      const attached = Object.keys(result.notes_attached).length;
-      onImported(
-        `Imported ${result.inserted} new record(s); ${result.duplicates} already on file; ` +
-          `${result.detected_exception_ids.length} exception(s) detected` +
-          (attached ? `; notes attached to ${attached} exception(s)` : '') +
-          '.'
-      );
-    });
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div className="panel-card" style={{ padding: 18 }}>
-        <h2 style={{ marginTop: 0 }}>Import</h2>
-        <p className="muted small">
-          Paste CSV or JSON. The backend checks every row, skips duplicates, limits you to your own
-          employees, and re-runs detection for the days it touches. Times without an offset are read
-          in the employee's timezone. Preview writes nothing.
-        </p>
-        <label className="field-label">
-          What are you importing?
-          <select
-            className="input-field"
-            value={kind}
-            onChange={(e) => {
-              const next = e.target.value as ImportKind;
-              setKind(next);
-              setContent(SAMPLES[next]);
-              setPreview(null);
-            }}
-          >
-            <option value="punches">Clock punches</option>
-            <option value="shifts">Scheduled shifts</option>
-            <option value="notes">Employee notes</option>
-          </select>
-        </label>
-        <textarea
-          className="input-field mono"
-          style={{ width: '100%', minHeight: 140, marginTop: 10 }}
-          value={content}
-          onChange={(e) => {
-            setContent(e.target.value);
-            setPreview(null);
-          }}
-          aria-label="Import data"
-        />
-        {error && <div className="banner banner-error" role="alert" style={{ marginTop: 10 }}>{error}</div>}
-        <div className="button-row" style={{ marginTop: 12 }}>
-          <button type="button" className="btn-secondary" disabled={busy || !content.trim()} onClick={handlePreview}>
-            Preview
-          </button>
-          <button type="button" className="btn-primary" disabled={busy || !preview || preview.valid === 0} onClick={handleImport}>
-            Import {preview ? `${preview.valid} valid row(s)` : ''}
-          </button>
-          <label className="small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input type="checkbox" checked={allowPartial} onChange={(e) => setAllowPartial(e.target.checked)} />
-            Import the valid rows even if some are invalid
-          </label>
-        </div>
-      </div>
-
-      {preview && (
-        <div className="panel-card">
-          <div className="toolbar">
-            <strong>
-              {preview.valid} valid, {preview.invalid} invalid, {preview.duplicates} duplicate
-            </strong>
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Row</th>
-                  <th>Status</th>
-                  <th>What it is</th>
-                  <th>Detail</th>
                   <td>{tr(p.jurisdiction)}</td>
                   <td>{p.daily_regular_hours}{tr(" hours")} / {p.weekly_regular_hours}{tr(" hours")}</td>
                   <td>{p.overtime_rate}× ({p.quarterly_ot_cap ? `${p.quarterly_ot_cap}${tr(" hours per quarter")}` : tr("no cap")})</td>
                   <td>{p.rest_minutes}{tr(" min after ")}{p.rest_after_hours}{tr(" hours")}</td>
                   <td>{p.max_spread_hours ? `${p.max_spread_hours}${tr(" hours")}` : tr('N/A')}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {preview.rows.map((r) => {
-                  const record = r.punch ?? r.shift ?? r.note;
-                  const what = r.punch
-                    ? `${r.punch.employee_id} ${r.punch.type} ${r.punch.ts}`
-                    : r.shift
-                    ? `${r.shift.employee_id} ${r.shift.start} to ${r.shift.end}`
-                    : r.note
-                    ? `${r.note.employee_id}: "${r.note.text}"`
-                    : '—';
-                  return (
-                    <tr key={r.row_number}>
-                      <td className="mono small">#{r.row_number}</td>
-                      <td>
-                        <span className={r.status === 'valid' ? 'badge-pass' : r.status === 'duplicate' ? 'badge-neutral' : 'badge-escalated'}>
-                          {r.status.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="mono small">{record ? what : '—'}</td>
-                      <td className="small">
-                        {r.error ? <span style={{ color: r.status === 'invalid' ? '#dc2626' : undefined }}>{r.error}</span> : 'Ready to import'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
     </div>
   );
 }

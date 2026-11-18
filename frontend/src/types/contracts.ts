@@ -1,7 +1,7 @@
 ﻿export type Severity = 'problem' | 'warning';
-// 'proposed' is a UI-only state: the backend knows open | escalated | resolved, and the UI
-// marks an item 'proposed' once an eligible draft has been fetched for it.
-export type ExceptionStatus = 'open' | 'proposed' | 'escalated' | 'resolved';
+// 'proposed' is a UI-only state: the backend knows open | escalated | resolved | dismissed, and
+// the UI marks an item 'proposed' once an eligible draft has been fetched for it.
+export type ExceptionStatus = 'open' | 'proposed' | 'escalated' | 'resolved' | 'dismissed';
 export type DecisionType = 'approved' | 'edited' | 'rejected';
 export type Role = 'employee' | 'manager' | 'payroll_admin' | 'compliance' | 'admin';
 export type UILang = 'en' | 'hi';
@@ -11,9 +11,6 @@ export interface PunchEvent {
   employee_id: string;
   ts: string;
   type: 'in' | 'out' | 'break_start' | 'break_end';
-  source: 'kiosk' | 'mobile' | 'badge' | 'web' | 'import';
-  device_id: string;
-
   source?: 'kiosk' | 'mobile' | 'badge' | 'web' | 'import' | string;
   device_id?: string;
 }
@@ -154,18 +151,3 @@ export interface PolicyPack {
   max_spread_hours?: number | null;
   late_tolerance_min?: number;
 }
-
-export interface ImportRow {
-  row_num: number;
-  employee_id: string;
-  employee_name: string;
-  work_date: string;
-  in_time: string;
-  out_time: string;
-  location: string;
-  valid: boolean;
-  error?: string;
-}
-
-
-
