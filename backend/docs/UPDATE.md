@@ -307,3 +307,42 @@ Never include credentials, private employee data, or invented test results.
 - Open: the Indian quarter definition still needs confirming; who authors 0.2.0 still needs Jayanth's confirmation.
 - Next step: publish the backend branch so Amulya can pull it. After 0.2.0, populate the outcome field, add evidence_ref and the tolerance, and add week_start weekday checks and as_of open-shift handling.
 - Publication: local only; not committed or pushed.
+
+### 2026-11-18 — Amulya Mohan — B-04 / B-05 — Live report including multilingual intents
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed: `backend/evals/reports/ollama-qwen2.5-7b-instruct-propose_v2-with-language.{md,json}` generated from clean commit 475b4cc (2026-11-17 18:40 UTC); results added to `docs/MODEL_CARD.md` and CLAUDE.md.
+- Results: all six live gates pass (unsafe eligible 0; injection resistance 100%; harness block rate 100% on 20 cases, each stopped by its expected gate; leakage 0; language parity 100%; write refusal 100%). Proposal accuracy 100% with every category at 100%; latency p50 4.23 s, p95 4.58 s. Lexicon intents 100% in English, Hindi and Kannada. Paraphrases 10/12 through the LLM fallback (same two safe misses as the verification runs).
+- Also: synced Track A commit 1c8b820 (append-only UPDATE.md conflict, both entries kept). On
+  Windows 15 Track A tests failed with `ZoneInfoNotFoundError` (no system IANA database);
+  added `tzdata` as a runtime dependency (`pyproject.toml`, `requirements-dev.lock`).
+- Contracts: none.
+- Validation: the run above; the report records its commit, model, prompt and validator. After the
+  sync: pytest 191 passed on Windows; ruff check and format clean; 8/8 CI eval gates pass.
+- Next step: Jayanth reviews SHARED-01; PR from `backend` into `main` after review.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan — SHARED-01 — Contract 0.2.0-draft
+
+- Branch: `backend`.
+- Status: REVIEW (Track A to adopt and confirm).
+- Changed: `app/core/contracts.py` to `0.2.0-draft`: `RuleOutcome` and `RuleCheck.outcome` (derived from `passed` when omitted; must agree with it); `ValidationResult(passed=True)` requires at least one check and all passing; `EvidenceKind`, `EvidenceRef`, `ProposedAction.evidence_ref`; `Weekday`; `PolicyRules.evidence_tolerance_min`, `week_start`, `quarter_start_month` (all three packs: 5, monday, 1); optional `CaseContext.as_of`.
+- Pipeline: a `violation` blocks, `insufficient_evidence` (with no violation) escalates with the proposal kept; the time-evidence gate (`anchor_times`) uses the policy tolerance, attaches an `EvidenceRef` (schedule, then note, then history) before the validator runs, rejects a model-supplied ref that does not resolve, and blocks any added punch after `as_of`; `<facts>` states the evaluation time.
+- Contracts: yes, SHARED-01 draft revision; handover table in TRACK_B_INTEGRATION.md 5a; CONTRACTS.md and shared TASKS.md updated. No Track A files changed. `build_verified_case` should exclude `as_of` from the hash once CaseService sets it.
+- Validation: ruff check and format clean; pytest 214 passed (23 new in `tests/unit/test_contract_v020.py`); all 8 CI eval gates pass; the pipeline with Track A's real `validate_correction` attaches `schedule_end S-1` and is BLOCKED by its pending rules, as intended.
+- Next step: Jayanth adopts 0.2.0 in the validator/CaseService and confirms; Amulya moves evals to complete evidence with both validators side by side.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan — SHARED-01 — Verification of contract 0.2.0-draft
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Defects found and fixed:
+  - Timestamps stored in UTC (what a database usually returns) broke the evidence gates: a note agreeing with the schedule was flagged as a conflict, note times could not be matched, and the model's `<facts>` showed 03:30-12:30 for a 09:00-18:00 shift. All failed safe (escalate/block) but would have rejected good cases. Every time is now read in `employee.timezone` (`local_zone` in `app/ai/evidence.py`).
+  - `Weekday.index` shadowed `str.index`; renamed to `Weekday.number`.
+  - For codes the time gate does not anchor, a model-supplied `evidence_ref` would have reached the validator unverified; it is now removed.
+  - `RuleCheck` derived `outcome` from `passed is True`, so a JSON `"true"` would have failed; it now uses the same bool coercion as the field.
+  - Live Qwen wrote `"note": null` on every x08 run; the schema rejected it, the repair retry pushed the case past the 8 s budget, and it escalated by timeout instead of being blocked by the time-evidence gate (safe either way). A null note is now read as empty.
+- Validation (actually run): clean venv from `requirements-dev.lock` (tzdata 2026f): pytest 223 passed, ruff check and format clean, 8/8 CI eval gates; real server over HTTP (`/health` reports `0.2.0-draft`, `/assistant/query`, problem+json on bad input, no server errors); probes for UTC storage, overnight note on the next day, a US DST date, `as_of` boundary to the second, wrong evidence kind; live Qwen2.5-7B: all 6 live gates, proposal accuracy 100%, 0% repair retries, p50 5.57 s, p95 6.28 s; x08 blocked by `time_evidence` in 5/5 direct runs. The same machine ran the previous commit at p50 5.66 s, so today's higher latency (vs 4.23 s yesterday) is the machine, not this change. Pipeline with Track A's real `validate_correction`: evidence ref attached, BLOCKED by its pending rules as intended.
+- Publication: committed and pushed to `backend` (authorised by the owner).

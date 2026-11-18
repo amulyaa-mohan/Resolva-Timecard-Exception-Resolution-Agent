@@ -13,11 +13,12 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from datetime import timedelta
 from pathlib import Path
 
 from pydantic import ValidationError
 
-from app.ai.evidence import missing_evidence, unanchored_times
+from app.ai.evidence import anchor_times, local_zone, missing_evidence
 from app.ai.providers.base import (
     ChatMessage,
     LLMProvider,
@@ -36,6 +37,7 @@ from app.core.contracts import (
     LLMTrace,
     PolicySnapshot,
     ProposalResult,
+    RuleOutcome,
     ValidationResult,
 )
 from app.core.tracing import get_trace_id
@@ -61,10 +63,14 @@ def case_facts(case: CaseContext, policy: PolicySnapshot | None) -> str:
     same-day 23:37 clock-out). Stating local times with dates removes that arithmetic.
     """
 
+    zone = local_zone(case)  # stored timestamps may be UTC; the model reasons in local time
+
     def local(ts) -> str:
-        return ts.strftime("%a %Y-%m-%d %H:%M (UTC%z)")
+        return ts.astimezone(zone).strftime("%a %Y-%m-%d %H:%M (UTC%z)")
 
     lines = [f"Work date: {case.work_date.isoformat()} ({case.work_date:%A})"]
+    if case.as_of is not None:
+        lines.append(f"Evaluation time (now): {local(case.as_of)}")
     if case.schedule:
         lines.append(f"Scheduled shift: {local(case.schedule.start)} to {local(case.schedule.end)}")
     else:
@@ -360,9 +366,13 @@ def generate_proposal(
     if not run.check("actions_allowed", not bad_actions, ", ".join(bad_actions)):
         blocked.append(f"Action(s) not allowed for {case.code.value}: {', '.join(bad_actions)}.")
 
-    unanchored = unanchored_times(case, proposal.actions)
+    tolerance = timedelta(minutes=policy.rules.evidence_tolerance_min)
+    anchored, unanchored = anchor_times(case, list(proposal.actions), tolerance)
     if not run.check("time_evidence", not unanchored, "; ".join(unanchored)):
         blocked.append("Proposed time not supported by evidence: " + "; ".join(unanchored))
+    else:
+        # Every added time now names its evidence; the validator checks against the same ref.
+        proposal = proposal.model_copy(update={"actions": anchored})
 
     unknown = [c.chunk_id for c in proposal.citations if c.chunk_id not in clauses_by_id]
     if not run.check("citations_retrieved", not unknown, ", ".join(unknown)):
@@ -381,7 +391,9 @@ def generate_proposal(
         )
 
     # Deterministic re-validation with Track A's rules (same functions as detection).
+    # Contract 0.2.0: a violation blocks; insufficient evidence (and no violation) escalates.
     validation: ValidationResult | None = None
+    undecided: list[str] = []
     if not blocked:
         try:
             validation = validator(case, list(proposal.actions), policy)
@@ -389,17 +401,33 @@ def generate_proposal(
             run.check("rules_revalidation", False, f"validator error: {type(exc).__name__}")
             blocked.append("Rule re-validation failed to run.")
         else:
-            failed = [f"{c.code.value}: {c.reason}" for c in validation.checks if not c.passed]
+
+            def describe(outcome: RuleOutcome) -> list[str]:
+                return [
+                    f"{c.code.value}: {c.reason}" for c in validation.checks if c.outcome == outcome
+                ]
+
+            violations = describe(RuleOutcome.VIOLATION)
+            undecided = describe(RuleOutcome.INSUFFICIENT_EVIDENCE)
             if not validation.checks:
                 # A result with no rule checks has validated nothing; it cannot approve.
                 run.check("rules_revalidation", False, "validator returned no rule checks")
                 blocked.append("Rule re-validation returned no checks.")
-            elif not run.check("rules_revalidation", validation.passed, "; ".join(failed)):
-                blocked.append("Proposed correction fails rule validation: " + "; ".join(failed))
+            elif not run.check("rules_revalidation", not violations, "; ".join(violations)):
+                blocked.append(
+                    "Proposed correction fails rule validation: " + "; ".join(violations)
+                )
+            elif not run.check(
+                "rules_evidence", validation.passed and not undecided, "; ".join(undecided)
+            ):
+                # The contract makes passed=False with no violation mean 'undecided'.
+                undecided = undecided or ["validator did not pass the correction"]
     if blocked:
         return run.finish(GateStatus.BLOCKED, blocked, proposal, validation)
 
     escalate: list[str] = []
+    if undecided:
+        escalate.append("Not enough evidence to validate the correction: " + "; ".join(undecided))
     if not run.check(
         "evidence_complete",
         not proposal.missing_information,

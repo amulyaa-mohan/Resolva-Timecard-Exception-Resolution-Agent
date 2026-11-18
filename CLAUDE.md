@@ -44,12 +44,23 @@ cd backend && docker compose up --build                                    # nee
 The local virtualenv is `venv/` (Jayanth's docs use `.venv/`; both are git-ignored).
 Settings are unprefixed env vars or `backend/.env` (`AI_ENABLED`, `LLM_PROVIDER`, `CONFIDENCE_THRESHOLD`, ...).
 
-## Current state (2026-11-17, after B-05)
+## Current state (2026-11-18, after Track A sync)
 
 - Branch `backend` (on top of `main` 68ede72). B-01/B-02 3874367, B-03 ef619b6, B-05 2099dc5 +
   c6bde83 (time-evidence gate) + live reports. CI green on GitHub for each push.
-- SHARED-01: draft contracts `0.1.0-draft`, awaiting Jayanth's review (11 decisions in
-  TRACK_B_INTEGRATION.md section 5). His validator must return at least one `RuleCheck` and enforce the
+- Track A pushed 1c8b820 (attendance context, missing-punch detector, partial `validate_correction`
+  in `app/rules/validator.py` that always returns passed=false) and merged PR #6 into `main`.
+  His answers: `backend/docs/shared/TRACK_A_CONTRACT_RESPONSE.md`. Amulya replied (2026-11-18):
+  totals via `make_validator` (no contract change); `RuleCheck.outcome` pass/violation/
+  insufficient_evidence (violation -> BLOCKED, insufficient -> ESCALATED); validator stays
+  exact-time until `ProposedAction.evidence_ref` + a pack `evidence_tolerance_min`; evals get
+  complete evidence and show stub vs real validator side by side; pack fields `week_start`
+  (Monday) and `quarter_start_month` (1); `CaseContext.as_of` (UTC, excluded from
+  evidence_version).
+- SHARED-01: `0.2.0-draft` implemented by Track B (2026-11-18): `RuleOutcome`, `EvidenceRef`
+  attached deterministically by `anchor_times` in `app/ai/evidence.py`, policy
+  `evidence_tolerance_min`/`week_start`/`quarter_start_month`, optional `CaseContext.as_of`
+  (added punch after it blocks; shown in `<facts>`). Handover in TRACK_B_INTEGRATION.md 5a. His validator must return at least one `RuleCheck` and enforce the
   missing-punch inference window. Frontend type mismatches are listed in backend/docs/shared/CONTRACTS.md.
 - B-01 to B-05 all in REVIEW. B-04: `POST /assistant/query` (en/hi/kn -> Intent, read-only); lexicon
   parity is a CI gate; LLM fallback for paraphrases (Qwen 10/12, misses failed safe). The model may
@@ -65,12 +76,17 @@ Settings are unprefixed env vars or `backend/.env` (`AI_ENABLED`, `LLM_PROVIDER`
   Live reports at c6bde83 (Qwen2.5-7B): v1 83% proposal accuracy, v2 100% (two runs); 0 unsafe
   eligible and 100% injection resistance in all runs. Numbers are in docs/MODEL_CARD.md. Validator in
   evals is a stand-in. Real-model results vary run to run; rely on the deterministic gates.
-- Tests: 171 passing. Local Ollama in Docker: `cd backend && docker compose -f docker-compose.yml
+- Latest live report (475b4cc, prompt v2 + language): all 6 live gates pass, proposal accuracy 100%,
+  p50 4.23 s, lexicon intents 100% in en/hi/kn, paraphrases 10/12 (safe misses).
+- Tests: 223 passing (incl. Track A). `tzdata` is a runtime dependency (Windows/slim images). Local Ollama in Docker: `cd backend && docker compose -f docker-compose.yml
   -f docker-compose.gpu.yml --profile ollama up -d ollama` (models persist in the `ollama-models` volume).
 
 ## Next up
 
-1. When Track A lands A-02: swap `validate_correction` into evals and live_check; re-run live evals.
+1. Jayanth adopts 0.2.0 (outcomes, evidence_ref tolerance, week_start, as_of excluded from his
+   hash). Then make `as_of` required and freeze SHARED-01; update frontend `contracts.ts`.
+1b. Evals: complete evidence per case, incomplete cases expecting ESCALATED, report stub vs real
+   `validate_correction` side by side; then gate CI on the real one and re-run live evals.
 2. SHARED-02 with Jayanth: first end-to-end missing-punch flow through his routes; wire
    `ExceptionQuery` filters into his exception list.
 3. Ask native Hindi/Kannada speakers to review the lexicons and reply templates.

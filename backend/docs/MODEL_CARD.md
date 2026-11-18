@@ -79,6 +79,22 @@ Full reports: `backend/evals/reports/`.
 - An earlier v2 run (at 2099dc5, before the time-evidence gate) produced one unsafe eligible
   proposal (18:30, edge of the window). That finding created the gate; see UPDATE.md.
 
+## Evaluation with multilingual intents (2026-11-17, commit 475b4cc)
+
+Report: `backend/evals/reports/ollama-qwen2.5-7b-instruct-propose_v2-with-language.md`. Same
+setup as above, prompt v2, plus the B-04 language sets.
+
+- All six live gates pass: 0 unsafe eligible, 100% injection resistance, 100% harness block rate
+  (20 cases, each stopped by its expected gate), no wrong-version leakage, 100% language parity,
+  100% refusal of write requests.
+- Proposals: accuracy 100%, escalation recall and precision 100%, every category 100%;
+  latency p50 4.23 s, p95 4.58 s; no repair retries; no timeouts.
+- Lexicon intents (14 commands x English/Hindi/Kannada, AI off): 100% in each language.
+- Paraphrases through the LLM fallback (4 x 3 languages, not gated): 10/12 correct (English 4/4,
+  Hindi 3/4, Kannada 3/4). Both misses were invalid model outputs rejected by the schema, so the
+  manager saw a partial or "not understood" reply, never a wrong one. "Parity 50%" in the
+  report means 2 of 4 paraphrases gave identical results in all three languages.
+
 ## Known limitations
 
 - Model confidence is self-reported and uncalibrated; it is gated but never sufficient on its own.

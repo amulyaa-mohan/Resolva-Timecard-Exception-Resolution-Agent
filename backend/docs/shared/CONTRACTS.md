@@ -1,6 +1,10 @@
 # Cross-team contract coordination
 
-Status: SHARED-01 draft `0.1.0-draft` exists in `backend/app/core/contracts.py` (proposed by Track B; not yet agreed).
+Status: SHARED-01 draft `0.2.0-draft` in `backend/app/core/contracts.py` (Track B implemented the
+changes agreed in TRACK_A_CONTRACT_RESPONSE.md and Track B's reply; not frozen). Changes from 0.1.0:
+`RuleCheck.outcome`, `EvidenceRef` / `ProposedAction.evidence_ref`, `PolicyRules.evidence_tolerance_min`,
+`week_start`, `quarter_start_month`, and `CaseContext.as_of`. Details: TRACK_B_INTEGRATION.md 5a.
+Frontend `contracts.ts` does not have these fields yet; update it when the contract is frozen.
 Open decisions and how Track A plugs in: `backend/docs/shared/TRACK_B_INTEGRATION.md`.
 Running APIs include GET /health, POST /assistant/query, and optional authenticated GET /exceptions and GET /exceptions/{exception_id}. Decision endpoints remain pending.
 

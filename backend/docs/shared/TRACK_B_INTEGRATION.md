@@ -3,7 +3,8 @@
 Audience: C V Jayanth (Track A) and his coding agent (Codex). Maintained by Amulya Mohan (Track B).
 Purpose: show exactly what Track B already provides, what Track A must supply, and how the two
 connect, so Track A can build against real code instead of guessing.
-Last updated: 2026-11-17 (B-03). Contract version: `0.1.0-draft` (not frozen; see "Decisions for SHARED-01").
+Last updated: 2026-11-18. Contract version: `0.2.0-draft` (not frozen; see section 5a for the
+0.2.0 changes and section 5 for the original decisions).
 
 ## 1. What already exists and runs
 
@@ -184,6 +185,29 @@ There are 11 decisions. Reply in `backend/docs/UPDATE.md` or a PR comment. Until
 10. **Severity**: `DEFAULT_SEVERITY` follows design doc section 8. OK?
 11. **`detection_details` keys** for the evidence gate: `overlap_minutes`, `spread_minutes`,
     `quarter_ot_hours` (see "Evidence gate before the model"). OK, or other names?
+
+## 5a. Contract 0.2.0-draft (2026-11-18): what Track A does with it
+
+Implemented in `backend/app/core/contracts.py` from Track A's response and Track B's reply. Existing
+Track A code keeps working unchanged (all 223 tests pass, including `test_track_a_boundary.py`).
+
+Timezones: Track B reads every timestamp in `employee.timezone` (notes, habits and the model's
+`<facts>` are wall-clock times there), so stored timestamps may be UTC or carry any offset; a
+database returning UTC behaves the same as local offsets (regression test included).
+
+| Change | Contract | What Track A does |
+| --- | --- | --- |
+| Rule outcomes | `RuleOutcome` = `pass` / `violation` / `insufficient_evidence`; `RuleCheck.outcome` | Set `outcome` on each check. If omitted it is derived from `passed` (False -> `violation`), so today's checks are violations. Use `insufficient_evidence` only when the rule cannot be decided from the inputs (for example missing totals). A rule that is not implemented yet should stay `violation`. |
+| Pipeline mapping | `generate_proposal` | Any `violation` -> BLOCKED. Otherwise any `insufficient_evidence` -> ESCALATED (proposal and validation kept for the manager). Only all-`pass` can be ELIGIBLE. |
+| Consistency | `RuleCheck`, `ValidationResult` | `passed` must be true exactly when `outcome == "pass"`. `ValidationResult(passed=True)` needs at least one check and every check passing; otherwise construction fails. |
+| Evidence for a time | `EvidenceRef(kind, id)`; `ProposedAction.evidence_ref`; `EvidenceKind` = `schedule_start` / `schedule_end` (id = shift_id), `note` (id = note_id), `history_punch` (id = punch_id) | Track B's time-evidence gate attaches the ref deterministically before your validator runs; a model-supplied ref is kept only if it resolves and supports the time. Accept `new_ts` within `policy.rules.evidence_tolerance_min` of the referenced evidence. If `evidence_ref` is None, stay strict (exact schedule time). For `note`, the time is the clock time the employee stated, on the work date or the next day. |
+| Tolerance | `PolicyRules.evidence_tolerance_min` (0-60, packs: 5) | Use this, not a constant. Track B's gate uses the same value. |
+| Policy week | `PolicyRules.week_start: Weekday` (packs: `monday`); `Weekday.number` gives Python's `date.weekday()` number | Check the week starts on this day, not only that it contains the work date (closes the Friday-start gap you noted). |
+| Quarters | `PolicyRules.quarter_start_month` 1-12 (packs: 1 = Jan/Apr/Jul/Oct) | Quarter boundaries in the employee's local timezone. |
+| Evaluation time | `CaseContext.as_of: AwareDatetime \| None` | Set it in `CaseService` from the server clock. Exclude it from the hash: add `"as_of"` to the `exclude` set in `build_verified_case`, or every reload changes `evidence_version`. Use it for open shifts instead of `max(shift.end, punches)`. Track B blocks any added punch after `as_of` and shows it to the model as "Evaluation time (now)". Optional during the draft; we make it required once CaseService sets it. |
+
+Unchanged: totals reach your validator through `make_validator` (no contract field). Version stays a
+draft until we both agree; then SHARED-01 is marked DONE and the frontend types are updated.
 
 ## 6. Evaluating with your validator
 

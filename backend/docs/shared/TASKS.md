@@ -11,7 +11,7 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 | COORD-04 | Area-specific agent guidance and progress logs | Jayanth | REVIEW | — | Frontend/backend/database guides and routing verified |
 | COORD-05 | Simplify to frontend/backend root folders | Jayanth | REVIEW | — | References/config verified; backend test, lint and frontend build passed |
 | COORD-01 | Shared instructions and tracker | Jayanth | REVIEW | — | Teammates read rules and record task ownership |
-| SHARED-01 | Freeze initial API/data contracts | Both | REVIEW | COORD-01 | Draft `0.1.0-draft` by Amulya in backend/app/core/contracts.py; Track A answers in TRACK_A_CONTRACT_RESPONSE.md; Amulya confirmation pending before freeze |
+| SHARED-01 | Freeze initial API/data contracts | Both | REVIEW | COORD-01 | `0.2.0-draft` (2026-11-18) implements Track A's answers and Amulya's reply: rule outcomes, evidence refs, policy week/quarter/tolerance, as_of (TRACK_B_INTEGRATION.md 5a). Jayanth to adopt in the validator and confirm before freeze |
 | A-01 | DB foundation, synthetic seed, role dependencies | Jayanth | IN PROGRESS | SHARED-01 | Reproducible employee/shift/punch fixture and server-side permission checks |
 | B-01 | App configuration, mock provider, development packaging | Amulya | REVIEW | SHARED-01 (draft) | Verified: clean install, server, offline mock, kill-switch, Docker healthy; startup in LOCAL_DEVELOPMENT.md |
 | A-02 | Missing-punch detection and correction validation | Jayanth | IN PROGRESS | A-01 | Missing punch detected; valid fix passes; unsupported fix blocked |
@@ -36,4 +36,4 @@ DONE means acceptance verified and review completed; REVIEW means ready for team
 
 ## Current next step
 
-Jayanth reviews the SHARED-01 draft (TRACK_B_INTEGRATION.md section 5, 11 decisions) and builds A-01/A-02 against it; Track B tasks B-01 to B-05 are in REVIEW. When A-02 lands, swap the stand-in validator into evals; then SHARED-02.
+Contract `0.2.0-draft` is in place. Jayanth adopts it in the validator and CaseService (TRACK_B_INTEGRATION.md 5a: outcomes, evidence_ref tolerance, week_start, as_of); Amulya moves evals to complete evidence and reports the stand-in and real validators side by side; then freeze SHARED-01 and start SHARED-02.

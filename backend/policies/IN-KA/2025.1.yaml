@@ -17,4 +17,7 @@ rules:
   rest_minutes: 60
   late_tolerance_min: 7
   missing_punch_window_min: 30
+  evidence_tolerance_min: 5
+  week_start: monday
+  quarter_start_month: 1
 source_doc: 2025.1.md
