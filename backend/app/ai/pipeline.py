@@ -172,6 +172,33 @@ def _adjustment_facts(case: CaseContext, policy: PolicySnapshot | None, local) -
     return lines
 
 
+def _localised(case: CaseContext) -> CaseContext:
+    """The case with every timestamp in the employee's local time zone.
+
+    Found in the live demo on PostgreSQL (2026-11-18): the database returns UTC, so the model
+    saw 09:25+00:00, copied that offset as instructed, and wrote the stated 09:05 as 09:05+00:00
+    (14:35 local), which the time-evidence gate rightly refused. Same instants, local offsets.
+    """
+    zone = local_zone(case)
+
+    def local(ts):
+        return ts.astimezone(zone) if ts is not None else None
+
+    def punches(items):
+        return [p.model_copy(update={"ts": local(p.ts)}) for p in items]
+
+    update = {
+        "punches": punches(case.punches),
+        "punch_history": punches(case.punch_history),
+        "as_of": local(case.as_of),
+    }
+    if case.schedule is not None:
+        update["schedule"] = case.schedule.model_copy(
+            update={"start": local(case.schedule.start), "end": local(case.schedule.end)}
+        )
+    return case.model_copy(update=update)
+
+
 def build_messages(
     case: CaseContext,
     retrieved: list[RetrievedClause],
@@ -183,7 +210,7 @@ def build_messages(
     allowed = ", ".join(sorted(a.value for a in ALLOWED_ACTIONS[case.code]))
     system = template.format(allowed_actions=allowed)
 
-    case_data = case.model_dump(mode="json", exclude={"notes"})
+    case_data = _localised(case).model_dump(mode="json", exclude={"notes"})
     clauses = [
         {
             "chunk_id": r.clause.chunk_id,

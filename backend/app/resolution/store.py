@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -30,6 +31,7 @@ from app.core.contracts import (
     GateStatus,
     ProposalResult,
     ProposedAction,
+    PunchRecord,
 )
 from app.policies.registry import PolicyRegistry, PolicyResolutionError
 from app.resolution import totals
@@ -307,13 +309,27 @@ class ResolutionStore:
         ]
         if effective is None:
             effective = apply_corrections(case.punches, case.employee.employee_id, parsed)
+        # One zone for the whole response (2026-11-18): PostgreSQL returns UTC while approved
+        # actions keep the offset they were submitted with, so a frontend saw 03:55 next to
+        # 09:05 for the same day. Everything is shown in the employee's local time.
+        zone = ZoneInfo(case.employee.timezone)
+
+        def local(punch: PunchRecord) -> PunchRecord:
+            return punch.model_copy(update={"ts": punch.ts.astimezone(zone)})
+
+        for action in applied:
+            if action.get("new_ts"):
+                ts = action["new_ts"]
+                ts = datetime.fromisoformat(ts) if isinstance(ts, str) else ts
+                action["new_ts"] = ts.astimezone(zone).isoformat()
         return {
             "exception_id": exception_id,
             "employee_id": case.employee.employee_id,
             "work_date": case.work_date,
-            "raw_punches": case.punches,
+            "timezone": case.employee.timezone,
+            "raw_punches": [local(p) for p in case.punches],
             "corrections_applied": applied,
-            "effective_punches": effective,
+            "effective_punches": [local(p) for p in effective],
             "net_worked_hours": net_worked_hours(effective),
         }
 

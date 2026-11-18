@@ -84,7 +84,7 @@ def test_no_stated_time_escalates_before_the_model(code, policy, settings):
 def test_stated_time_too_far_from_any_punch_escalates(policy):
     case = _late(notes=("I was here at 08:30 sharp.",))  # 55 min from 09:25, window 30
     gaps = missing_evidence(case, policy)
-    assert gaps and "more than 30 min from every recorded punch" in gaps[0]
+    assert gaps and "more than 30 min away" in gaps[0]
 
 
 def test_stated_time_near_a_punch_passes_the_gate(policy):
@@ -298,3 +298,67 @@ def test_other_unretrieved_citations_are_still_blocked(policy, settings, chunk_i
     result = _run_overlap(policy, settings, chunk_id)
     assert result.status == GateStatus.BLOCKED
     assert any("not in the retrieved policy evidence" in r for r in result.reasons)
+
+
+# ------------------------------------------------------------------ UTC storage (live demo finding)
+
+
+def test_case_json_shows_local_times_when_storage_is_utc(policy, settings):
+    from datetime import UTC
+
+    case = _late()
+    utc = case.model_copy(
+        update={
+            "punches": [p.model_copy(update={"ts": p.ts.astimezone(UTC)}) for p in case.punches],
+            "schedule": case.schedule.model_copy(
+                update={
+                    "start": case.schedule.start.astimezone(UTC),
+                    "end": case.schedule.end.astimezone(UTC),
+                }
+            ),
+        }
+    )
+    retrieved = retrieve(utc, policy, top_k=4).clauses
+    user = build_messages(utc, retrieved, settings.prompts_dir, "propose_v3", policy)[1].content
+    case_json = user.split("<case_json>")[1].split("</case_json>")[0]
+    assert "+05:30" in case_json and "+00:00" not in case_json and 'Z"' not in case_json
+    assert "2026-11-12T09:25:00+05:30" in case_json
+
+
+def test_utc_stored_case_end_to_end_with_mock(policy, settings):
+    from datetime import UTC
+
+    case = _late()
+    utc = case.model_copy(
+        update={
+            "punches": [p.model_copy(update={"ts": p.ts.astimezone(UTC)}) for p in case.punches],
+            "schedule": case.schedule.model_copy(
+                update={
+                    "start": case.schedule.start.astimezone(UTC),
+                    "end": case.schedule.end.astimezone(UTC),
+                }
+            ),
+        }
+    )
+    result = generate_proposal(
+        utc, policy, provider=MockProvider(), validator=passing_validator, settings=settings
+    )
+    assert result.status == GateStatus.ELIGIBLE, result.reasons
+    assert result.proposal.actions[0].new_ts.astimezone(IST).strftime("%H:%M") == "09:05"
+
+
+def test_stated_times_that_equal_recorded_punches_escalate(policy):
+    # Live demo: a double tap at 09:00 and 10:00 with the note "my real shift was 9:00 to
+    # 6:00 pm". Both stated times equal recorded punches, so neither describes an error.
+    case = _case(
+        ExceptionCode.OVERLAPPING_SHIFT,
+        [
+            _punch("P-1", PunchType.IN, "09:00"),
+            _punch("P-2", PunchType.IN, "10:00"),
+            _punch("P-3", PunchType.OUT, "17:00"),
+            _punch("P-4", PunchType.OUT, "18:00"),
+        ],
+        ("I tapped in twice by mistake. My real shift was 9:00 to 6:00 pm.",),
+    )
+    gaps = missing_evidence(case, policy)
+    assert gaps and "do not correct any recorded punch" in gaps[0]

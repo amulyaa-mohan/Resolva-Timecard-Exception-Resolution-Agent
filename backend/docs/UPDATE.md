@@ -556,6 +556,28 @@ Never include credentials, private employee data, or invented test results.
   The AI flows that read the notes were not run against a live model here.
 - Open: "unscheduled shift" as a schedule deviation needs a signal that schedules are complete; contract 0.3.0 review.
 
+### 2026-11-18 — Amulya Mohan — Live verification of Track A 090bbdd; two fixes
+
+- Branch: `backend` (pulled 090bbdd: structured detection details, note import, demo notes).
+- Status: REVIEW.
+- Changed:
+  - `app/ai/pipeline.py` (Track B): the case JSON shows timestamps in the employee's local zone. On PostgreSQL (UTC) the model copied `+00:00` onto local wall times, so every adjustment was blocked live.
+  - `app/ai/evidence.py` (Track B): a stated time equal to a recorded punch does not count as a correction (the double-tap note now escalates before the model).
+  - `app/resolution/store.py` (Track A, at the owner's request): approval and the timecard read share `apply_actions`; approving an `adjust_punch` returned 500 and would have double-counted day totals.
+  - Tests: `test_case_json_shows_local_times_when_storage_is_utc`, `test_utc_stored_case_end_to_end_with_mock`, `test_stated_times_that_equal_recorded_punches_escalate`, `test_approving_an_adjustment_applies_it_once` (SQLite and PostgreSQL; fails on the old code).
+- Validation: pytest 585 passed on PostgreSQL 15 (none skipped); ruff clean; eval 9/9; Docker stack with live Qwen: demo story end to end (missing punch approved, then the late arrival eligible and approved to the stated 09:05, net 7.92 h), HTTP walk-through 49/49, 0 server errors; full live eval 100% in every category, 0 unsafe, p50 4.58 s.
+- Answered in TRACK_A_CONTRACT_RESPONSE.md: unscheduled shift stays insufficient_evidence until a "roster final" signal exists (proposal for 0.3.0); two questions for Track A (overtime-only remainder after an evidenced fix; timecard time zone).
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan — Settle open questions; verify end to end before merging to main
+
+- Branch: `backend`.
+- Status: REVIEW, then merge into `main`.
+- Changed (Track A modules at the owner's request): `app/rules/validator.py`, so an evidenced fix leaving only warning-severity violations (SCHEDULE_DEVIATION and/or OVERTIME_RISK) is escalated; `app/resolution/store.py` and `router.py`, so the timecard is in the employee's zone with a `timezone` field. Tests updated and added; eval e03 now expects ESCALATED.
+- Decided: an unscheduled shift stays `insufficient_evidence` until a roster-final signal (0.3.0).
+- Validation: the Windows host now blocks the psycopg DLL (Application Control; settings not changed), so tests ran in a Linux `python:3.12-slim` container on the compose network: 590 passed on PostgreSQL 15 (none skipped), ruff clean, eval 9/9. Docker stack (API image, PostgreSQL, Ollama on the GPU), fresh demo week seeded from a container: demo story end to end (missing punch approved, then the late arrival eligible and approved to the stated 09:05), and the spread-over now escalates for review; HTTP walk-through 49/49, 76 requests, 0 server errors; full live eval (in a container) 100% in every category, 0 unsafe, 0 repair retries, p50 4.44 s.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
 ### 2026-11-18 — C V Jayanth — A-AUDIT-02 — Self-audit of the code written after Track B's audit
 
 - Branch: backend. Status REVIEW. Full findings, reproductions and what was checked and fine:
