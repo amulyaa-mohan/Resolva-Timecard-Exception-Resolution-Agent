@@ -1,4 +1,4 @@
-﻿import { useId, useState } from 'react';
+import { useId, useState } from 'react';
 import { ExceptionItem, PunchEvent, UILang } from '../types/contracts';
 
 interface RecordedPunchesCardProps {
@@ -53,51 +53,23 @@ const COPY: Record<
     sourceLabel: 'Source',
     deviceLabel: 'Device',
   },
-  kn: {
-    title: 'ದಾಖಲಾದ ಪಂಚ್‌ಗಳು (Recorded punches)',
-    events: {
-      in: 'ಕೆಲಸಕ್ಕೆ ಹಾಜರು (Clock in)',
-      out: 'ಕೆಲಸದಿಂದ ನಿರ್ಗಮನ (Clock out)',
-      break_start: 'ವಿರಾಮ ಪ್ರಾರಂಭ (Break started)',
-      break_end: 'ವಿರಾಮ ಮುಕ್ತಾಯ (Break ended)',
-    },
-    sources: {
-      import: 'ಆಮದು (Imported)',
-      imported: 'ಆಮದು (Imported)',
-      kiosk: 'ಕಿಯೋಸ್ಕ್ (Kiosk)',
-      mobile: 'ಮೊಬೈಲ್ (Mobile)',
-      badge: 'ಬ್ಯಾಡ್ಜ್ (Badge)',
-      web: 'ವೆಬ್ (Web)',
-    },
-    missingClockOut: 'ನಿರ್ಗಮನ ಪಂಚ್ ಕಾಣೆಯಾಗಿದೆ (Clock-out missing)',
-    missingClockOutHint: 'ಈ ಪಾಳಿಗೆ ಯಾವುದೇ ಕ್ಲಾಕ್-ಔಟ್ ದಾಖಲಾಗಿಲ್ಲ.',
-    viewSource: 'ಮೂಲ ದಾಖಲೆಗಳನ್ನು ವೀಕ್ಷಿಸಿ',
-    emptyPunches: 'ಈ ಪಾಳಿಗೆ ಯಾವುದೇ ಪಂಚ್‌ಗಳು ದಾಖಲಾಗಿಲ್ಲ.',
-    copyId: 'ID ನಕಲಿಸಿ',
-    copied: 'ನಕಲಿಸಲಾಗಿದೆ',
-    recordId: 'ದಾಖಲೆ ID',
-    rawTimestamp: 'ISO ಸಮಯ',
-    eventCode: 'ಕೋಡ್',
-    sourceLabel: 'ಮೂಲ',
-    deviceLabel: 'ಸಾಧನ',
-  },
   hi: {
-    title: 'दर्ज किए गए पंच (Recorded punches)',
+    title: 'दर्ज किए गए पंच',
     events: {
-      in: 'क्लॉक इन (Clock in)',
-      out: 'क्लॉक आउट (Clock out)',
-      break_start: 'ब्रेक शुरू (Break started)',
-      break_end: 'ब्रेक समाप्त (Break ended)',
+      in: 'क्लॉक इन',
+      out: 'क्लॉक आउट',
+      break_start: 'ब्रेक शुरू',
+      break_end: 'ब्रेक समाप्त',
     },
     sources: {
-      import: 'आयातित (Imported)',
-      imported: 'आयातित (Imported)',
-      kiosk: 'कियोस्क (Kiosk)',
-      mobile: 'मोबाइल (Mobile)',
-      badge: 'बैज (Badge)',
-      web: 'वेब (Web)',
+      import: 'आयातित',
+      imported: 'आयातित',
+      kiosk: 'कियोस्क',
+      mobile: 'मोबाइल',
+      badge: 'बैज',
+      web: 'वेब',
     },
-    missingClockOut: 'क्लॉक-आउट गायब है (Clock-out missing)',
+    missingClockOut: 'क्लॉक-आउट गायब है',
     missingClockOutHint: 'इस शिफ्ट के लिए कोई क्लॉक-आउट पंच दर्ज नहीं किया गया।',
     viewSource: 'स्रोत रिकॉर्ड देखें',
     emptyPunches: 'इस शिफ्ट के लिए कोई पंच दर्ज नहीं है।',
@@ -126,10 +98,10 @@ function resolveIanaTimezone(rawTz?: string): string {
   }
 }
 
-function formatWorkDate(workDate: string, ianaTz: string): string {
+function formatWorkDate(workDate: string, ianaTz: string, lang: UILang): string {
   const parsed = new Date(`${workDate}T12:00:00Z`);
   if (Number.isNaN(parsed.getTime())) return workDate;
-  return new Intl.DateTimeFormat('en-GB', {
+  return new Intl.DateTimeFormat(lang === 'hi' ? 'hi-IN' : 'en-GB', {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
@@ -187,7 +159,7 @@ export function RecordedPunchesCard({ item, lang = 'en' }: RecordedPunchesCardPr
   const t = COPY[lang];
 
   const ianaTz = resolveIanaTimezone(item.timezone);
-  const formattedDate = formatWorkDate(item.work_date, ianaTz);
+  const formattedDate = formatWorkDate(item.work_date, ianaTz, lang);
 
   const formattedPunches = item.punches.map((punch) => {
     const local = formatPunchInTimezone(punch.ts, ianaTz);

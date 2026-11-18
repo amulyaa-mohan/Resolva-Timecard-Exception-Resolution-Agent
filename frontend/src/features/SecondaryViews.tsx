@@ -1,7 +1,9 @@
+import { useTranslation } from "../lib/locale";
 ﻿import { useState } from 'react';
 import { AuditEvent, ExceptionItem, PolicyPack } from '../types/contracts';
 
 export function AuditView({ events }: { events: AuditEvent[] }) {
+  const { tr } = useTranslation();
   const exportCsv = () => {
     const header = 'id,trace_id,actor_type,actor_name,action,entity_ref,before,after,ts\n';
     const rows = events
@@ -24,25 +26,21 @@ export function AuditView({ events }: { events: AuditEvent[] }) {
     <div className="panel-card">
       <div className="toolbar">
         <div>
-          <strong>Immutable Append-Only Audit Trail</strong>
-          <p className="muted small" style={{ margin: 0 }}>
-            Every detection, AI draft, validator gate, and manager decision is logged with a trace ID.
-          </p>
+          <strong>{tr("Immutable Append-Only Audit Trail")}</strong>
+          <p className="muted small" style={{ margin: 0 }}>{tr("Every detection, AI draft, validator gate, and manager decision is logged with a trace ID.")}</p>
         </div>
-        <button type="button" className="btn-secondary" onClick={exportCsv}>
-          Export CSV
-        </button>
+        <button type="button" className="btn-secondary" onClick={exportCsv}>{tr("Export CSV")}</button>
       </div>
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Timestamp</th>
-              <th>Trace ID</th>
-              <th>Actor</th>
-              <th>Action</th>
-              <th>Entity</th>
-              <th>Before → After</th>
+              <th>{tr("Timestamp")}</th>
+              <th>{tr("Trace ID")}</th>
+              <th>{tr("Actor")}</th>
+              <th>{tr("Action")}</th>
+              <th>{tr("Entity")}</th>
+              <th>{tr("Before → After")}</th>
             </tr>
           </thead>
           <tbody>
@@ -53,7 +51,7 @@ export function AuditView({ events }: { events: AuditEvent[] }) {
                 <td>
                   <span className={e.actor_type === 'ai' ? 'badge-ai' : 'badge-neutral'}>{e.actor_name}</span>
                 </td>
-                <td className="mono small"><strong>{e.action}</strong></td>
+                <td className="mono small"><strong>{tr(e.action)}</strong></td>
                 <td className="mono small">{e.entity_ref}</td>
                 <td className="small">
                   <span className="muted">{e.before_summary}</span> → <strong>{e.after_summary}</strong>
@@ -68,6 +66,7 @@ export function AuditView({ events }: { events: AuditEvent[] }) {
 }
 
 export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: ExceptionItem) => void }) {
+  const { tr } = useTranslation();
   const [empId, setEmpId] = useState('EMP-BLR-07');
   const [empName, setEmpName] = useState('Meera Krishnan');
   const [punchTime, setPunchTime] = useState('09:05');
@@ -140,30 +139,18 @@ export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: Excep
 
   return (
     <div className="panel-card" style={{ maxWidth: 640, padding: 20 }}>
-      <h2 style={{ marginTop: 0 }}>Kiosk Punch Simulator (Live Event Demo)</h2>
-      <p className="muted">
-        Simulates a raw immutable punch event entering the deterministic rules detector and routing an AI-drafted proposal into the Manager Inbox.
-      </p>
+      <h2 style={{ marginTop: 0 }}>{tr("Kiosk Punch Simulator (Live Event Demo)")}</h2>
+      <p className="muted">{tr("Simulates a raw immutable punch event entering the deterministic rules detector and routing an AI-drafted proposal into the Manager Inbox.")}</p>
       <form onSubmit={handleIngest} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <label className="field-label">
-          Employee ID:
-          <input className="input-field mono" value={empId} onChange={(e) => setEmpId(e.target.value)} required />
+        <label className="field-label">{tr("Employee ID:")}<input className="input-field mono" value={empId} onChange={(e) => setEmpId(e.target.value)} required />
         </label>
-        <label className="field-label">
-          Employee Name:
-          <input className="input-field" value={empName} onChange={(e) => setEmpName(e.target.value)} required />
+        <label className="field-label">{tr("Employee Name:")}<input className="input-field" value={empName} onChange={(e) => setEmpName(e.target.value)} required />
         </label>
-        <label className="field-label">
-          Clock-In Time (IST):
-          <input type="time" className="input-field mono" value={punchTime} onChange={(e) => setPunchTime(e.target.value)} required />
+        <label className="field-label">{tr("Clock-In Time (IST):")}<input type="time" className="input-field mono" value={punchTime} onChange={(e) => setPunchTime(e.target.value)} required />
         </label>
-        <label className="field-label">
-          Employee Note (Untrusted Evidence):
-          <input className="input-field" value={note} onChange={(e) => setNote(e.target.value)} />
+        <label className="field-label">{tr("Employee Note (Untrusted Evidence):")}<input className="input-field" value={note} onChange={(e) => setNote(e.target.value)} />
         </label>
-        <button type="submit" className="btn-primary">
-          Post Raw Punch & Trigger Detection
-        </button>
+        <button type="submit" className="btn-primary">{tr("Post Raw Punch & Trigger Detection")}</button>
       </form>
     </div>
   );
@@ -182,18 +169,15 @@ export function PolicySettingsView({
   confidenceThreshold: number;
   onChangeThreshold: (v: number) => void;
 }) {
+  const { tr } = useTranslation();
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div className="panel-card" style={{ padding: 18 }}>
-        <h3 style={{ marginTop: 0 }}>Harness Guardrails & Kill-Switch</h3>
+        <h3 style={{ marginTop: 0 }}>{tr("Harness Guardrails & Kill-Switch")}</h3>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24, alignItems: 'center' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
-            <input type="checkbox" checked={aiEnabled} onChange={(e) => onToggleAi(e.target.checked)} />
-            AI Proposal Pipeline Enabled (Uncheck for Rules-Only Fallback Mode)
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>
-            Confidence Gate Threshold:
-            <input
+            <input type="checkbox" checked={aiEnabled} onChange={(e) => onToggleAi(e.target.checked)} />{tr("AI Proposal Pipeline Enabled (Uncheck for Rules-Only Fallback Mode)")}</label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600 }}>{tr("Confidence Gate Threshold:")}<input
               type="range"
               min="0.50"
               max="0.95"
@@ -208,18 +192,18 @@ export function PolicySettingsView({
 
       <div className="panel-card">
         <div className="toolbar">
-          <strong>Versioned Jurisdiction Policy Packs (Configuration, Not Code)</strong>
+          <strong>{tr("Versioned Jurisdiction Policy Packs (Configuration, Not Code)")}</strong>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Pack ID & Version</th>
-                <th>Jurisdiction</th>
-                <th>Daily / Weekly</th>
-                <th>OT Rate & Cap</th>
-                <th>Rest Break</th>
-                <th>Max Spread-Over</th>
+                <th>{tr("Pack ID & Version")}</th>
+                <th>{tr("Jurisdiction")}</th>
+                <th>{tr("Daily / Weekly")}</th>
+                <th>{tr("OT Rate & Cap")}</th>
+                <th>{tr("Rest Break")}</th>
+                <th>{tr("Max Spread-Over")}</th>
               </tr>
             </thead>
             <tbody>
@@ -227,10 +211,10 @@ export function PolicySettingsView({
                 <tr key={`${p.id}@${p.version}`}>
                   <td className="mono"><strong>{p.id}@{p.version}</strong></td>
                   <td>{p.jurisdiction}</td>
-                  <td className="mono">{p.daily_regular_hours}h / {p.weekly_regular_hours}h</td>
-                  <td className="mono">{p.overtime_rate}x ({p.quarterly_ot_cap ? `${p.quarterly_ot_cap}h/qtr` : 'no cap'})</td>
-                  <td className="mono">{p.rest_minutes}m after {p.rest_after_hours}h</td>
-                  <td className="mono">{p.max_spread_hours ? `${p.max_spread_hours}h` : 'N/A'}</td>
+                  <td className="mono">{p.daily_regular_hours}{"" + tr("h /") + " "}{p.weekly_regular_hours}{tr("h")}</td>
+                  <td className="mono">{p.overtime_rate}x ({p.quarterly_ot_cap ? `${p.quarterly_ot_cap}h/qtr` : tr('no cap')})</td>
+                  <td className="mono">{p.rest_minutes}{"" + tr("m after") + " "}{p.rest_after_hours}{tr("h")}</td>
+                  <td className="mono">{p.max_spread_hours ? `${p.max_spread_hours}h` : tr('N/A')}</td>
                 </tr>
               ))}
             </tbody>
@@ -248,6 +232,7 @@ EMP-BLR-12,Karthik Hegde,2026-11-17,09:15,18:10,Bengaluru (BLR-02)
 EMP-AUS-09,Hannah Brooks,11/17/2026,08:00,17:00,Austin (AUS-01)`;
 
 export function ImportPreviewView({ onImportValid }: { onImportValid: (items: ExceptionItem[]) => void }) {
+  const { tr } = useTranslation();
   const [csvInput, setCsvInput] = useState(SAMPLE_CSV);
   const [rows, setRows] = useState<import('../types/contracts').ImportRow[]>(() =>
     []
@@ -311,10 +296,8 @@ export function ImportPreviewView({ onImportValid }: { onImportValid: (items: Ex
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div className="panel-card" style={{ padding: 18 }}>
-        <h2 style={{ marginTop: 0 }}>Schedule & Punch Import Preview (FE-04)</h2>
-        <p className="muted small">
-          Validates CSV/JSON rows before ingestion. Invalid rows are flagged and blocked; valid unpaired rows route to the Exception Inbox.
-        </p>
+        <h2 style={{ marginTop: 0 }}>{tr("Schedule & Punch Import Preview (FE-04)")}</h2>
+        <p className="muted small">{tr("Validates CSV/JSON rows before ingestion. Invalid rows are flagged and blocked; valid unpaired rows route to the Exception Inbox.")}</p>
         <textarea className="input-field code-editor mono"
           rows={6}
           style={{ width: '100%' }}
@@ -325,25 +308,24 @@ export function ImportPreviewView({ onImportValid }: { onImportValid: (items: Ex
           }}
         />
         <div className="button-row" style={{ marginTop: 12 }}>
-          <button type="button" className="btn-primary" disabled={validMissingPunches.length === 0} onClick={handleImport}>
-            Import Valid Exception Rows to Inbox ({validMissingPunches.length})
+          <button type="button" className="btn-primary" disabled={validMissingPunches.length === 0} onClick={handleImport}>{tr("Import Valid Exception Rows to Inbox (")}{validMissingPunches.length})
           </button>
         </div>
       </div>
 
       <div className="panel-card">
         <div className="toolbar">
-          <strong>Row-Level Validation Preview ({parsedRows.filter((r) => r.valid).length} Valid / {parsedRows.filter((r) => !r.valid).length} Invalid)</strong>
+          <strong>{tr("Row-Level Validation Preview (")}{parsedRows.filter((r) => r.valid).length}{" " + tr("Valid /") + " "}{parsedRows.filter((r) => !r.valid).length}{" " + tr("Invalid)") + ""}</strong>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Row</th>
-                <th>Status</th>
-                <th>Employee</th>
-                <th>Work Date & Punches</th>
-                <th>Validation Detail</th>
+                <th>{tr("Row")}</th>
+                <th>{tr("Status")}</th>
+                <th>{tr("Employee")}</th>
+                <th>{tr("Work Date & Punches")}</th>
+                <th>{tr("Validation Detail")}</th>
               </tr>
             </thead>
             <tbody>
@@ -352,12 +334,12 @@ export function ImportPreviewView({ onImportValid }: { onImportValid: (items: Ex
                   <td className="mono small">#{r.row_num}</td>
                   <td>
                     <span className={r.valid ? 'badge-pass' : 'badge-escalated'}>
-                      {r.valid ? 'VALID' : 'INVALID ROW'}
+                      {tr(r.valid ? 'VALID' : 'INVALID ROW')}
                     </span>
                   </td>
                   <td className="small"><strong>{r.employee_name || '—'}</strong> ({r.employee_id || 'missing'})</td>
                   <td className="mono small">{r.work_date} | {r.in_time} → {r.out_time || 'MISSING'}</td>
-                  <td className="small">{r.valid ? 'Ready for ingestion' : <span style={{ color: '#dc2626' }}>{r.error}</span>}</td>
+                  <td className="small">{r.valid ? tr('Ready for ingestion') : <span style={{ color: '#dc2626' }}>{tr(r.error ?? "")}</span>}</td>
                 </tr>
               ))}
             </tbody>

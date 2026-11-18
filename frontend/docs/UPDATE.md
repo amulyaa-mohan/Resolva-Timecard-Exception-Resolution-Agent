@@ -73,3 +73,9 @@ Append entries; preserve other developers' history. Use repository-relative path
 
 - Inset and centered chevrons on single-select controls. Preserved native select interaction and restored the native indicator in forced colors.
 - Validation: TypeScript/Vite production build and Git whitespace check passed.
+
+### 2026-11-18 — C V Jayanth — FE-08 — Hindi UI and shared header layout
+
+- Removed Kannada from the frontend language picker. Hindi applies across page controls and representative demo labels, with a persisted preference and document language.
+- Both languages use the same responsive header grid. Name, identifier, and original evidence values are preserved.
+- Validation: TypeScript and Vite production build passed. Git whitespace checked before commit. Browser breakpoint and native-speaker review pending.

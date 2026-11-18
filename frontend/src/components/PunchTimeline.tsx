@@ -1,3 +1,4 @@
+import { useTranslation } from "../lib/locale";
 ﻿import { ExceptionItem } from '../types/contracts';
 
 interface PunchTimelineProps {
@@ -18,6 +19,7 @@ function hhmmToMinutes(hhmm: string): number | null {
 }
 
 export function PunchTimeline({ item, editedTimeHHMM }: PunchTimelineProps) {
+  const { tr } = useTranslation();
   // Timeline window: 06:00 (360m) to 22:00 (1320m) = 960 minutes span
   const startMin = 6 * 60;
   const endMin = 22 * 60;
@@ -45,15 +47,15 @@ export function PunchTimeline({ item, editedTimeHHMM }: PunchTimelineProps) {
   return (
     <div className="timeline-card">
       <div className="timeline-header">
-        <span className="section-label">24-Hour Shift & Punch Evidence ({item.timezone})</span>
+        <span className="section-label">{tr("24-Hour Shift & Punch Evidence (")}{item.timezone})</span>
         <div className="timeline-legend">
-          <span className="legend-item"><i className="dot-sched" /> Scheduled</span>
-          <span className="legend-item"><i className="dot-raw" /> Raw Punch (Immutable)</span>
+          <span className="legend-item"><i className="dot-sched" />{" " + tr("Scheduled") + ""}</span>
+          <span className="legend-item"><i className="dot-raw" />{" " + tr("Raw Punch (Immutable)") + ""}</span>
           {proposedPct !== null && (
-            <span className="legend-item"><i className="dot-ai" /> AI Proposed</span>
+            <span className="legend-item"><i className="dot-ai" />{" " + tr("AI Proposed") + ""}</span>
           )}
           {editedPct !== null && (
-            <span className="legend-item"><i className="dot-edit" /> Manager Edit</span>
+            <span className="legend-item"><i className="dot-edit" />{" " + tr("Manager Edit") + ""}</span>
           )}
         </div>
       </div>
@@ -66,8 +68,7 @@ export function PunchTimeline({ item, editedTimeHHMM }: PunchTimelineProps) {
             style={{ left: `${schedStart}%`, width: `${schedEnd - schedStart}%` }}
             title={`Scheduled: ${item.schedule?.start.slice(11, 16)} – ${item.schedule?.end.slice(11, 16)}`}
           >
-            <span>
-              Sched {item.schedule?.start.slice(11, 16)}–{item.schedule?.end.slice(11, 16)}
+            <span>{"" + tr("Sched") + " "}{item.schedule?.start.slice(11, 16)}–{item.schedule?.end.slice(11, 16)}
             </span>
           </div>
         )}
@@ -84,7 +85,7 @@ export function PunchTimeline({ item, editedTimeHHMM }: PunchTimelineProps) {
             >
               <div className="marker-pin" />
               <div className="marker-label">
-                {p.type === 'break_start' ? 'brk_in' : p.type === 'break_end' ? 'brk_out' : p.type}{' '}
+                {tr({ in: 'Clock in', out: 'Clock out', break_start: 'Break started', break_end: 'Break ended' }[p.type] ?? p.type)}{' '}
                 {p.ts.slice(11, 16)}
               </div>
             </div>
@@ -99,7 +100,7 @@ export function PunchTimeline({ item, editedTimeHHMM }: PunchTimelineProps) {
             title={`AI Proposed: ${proposedAction.new_ts.slice(11, 16)}`}
           >
             <div className="marker-pin" />
-            <div className="marker-label">AI {proposedAction.new_ts.slice(11, 16)}</div>
+            <div className="marker-label">{"" + tr("AI") + " "}{proposedAction.new_ts.slice(11, 16)}</div>
           </div>
         )}
 
@@ -111,7 +112,7 @@ export function PunchTimeline({ item, editedTimeHHMM }: PunchTimelineProps) {
             title={`Manager Edit: ${editedTimeHHMM}`}
           >
             <div className="marker-pin" />
-            <div className="marker-label">Edit {editedTimeHHMM}</div>
+            <div className="marker-label">{"" + tr("Edit") + " "}{editedTimeHHMM}</div>
           </div>
         )}
       </div>

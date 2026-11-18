@@ -13,3 +13,5 @@ Shared dependencies refer to backend/docs/shared/TASKS.md; do not duplicate thei
 | FE-06 | Adapt and Integrate Resolva Login | Soumya | REVIEW | FE-05 | Login screen initial state, demo validation, remember email, sign-out |
 
 | FE-07 | Align dropdown chevrons | C V Jayanth | REVIEW | — | Inset chevrons with a native fallback in forced colors |
+
+| FE-08 | Hindi UI and consistent navigation layout | C V Jayanth | REVIEW | — | English/Hindi picker, shared localization and responsive header |

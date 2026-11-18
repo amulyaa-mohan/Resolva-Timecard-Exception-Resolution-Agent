@@ -2,7 +2,7 @@
 export type ExceptionStatus = 'open' | 'proposed' | 'escalated' | 'resolved';
 export type DecisionType = 'approved' | 'edited' | 'rejected';
 export type Role = 'employee' | 'manager' | 'payroll_admin' | 'compliance' | 'admin';
-export type UILang = 'en' | 'kn' | 'hi';
+export type UILang = 'en' | 'hi';
 
 export interface PunchEvent {
   id: string;

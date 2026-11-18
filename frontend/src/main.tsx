@@ -1,3 +1,4 @@
+import { LanguageContext, translate } from "./lib/locale";
 ﻿import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { LoginScreen } from './components/LoginScreen';
@@ -19,17 +20,11 @@ const LABELS: Record<UILang, {
     kpiWarnings: 'Open Warnings', kpiReady: 'AI-Ready to Approve', kpiReadiness: 'Pay-Period Readiness',
     bulkApprove: 'Bulk Approve Eligible',
   },
-  kn: {
-    inbox: 'ವಿನಾಯಿತಿ ಇನ್‌ಬಾಕ್ಸ್ (Inbox)', escalations: 'ಹೆಚ್ಚುವರಿ ಪರಿಶೀಲನೆ (Escalations)', importTab: 'ಆಮದು ಪೂರ್ವವೀಕ್ಷಣೆ (Import)',
-    audit: 'ಲೆಕ್ಕಪರಿಶೋಧನೆ (Audit)', kiosk: 'ಕಿಯೋಸ್ಕ್ ಸಿಮ್ಯುಲೇಟರ್', policies: 'ನೀತಿಗಳು (Policies)',
-    kpiProblems: 'ತೆರೆದ ಸಮಸ್ಯೆಗಳು (Problems)', kpiWarnings: 'ಎಚ್ಚರಿಕೆಗಳು (Warnings)',
-    kpiReady: 'AI ಅನುಮೋದನೆಗೆ ಸಿದ್ಧ', kpiReadiness: 'ವೇತನ ಸಿದ್ಧತೆ (Readiness)', bulkApprove: 'ಸಾಮೂಹಿಕ ಅನುಮೋದನೆ (Bulk Approve)',
-  },
   hi: {
-    inbox: 'अपवाद इनबॉक्स (Inbox)', escalations: 'एस्केलेशन (Escalations)', importTab: 'इम्पोर्ट पूर्वावलोकन (Import)',
-    audit: 'ऑडिट ट्रेल (Audit)', kiosk: 'कियोस्क सिम्युलेटर', policies: 'नीतियां और सेटिंग्स',
-    kpiProblems: 'खुली समस्याएं (Problems)', kpiWarnings: 'चेतावनियां (Warnings)',
-    kpiReady: 'AI अनुमोदन के लिए तैयार', kpiReadiness: 'पेरोल तैयारी (Readiness)', bulkApprove: 'सामूहिक अनुमोदन (Bulk Approve)',
+    inbox: 'अपवाद इनबॉक्स', escalations: 'एस्केलेशन', importTab: 'इम्पोर्ट पूर्वावलोकन',
+    audit: 'ऑडिट ट्रेल', kiosk: 'कियोस्क सिम्युलेटर', policies: 'नीतियां और सेटिंग्स',
+    kpiProblems: 'खुली समस्याएं', kpiWarnings: 'चेतावनियां',
+    kpiReady: 'AI अनुमोदन के लिए तैयार', kpiReadiness: 'पेरोल तैयारी', bulkApprove: 'सामूहिक अनुमोदन',
   },
 };
 
@@ -42,7 +37,7 @@ function App() {
   const [selectedId, setSelectedId] = useState<string | null>(initial.exceptions[0]?.id ?? null);
   const [tab, setTab] = useState<Tab>('inbox');
   const [role, setRole] = useState<Role>('manager');
-  const [lang, setLang] = useState<UILang>('en');
+  const [lang, setLang] = useState<UILang>(() => localStorage.getItem('resolva-language') === 'hi' ? 'hi' : 'en');
   const [aiEnabled, setAiEnabled] = useState(true);
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.75);
   const [locationFilter, setLocationFilter] = useState('ALL');
@@ -51,6 +46,12 @@ function App() {
   const [toast, setToast] = useState<{ msg: string; undoItem?: ExceptionItem } | null>(null);
 
   const t = LABELS[lang];
+  const tr = (text: string) => translate(lang, text);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    localStorage.setItem('resolva-language', lang);
+  }, [lang]);
 
   useEffect(() => {
     checkBackendHealth().then((h) => setHealthMsg(h.message));
@@ -214,24 +215,33 @@ function App() {
 
   if (!isAuthenticated) {
     return (
+      <LanguageContext.Provider value={lang}>
+        <div className="login-language">
+          <select aria-label={tr("Language")} value={lang} onChange={(e) => setLang(e.target.value === "hi" ? "hi" : "en")}>
+            <option value="en">English</option>
+            <option value="hi">हिंदी</option>
+          </select>
+        </div>
       <LoginScreen
         onLoginSuccess={(signedInEmail) => {
           setIsAuthenticated(true);
           setCurrentUserEmail(signedInEmail);
         }}
       />
+      </LanguageContext.Provider>
     );
   }
 
   return (
+    <LanguageContext.Provider value={lang}>
     <div>
       <header className="topbar">
         <div className="brand">
           <span className="brand-title">Resolva</span>
-          <span className="fixture-pill">SYNTHETIC FIXTURES (FE-01..FE-05)</span>
+          <span className="fixture-pill">{tr("SYNTHETIC FIXTURES (FE-01..FE-05)")}</span>
         </div>
 
-        <nav className="nav-tabs" aria-label="Primary views">
+        <nav className="nav-tabs" aria-label={tr("Primary views")}>
           <button type="button" className={`nav-tab ${tab === 'inbox' ? 'active' : ''}`} onClick={() => setTab('inbox')}>
             {t.inbox} ({exceptions.filter((e) => e.status !== 'resolved').length})
           </button>
@@ -253,17 +263,16 @@ function App() {
         </nav>
 
         <div className="role-box">
-          <select aria-label="Language" className="role-select" value={lang} onChange={(e) => setLang(e.target.value as UILang)}>
-            <option value="en">EN</option>
-            <option value="kn">ಕನ್ನಡ (KN)</option>
-            <option value="hi">हिंदी (HI)</option>
+          <select aria-label={tr("Language")} className="role-select" value={lang} onChange={(e) => setLang(e.target.value === "hi" ? "hi" : "en")}>
+            <option value="en">English</option>
+            <option value="hi">हिंदी</option>
           </select>
-          <select id="role-switcher" aria-label="Active role" className="role-select mono" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            <option value="manager">manager (Priya)</option>
-            <option value="employee">employee (Read-only)</option>
-            <option value="compliance">compliance (Auditor)</option>
-            <option value="payroll_admin">payroll_admin</option>
-            <option value="admin">admin</option>
+          <select id="role-switcher" aria-label={tr("Active role")} className="role-select" value={role} onChange={(e) => setRole(e.target.value as Role)}>
+            <option value="manager">{tr("manager (Priya)")}</option>
+            <option value="employee">{tr("employee (Read-only)")}</option>
+            <option value="compliance">{tr("compliance (Auditor)")}</option>
+            <option value="payroll_admin">{tr("payroll_admin")}</option>
+            <option value="admin">{tr("admin")}</option>
           </select>
           <button
             type="button"
@@ -273,29 +282,26 @@ function App() {
               setIsAuthenticated(false);
               setCurrentUserEmail(null);
             }}
-            aria-label="Sign Out"
-            title={currentUserEmail ? `Signed in as ${currentUserEmail}` : 'Sign Out'}
-          >
-            Sign Out
-          </button>
+            aria-label={tr("Sign Out")}
+            title={currentUserEmail ? `${tr('Signed in as')} ${currentUserEmail}` : tr('Sign Out')}
+          >{tr("Sign Out")}</button>
         </div>
       </header>
 
       <div className="status-strip">
-        <span>{healthMsg}</span>
-        <span>Shortcuts: <strong>J/K</strong> navigate • <strong>A</strong> approve • <strong>E</strong> edit • <strong>R</strong> reject • <strong>Esc</strong> close</span>
+        <span>{lang === 'hi' && healthMsg.startsWith('Backend connected:') ? 'सर्वर जुड़ा है' : tr(healthMsg)}</span>
+        <span>{"" + tr("Shortcuts:") + " "}<strong>J/K</strong>{" " + tr("navigate •") + " "}<strong>A</strong>{" " + tr("approve •") + " "}<strong>E</strong>{" " + tr("edit •") + " "}<strong>R</strong>{" " + tr("reject •") + " "}<strong>Esc</strong>{" " + tr("close") + ""}</span>
       </div>
 
       <main className="container">
         {!aiEnabled && (
           <div className="banner banner-warn" style={{ marginBottom: 16 }}>
-            <strong>AI Unavailable / Kill-Switch Engaged:</strong> Showing deterministic rules-only results. Manual manager edits remain active.
-          </div>
+            <strong>{tr("AI Unavailable / Kill-Switch Engaged:")}</strong>{" " + tr("Showing deterministic rules-only results. Manual manager edits remain active.") + ""}</div>
         )}
 
         {(tab === 'inbox' || tab === 'escalations') && (
           <>
-            <section className="kpi-grid" aria-label="Pay-period summary">
+            <section className="kpi-grid" aria-label={tr("Pay-period summary")}>
               <div className="kpi-card kpi-red">
                 <div className="kpi-label">{t.kpiProblems}</div>
                 <div className="kpi-value">{openProblems}</div>
@@ -315,19 +321,19 @@ function App() {
             </section>
 
             <div className="workspace-grid">
-              <section className="panel-card" aria-label="Exception list">
+              <section className="panel-card" aria-label={tr("Exception list")}>
                 <div className="toolbar">
                   <div className="filter-group">
-                    <select className="role-select" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} aria-label="Filter by location">
-                      <option value="ALL">All Locations</option>
+                    <select className="role-select" value={locationFilter} onChange={(e) => setLocationFilter(e.target.value)} aria-label={tr("Filter by location")}>
+                      <option value="ALL">{tr("All Locations")}</option>
                       <option value="Bengaluru (BLR-01)">Bengaluru (BLR-01)</option>
                       <option value="Bengaluru (BLR-02)">Bengaluru (BLR-02)</option>
                       <option value="Austin (AUS-01)">Austin (AUS-01)</option>
                     </select>
-                    <select className="role-select" value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)} aria-label="Filter by severity">
-                      <option value="ALL">All Severities</option>
-                      <option value="problem">Problems Only</option>
-                      <option value="warning">Warnings Only</option>
+                    <select className="role-select" value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)} aria-label={tr("Filter by severity")}>
+                      <option value="ALL">{tr("All Severities")}</option>
+                      <option value="problem">{tr("Problems Only")}</option>
+                      <option value="warning">{tr("Warnings Only")}</option>
                     </select>
                   </div>
 
@@ -345,19 +351,17 @@ function App() {
                   <table>
                     <thead>
                       <tr>
-                        <th>Severity</th>
-                        <th>Employee</th>
-                        <th>Canonical Code</th>
-                        <th>AI / Validator Status</th>
-                        <th>State</th>
+                        <th>{tr("Severity")}</th>
+                        <th>{tr("Employee")}</th>
+                        <th>{tr("Canonical Code")}</th>
+                        <th>{tr("AI / Validator Status")}</th>
+                        <th>{tr("State")}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {visibleItems.length === 0 ? (
                         <tr>
-                          <td colSpan={5} style={{ textAlign: 'center', padding: 24 }} className="muted">
-                            No exceptions match the current filter.
-                          </td>
+                          <td colSpan={5} style={{ textAlign: 'center', padding: 24 }} className="muted">{tr("No exceptions match the current filter.")}</td>
                         </tr>
                       ) : (
                         visibleItems.map((item) => {
@@ -368,29 +372,29 @@ function App() {
                               className={`inbox-row ${item.id === selectedId ? 'selected' : ''}`}
                               onClick={() => setSelectedId(item.id)}
                             >
-                              <td><span className={`badge badge-${item.severity}`}>{item.severity.toUpperCase()}</span></td>
+                              <td><span className={`badge badge-${item.severity}`}>{tr(item.severity.toUpperCase())}</span></td>
                               <td>
                                 <strong>{item.employee_name}</strong>
                                 <div className="small muted">{item.location} • {item.work_date}</div>
                               </td>
                               <td>
                                 <div className="mono small"><strong>{item.code}</strong> <span className="muted">({item.policy_pack_id})</span></div>
-                                <div className="small muted">{item.summary}</div>
+                                <div className="small muted">{tr(item.summary)}</div>
                               </td>
                               <td>
                                 {!aiEnabled ? (
-                                  <span className="badge-neutral">Rules-Only</span>
+                                  <span className="badge-neutral">{tr("Rules-Only")}</span>
                                 ) : item.stale_warning ? (
-                                  <span className="badge-escalated">Stale (409)</span>
+                                  <span className="badge-escalated">{tr("Stale (409)")}</span>
                                 ) : passed ? (
-                                  <span className="badge-ai">AI Draft ({Math.round((item.proposal?.confidence ?? 0) * 100)}%)</span>
+                                  <span className="badge-ai">{tr("AI Draft (")}{Math.round((item.proposal?.confidence ?? 0) * 100)}%)</span>
                                 ) : (
-                                  <span className="badge-escalated">Escalated / Blocked</span>
+                                  <span className="badge-escalated">{tr("Escalated / Blocked")}</span>
                                 )}
                               </td>
                               <td>
                                 <span className={item.status === 'resolved' ? 'badge-pass' : 'badge-neutral'}>
-                                  {item.status.toUpperCase()}
+                                  {tr(item.status.toUpperCase())}
                                 </span>
                               </td>
                             </tr>
@@ -467,11 +471,9 @@ function App() {
 
       {toast && (
         <div className="toast" role="status" aria-live="polite">
-          <span>{toast.msg}</span>
+          <span>{tr(toast.msg)}</span>
           {toast.undoItem && (
-            <button type="button" className="btn-secondary" style={{ padding: '4px 10px' }} onClick={handleUndo}>
-              Undo (Audited Reversal)
-            </button>
+            <button type="button" className="btn-secondary" style={{ padding: '4px 10px' }} onClick={handleUndo}>{tr("Undo (Audited Reversal)")}</button>
           )}
           <button type="button" className="btn-ghost" style={{ color: '#fff' }} onClick={() => setToast(null)}>
             ✕
@@ -479,6 +481,7 @@ function App() {
         </div>
       )}
     </div>
+    </LanguageContext.Provider>
   );
 }
 
