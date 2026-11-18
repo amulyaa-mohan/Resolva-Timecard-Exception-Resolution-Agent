@@ -422,16 +422,29 @@ function App() {
 
         {tab === 'import' && (
           <ImportPreviewView
+            role={role}
             onImportValid={(newItems) => {
               setExceptions((prev) => [...newItems, ...prev]);
               if (newItems[0]) setSelectedId(newItems[0].id);
+            }}
+            onOpenException={(excId) => {
+              setSelectedId(excId);
               setTab('inbox');
-              setToast({ msg: `Imported ${newItems.length} valid exception(s) into Inbox.` });
             }}
           />
         )}
 
-        {tab === 'audit' && <AuditView events={auditEvents} />}
+        {tab === 'audit' && (
+          <AuditView
+            events={auditEvents}
+            selectedCase={selectedItem}
+            role={role}
+            onOpenCase={(excId) => {
+              setSelectedId(excId);
+              setTab('inbox');
+            }}
+          />
+        )}
 
         {tab === 'kiosk' && (
           <KioskView
@@ -486,4 +499,5 @@ function App() {
 }
 
 createRoot(document.getElementById('root')!).render(<App />);
+
 
