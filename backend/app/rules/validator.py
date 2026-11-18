@@ -33,6 +33,7 @@ from app.rules.engine import (
     blocked_checks,
     evaluate_rules,
     instant,
+    net_worked_hours,
 )
 
 # Trusted backend source of other-day totals, keyed by the case's own identifiers.
@@ -288,11 +289,94 @@ def _validate(
         # another violation (e.g. completing a shift that then exceeds weekly hours).
         checks = evaluate_rules(simulated, policy, aggregates)
         checks = _warning_needs_review(checks, parsed)
+        checks = _carry_prior_warnings(checks, before, case, simulated, parsed, policy)
         return ValidationResult(
-            passed=all(c.passed for c in checks), checks=checks, rule_version=RULE_VERSION
+            passed=all(c.passed for c in checks),
+            checks=checks,
+            rule_version=RULE_VERSION,
         )
     except (ValueError, AttributeError, KeyError) as exc:
         return _reject(f"Invalid correction evidence: {exc}", RuleOutcome.INSUFFICIENT_EVIDENCE)
+
+
+def _late_only_revealed(
+    simulated: CaseContext, actions: list[ProposedAction], policy: PolicySnapshot
+) -> bool:
+    """Is the schedule deviation only a late arrival, revealed by an added clock-out?
+
+    Decided 2026-11-18 (late arrival only). A clock-out completes a day with a late clock-in, so
+    the late-arrival warning appears only then. It is carried, and so does not block, only when
+    the correction adds a clock-out, the arrival is late beyond tolerance, and the departure is
+    within tolerance. An early departure, or any other rule, is never carried this way.
+    """
+    if simulated.schedule is None:
+        return False
+    if not any(a.type == ActionType.ADD_PUNCH and a.punch_type == PunchType.OUT for a in actions):
+        return False
+    work = [p for p in simulated.punches if p.type in (PunchType.IN, PunchType.OUT)]
+    ins = [p for p in work if p.type == PunchType.IN]
+    outs = [p for p in work if p.type == PunchType.OUT]
+    if not ins or not outs:
+        return False
+    tolerance = policy.rules.late_tolerance_min * 60
+    late_by = (
+        instant(min(ins, key=lambda p: instant(p.ts)).ts) - instant(simulated.schedule.start)
+    ).total_seconds()
+    early_by = (
+        instant(simulated.schedule.end) - instant(max(outs, key=lambda p: instant(p.ts)).ts)
+    ).total_seconds()
+    return late_by > tolerance and early_by <= tolerance
+
+
+def _carry_prior_warnings(
+    checks: list[RuleCheck],
+    before: list[RuleCheck],
+    original: CaseContext,
+    simulated: CaseContext,
+    actions: list[ProposedAction],
+    policy: PolicySnapshot,
+) -> list[RuleCheck]:
+    """Warnings that this correction does not block (decided 2026-11-18).
+
+    1. A warning already open before the correction, on a rule the correction does not target.
+    2. A late-arrival warning revealed by an added clock-out (see _late_only_revealed).
+
+    Such a check is reported as passing, with a reason saying why, because `passed` must agree
+    with the checks (contract 0.2.0). The warning stays open as its own exception, so nothing is
+    hidden. Problem-severity rules, the target rule, overtime, meal breaks, early departures and
+    any other violation the correction creates still block.
+    """
+    already_open = {c.code for c in before if c.outcome == RuleOutcome.VIOLATION}
+    revealed_late = _late_only_revealed(simulated, actions, policy)
+    carried: dict[ExceptionCode, str] = {}
+    for c in checks:
+        if c.outcome != RuleOutcome.VIOLATION or c.code == original.code:
+            continue
+        if DEFAULT_SEVERITY[c.code] != Severity.WARNING:
+            continue
+        if c.code in already_open:
+            if c.code == ExceptionCode.OVERTIME_RISK:
+                old_hours = net_worked_hours(original.punches)
+                new_hours = net_worked_hours(simulated.punches)
+                # Other-day totals are unchanged, so a day's increase also raises weekly hours.
+                if old_hours is None or new_hours is None or new_hours > old_hours:
+                    continue
+            carried[c.code] = "Already open before this correction"
+        elif c.code == ExceptionCode.SCHEDULE_DEVIATION and revealed_late:
+            carried[c.code] = "Late arrival revealed by the added clock-out, not changed by it"
+    updated = [
+        c.model_copy(
+            update={
+                "passed": True,
+                "outcome": RuleOutcome.PASS,
+                "reason": f"{carried[c.code]}: {c.reason}",
+            }
+        )
+        if c.code in carried
+        else c
+        for c in checks
+    ]
+    return updated
 
 
 def _warning_needs_review(

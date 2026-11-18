@@ -619,3 +619,8 @@ Never include credentials, private employee data, or invented test results.
 - Validation on the merged code: CI on `main` green (639 tests on PostgreSQL, none skipped); Docker stack with live Qwen2.5-7B: demo story end to end, HTTP walk-through 49/49, 0 server errors; full live eval 100% in every category, 0 unsafe, p50 4.45 s.
 - Decision: contract 0.3.0 is out of scope for the deadline. Unsupported fix types escalate to the manager.
 - Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Overtime warning carry-over regression
+
+- Reproduced an approval that increased projected weekly hours from 49 to 50 against a 48-hour limit.
+- The validator keeps an existing overtime warning blocking if a correction increases net worked hours. Corrections that leave hours unchanged or reduce them retain the existing carry-over behavior.
