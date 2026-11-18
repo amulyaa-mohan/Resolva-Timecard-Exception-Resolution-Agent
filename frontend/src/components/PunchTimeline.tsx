@@ -158,25 +158,15 @@ export function PunchTimeline({ item, editedTimeHHMM }: PunchTimelineProps) {
     // Sort chronologically
     rawList.sort((a, b) => a.minutes - b.minutes);
 
-    // Stagger close events (< 40 minutes apart) into alternating tiers to prevent overlap
-    let lastTier = 0;
-    let lastMins = -999;
-
+    // Assign each marker to the first of three tiers where its label will not overlap
+    // the previous label in that tier. Labels are roughly 60 minutes wide on the timeline.
+    const LABEL_SPAN_MIN = 60;
+    const lastInTier = [-Infinity, -Infinity, -Infinity];
     return rawList.map((m) => {
-      let tier = 0;
-      if (m.minutes - lastMins < 40) {
-        tier = (lastTier + 1) % 2;
-      } else {
-        tier = 0;
-      }
-      lastMins = m.minutes;
-      lastTier = tier;
-
-      return {
-        ...m,
-        tier,
-        leftPct: toPct(m.minutes),
-      };
+      let tier = lastInTier.findIndex((last) => m.minutes - last >= LABEL_SPAN_MIN);
+      if (tier === -1) tier = lastInTier.indexOf(Math.min(...lastInTier));
+      lastInTier[tier] = m.minutes;
+      return { ...m, tier, leftPct: toPct(m.minutes) };
     });
   }, [item, editedTimeHHMM, startHour, endHour, spanMinutes, tr]);
 
@@ -192,7 +182,7 @@ export function PunchTimeline({ item, editedTimeHHMM }: PunchTimelineProps) {
         <div>
           <span className="section-label">{tr("Shift & Punch Timeline")}</span>
           <span className="small muted">
-            {tr("Displaying")} {String(startHour).padStart(2, '0')}:00 – {String(endHour).padStart(2, '0')}:00 ({item.timezone})
+            {tr("Displaying")} {String(startHour).padStart(2, '0')}:00 – {String(endHour).padStart(2, '0')}:00 · {item.timezone}
           </span>
         </div>
         <div className="timeline-legend" aria-hidden="true">
@@ -252,7 +242,7 @@ export function PunchTimeline({ item, editedTimeHHMM }: PunchTimelineProps) {
                   ? `AI ${m.timeFormatted}`
                   : isEdit
                   ? `Edit ${m.timeFormatted}`
-                  : `${m.type === 'break_start' ? 'brk_in' : m.type === 'break_end' ? 'brk_out' : m.type} ${m.timeFormatted}`}
+                  : m.timeFormatted}
               </div>
             </div>
           );

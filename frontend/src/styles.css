@@ -390,7 +390,7 @@ tr.inbox-row.selected { background: #eef2ff; }
 .dot-edit { width: 8px; height: 8px; border-radius: 50%; background: var(--indigo); display: inline-block; }
 
 .timeline-track { position: relative; height: 84px; background: #f8fafc; border-radius: 6px; border: 1px solid var(--border); margin: 10px 0 6px 0; }
-.timeline-schedule-bar { position: absolute; top: 10px; height: 16px; background: rgba(148, 163, 184, 0.22); border: 1px dashed #64748b; border-radius: 4px; font-size: 10px; color: #334155; padding: 1px 6px; overflow: hidden; white-space: nowrap; z-index: 1; }
+.timeline-schedule-bar { position: absolute; top: 10px; height: 20px; background: rgba(148, 163, 184, 0.22); border: 1px dashed #64748b; border-radius: 4px; font-size: 11px; line-height: 16px; color: #334155; padding: 0 6px; overflow: hidden; white-space: nowrap; z-index: 1; }
 .timeline-marker { position: absolute; top: 10px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; z-index: 3; cursor: pointer; }
 .timeline-marker:focus-visible { outline: 2px solid var(--indigo); outline-offset: 2px; border-radius: 4px; }
 .marker-pin { width: 10px; height: 10px; border-radius: 50%; background: #0f172a; border: 2px solid #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.18); }
@@ -398,7 +398,10 @@ tr.inbox-row.selected { background: #eef2ff; }
 .timeline-marker.manager-edit .marker-pin { background: var(--indigo); }
 .timeline-marker.tier-0 .marker-label { margin-top: 4px; }
 .timeline-marker.tier-1 { top: 10px; }
-.timeline-marker.tier-1 .marker-stem { width: 1px; height: 18px; border-left: 1px dashed #94a3b8; }
+.timeline-marker.tier-1 .marker-stem, .timeline-marker.tier-2 .marker-stem { width: 1px; border-left: 1px dashed #94a3b8; }
+.timeline-marker.tier-1 .marker-stem { height: 18px; }
+.timeline-marker.tier-2 .marker-stem { height: 40px; }
+.timeline-marker.tier-2 .marker-label { margin-top: 2px; }
 .timeline-marker.tier-1 .marker-label { margin-top: 2px; }
 .marker-label {
   font-size: var(--text-mono-size);
@@ -1116,3 +1119,7 @@ summary:focus-visible,
   .topbar { padding: 10px 14px; }
   .kpi-grid { grid-template-columns: 1fr; }
 }
+
+/* Kiosk simulator: centred single column, matches the container width */
+.kiosk-card { max-width: 640px; margin: 0 auto; padding: 20px; }
+.kiosk-title { margin-top: 0; }

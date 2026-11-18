@@ -1060,8 +1060,8 @@ export function KioskView({ onSimulatePunch }: { onSimulatePunch: (newExc: Excep
   };
 
   return (
-    <div className="panel-card" style={{ maxWidth: 640, padding: 20 }}>
-      <h2 style={{ marginTop: 0 }}>{tr("Kiosk Punch Simulator (Live Event Demo)")}</h2>
+    <div className="panel-card kiosk-card">
+      <h2 className="kiosk-title">{tr("Kiosk Punch Simulator (Live Event Demo)")}</h2>
       <p className="muted">{tr("Simulates a raw immutable punch event entering the deterministic rules detector and routing an AI-drafted proposal into the Manager Inbox.")}</p>
       <form onSubmit={handleIngest} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <label className="field-label">{tr("Employee ID:")}<input className="input-field mono" value={empId} onChange={(e) => setEmpId(e.target.value)} required />
