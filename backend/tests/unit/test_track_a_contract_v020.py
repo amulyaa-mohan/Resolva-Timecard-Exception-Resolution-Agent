@@ -379,10 +379,11 @@ def test_two_adjustments_fix_spread(policy):
     result = validator(case, [adjust("P-0", 6, 25), adjust("P-3", 18, 5)], policy)
     failed = {c.code: c.reason for c in result.checks if not c.passed}
     assert ExceptionCode.SPREAD_OVER_BREACH not in failed  # the targeted rule is fixed
-    # ...but the day still breaks other rules (7 h after the break, 10h40 net), so the
-    # correction cannot be approved as-is. An early start is not a deviation (audit A5).
-    assert not result.passed
-    assert {ExceptionCode.MEAL_BREAK_BREACH, ExceptionCode.OVERTIME_RISK} <= set(failed)
+    # The day still has warnings (7 h after the break, 10h40 net). They were already open and
+    # this correction does not change them, so they no longer block it (decided 2026-11-18).
+    # An early start is not a deviation (audit A5).
+    assert result.passed
+    assert {ExceptionCode.MEAL_BREAK_BREACH, ExceptionCode.OVERTIME_RISK}.isdisjoint(failed)
     assert ExceptionCode.SCHEDULE_DEVIATION not in failed
 
 
