@@ -44,7 +44,7 @@ EVALS_DIR = Path(__file__).resolve().parent
 REPORTS_DIR = EVALS_DIR / "reports"
 
 PRIMARY, STUB = "real", "stub"
-CATEGORIES = ("clear", "ambiguous", "adversarial", "jurisdiction", "evidence")
+CATEGORIES = ("clear", "ambiguous", "adversarial", "jurisdiction", "evidence", "adjustment")
 HEADLINE = [
     (
         "proposal_accuracy",
@@ -237,6 +237,7 @@ def _actions_match(case: EvalCase, result: ProposalResult) -> bool:
         if not any(
             a.type.value == exp.type
             and (exp.punch_type is None or a.punch_type == exp.punch_type)
+            and (exp.punch_id is None or a.punch_id == exp.punch_id)
             and a.new_ts is not None
             and abs((a.new_ts - target).total_seconds()) <= exp.tolerance_min * 60
             for a in proposed
@@ -445,7 +446,7 @@ def fmt(v, pct=True):
 def render_markdown(report: dict) -> str:
     m, r, s, p = report["meta"], report["retrieval"], report["safety"], report["proposals"]
     real, stub = p[PRIMARY], p[STUB]
-    rules_only = [o for o in p["rows"] if o["rules_only"]]
+    rules_only = [o for o in p["rows"] if o["rules_only"] and o["category"] == "evidence"]
     lines = [
         f"# Resolva evaluation report: {m['label']}",
         "",
@@ -494,7 +495,7 @@ def render_markdown(report: dict) -> str:
         "Accuracy by category (stand-in, excluding rules-only cases): "
         + ", ".join(f"{k} {fmt(v)}" for k, v in stub["by_category"].items()),
         "",
-        f"Rules-only cases (missing or short breaks, missing or wrong-period totals, weekly "
+        f"Evidence-gap cases (missing or short breaks, missing or wrong-period totals, weekly "
         f"overtime): the real rules made {sum(o['status'] == 'eligible' for o in rules_only)} of "
         f"{len(rules_only)} eligible; the stand-in would have made "
         f"{sum(o['stub_status'] == 'eligible' for o in rules_only)} of {len(rules_only)} eligible.",
@@ -601,7 +602,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=None)
     parser.add_argument("--embeddings", choices=["hashing", "ollama"], default="hashing")
     parser.add_argument("--gates", choices=list(GATES), default="ci")
-    parser.add_argument("--prompt", choices=["propose_v1", "propose_v2"], default="propose_v2")
+    parser.add_argument(
+        "--prompt", choices=["propose_v1", "propose_v2", "propose_v3"], default="propose_v3"
+    )
     parser.add_argument("--label", default=None)
     parser.add_argument("--out", type=Path, default=REPORTS_DIR)
     parser.add_argument(

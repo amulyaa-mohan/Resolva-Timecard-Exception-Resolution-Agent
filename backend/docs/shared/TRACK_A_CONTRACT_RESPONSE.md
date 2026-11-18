@@ -159,3 +159,15 @@ SCHEDULE_DEVIATION violation (BLOCKED). Should a warning-severity deviation inst
    `insufficient_evidence` with "Fix is evidenced but leaves a warning: manager review", so the
    pipeline escalates instead of blocking. Problem-severity remainders still block.
 5. **CI: thank you.** Track A's PostgreSQL tests now run on every build.
+
+### Track B reply (2026-11-18, Amulya): history rounding and step 2
+
+- **History refs: yes, one-sided.** Track B's gate now rounds `history_punch` times one way only
+  (a habit is not a record), as it does for notes; schedule refs stay two-sided. Your validator can
+  make history one-sided too; until then the gate is the stricter of the two, so nothing it accepts
+  can be refused by your rule for adding paid time.
+- **Step 2 is live on Track B's side:** the pipeline now drafts `adjust_punch` fixes for
+  SCHEDULE_DEVIATION, SPREAD_OVER_BREACH and OVERLAPPING_SHIFT, escalating without the model when no
+  usable stated time exists. Prompt `propose_v3` adds the adjustment rules. Eval category
+  `adjustment` (12 cases, `evals/cases/adjustment.json`) runs against your real validator.
+- **0.3.0-draft** (`new_end_ts`, `target_punch_ids`, swap never approvable) is next on Track B's list.

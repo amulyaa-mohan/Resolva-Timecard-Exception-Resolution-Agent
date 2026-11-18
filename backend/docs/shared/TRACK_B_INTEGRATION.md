@@ -114,6 +114,17 @@ Qwen2.5-7B check showed why: with no schedule the model invented a clock-out 30 
 clock-in, and no attendance rule flags such a shift. Fill `punch_history` (previous 7 days) so
 this gate can use it.
 
+Since 2026-11-18 (step 2) the gate also covers SCHEDULE_DEVIATION, SPREAD_OVER_BREACH and
+OVERLAPPING_SHIFT, whose only automated fix is your `adjust_punch` to a stated time. They escalate
+before the model when no note states a time, or when every stated time is more than
+`missing_punch_window_min` from all recorded work punches (not a punching error). The time-evidence
+gate rounds stated (note) and habitual (history) times one way only, matching your validator, so a
+stated 09:05 can never become 09:00. The model sees per-code facts (deviation minutes, spread,
+overlapping sessions paired FIFO like your engine, stated times labelled as claims). A cited chunk_id
+that is mangled but unambiguously names a retrieved, active-version clause (seen live:
+`IN-KA@2025.1#KA-2025.1#KA-11`) is normalised and recorded as gate check
+`citation_ids_normalised`; anything else still fails `citations_retrieved`.
+
 The design doc's other "always escalate" cases need agreed `detection_details` keys. Proposed:
 `overlap_minutes` (OVERLAPPING_SHIFT; escalate above 120), `spread_minutes` (SPREAD_OVER_BREACH),
 `quarter_ot_hours` (OVERTIME_RISK). Confirm or rename them as part of SHARED-01 decision 11.

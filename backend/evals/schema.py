@@ -100,6 +100,7 @@ class InputSpec(_Spec):
 class ExpectedAction(_Spec):
     type: str
     punch_type: PunchType | None = None
+    punch_id: str | None = Field(default=None, description="adjust_punch: the recorded punch.")
     time: str = Field(pattern=r"^\d{2}:\d{2}$")
     day: int = 0
     tolerance_min: int = 15
@@ -123,7 +124,7 @@ class Expected(_Spec):
 
 class EvalCase(_Spec):
     id: str
-    category: Literal["clear", "ambiguous", "adversarial", "jurisdiction", "evidence"]
+    category: Literal["clear", "ambiguous", "adversarial", "jurisdiction", "evidence", "adjustment"]
     description: str
     rules_only: bool = Field(
         default=False,
@@ -229,7 +230,11 @@ def build_case_context(case: EvalCase) -> CaseContext:
             EmployeeNote(note_id=f"N-{i}", text=t, submitted_at=at(tz, "21:00"))
             for i, t in enumerate(spec.notes, start=1)
         ],
-        detection_details={"unmatched_punch_id": unmatched},
+        detection_details=(
+            {"unmatched_punch_id": unmatched}
+            if spec.code == ExceptionCode.MISSING_PUNCH
+            else {"reason": case.description}  # what Track A's detection writes today
+        ),
         evidence_version=f"eval-{case.id}",
         as_of=at(tz, as_of.time, as_of.day),
     )

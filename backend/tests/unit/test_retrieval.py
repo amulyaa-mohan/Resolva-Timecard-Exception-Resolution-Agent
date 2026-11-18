@@ -43,8 +43,9 @@ def test_top_clause_is_the_relevant_one(registry, pack, code):
 
 
 def test_no_supporting_clause_escalates(registry, settings):
-    # US-FED has no spread-over rule, so nothing clears the relevance floor.
-    case = case_for(ExceptionCode.SPREAD_OVER_BREACH, "US-FED")
+    # US-FED has no spread-over rule, so nothing clears the relevance floor. The note states a
+    # time near the recorded punch so the case passes the evidence gate and reaches retrieval.
+    case = case_for(ExceptionCode.SPREAD_OVER_BREACH, "US-FED", notes=("I punched in at 09:00.",))
     policy = registry.get("US-FED", "2025.1")
     assert retrieve(case, policy).clauses == []
     result = generate_proposal(

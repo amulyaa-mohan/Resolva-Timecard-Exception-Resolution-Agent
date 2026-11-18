@@ -190,7 +190,8 @@ def evaluate_rule_outcomes(
             policy.status != "active"
             or policy.jurisdiction != case.employee.jurisdiction
             or case.work_date < policy.effective_from
-            or (policy.effective_to is not None and case.work_date > policy.effective_to)
+            # effective_to is exclusive, as in PolicyRegistry.resolve (audit A6).
+            or (policy.effective_to is not None and case.work_date >= policy.effective_to)
         ):
             return blocked("Applicable active policy evidence is missing or inconsistent.")
         rules = policy.rules
@@ -244,8 +245,13 @@ def evaluate_rule_outcomes(
         meal = (bad, "Break punches unpaired or outside a single worked interval.")
     else:
         meal = (ok, "Observed breaks meet demo policy.")
-        for start, end in work:
-            cursor = start
+        # Audit A1: a clock-out/clock-in gap is a rest only when it lasts rest_minutes; a
+        # shorter gap must not restart the work count (13:00 out, 13:01 in is no meal break).
+        cursor, previous_end = None, None
+        for start, end in sorted(work, key=lambda w: instant(w[0])):
+            if cursor is None or hours(previous_end, start) * 60 >= rules.rest_minutes:
+                cursor = start
+            previous_end = end
             for bs, be in breaks:
                 if instant(start) <= instant(bs) and instant(be) <= instant(end):
                     if hours(cursor, bs) > rules.rest_after_hours:
@@ -296,11 +302,13 @@ def evaluate_rule_outcomes(
         schedule = (unknown, unpaired)
     else:
         tolerance = rules.late_tolerance_min * 60
-        inside = (
-            abs((instant(work[0][0]) - instant(case.schedule.start)).total_seconds()) <= tolerance
-            and abs((instant(work[-1][1]) - instant(case.schedule.end)).total_seconds())
-            <= tolerance
-        )
+        # Audit A5: policy KA-9 / US-6 define a deviation as a late arrival or an early
+        # departure. Arriving early or leaving late is extra time, judged by OVERTIME_RISK.
+        first_in = min((s for s, _ in work), key=instant)
+        last_out = max((e for _, e in work), key=instant)
+        late_by = (instant(first_in) - instant(case.schedule.start)).total_seconds()
+        early_by = (instant(case.schedule.end) - instant(last_out)).total_seconds()
+        inside = late_by <= tolerance and early_by <= tolerance
         schedule = (
             (ok, "Within schedule tolerance.") if inside else (bad, "Outside schedule tolerance.")
         )

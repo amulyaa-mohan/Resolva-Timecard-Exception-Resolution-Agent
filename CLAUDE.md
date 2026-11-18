@@ -70,7 +70,12 @@ Settings are unprefixed env vars or `backend/.env` (`AI_ENABLED`, `LLM_PROVIDER`
   1 repair retry) -> schema -> exception id -> escalation citations stripped if unverified -> allowed
   actions -> time evidence (added punch within 5 min of schedule/stated time/history) -> citations
   retrieved + verbatim -> validator (non-empty) -> missing info -> confidence.
-- Prompts: `propose_v2` (default; adds a trusted `<facts>` block with local dates) and `propose_v1`.
+- Prompts: `propose_v3` (default since step 2: stated-time adjustment rules), `propose_v2` (trusted
+  `<facts>` block with local dates) and `propose_v1`.
+- Step 2 (2026-11-18): proposals for SCHEDULE_DEVIATION, SPREAD_OVER_BREACH, OVERLAPPING_SHIFT via
+  adjust_punch to a stated time. Pre-model gate escalates with no usable stated time; stated and
+  history times round one way (no extra pay); per-code `<facts>`; mangled-but-unambiguous citation
+  ids normalised (`citation_ids_normalised`). Eval category `adjustment` (12 cases, 57 total).
 - Evals: `cd backend && python -m evals.run` (45 labelled cases incl. 9 evidence-gap cases, 20 scripted
   unsafe outputs, 12 retrieval cases). Since 2026-11-18 proposals are validated by Track A's
   `make_validator` with trusted eval totals (`evals/aggregates.py`); cases carry an observed break,
@@ -81,20 +86,23 @@ Settings are unprefixed env vars or `backend/.env` (`AI_ENABLED`, `LLM_PROVIDER`
 - Latest live report (dcccc0c, real validator, 45 cases): all 6 live gates pass, proposal accuracy
   100% under real and stand-in, every category 100%, p50 4.78 s; real rules made 0/6 rules-only
   cases eligible vs 6/6 for the stand-in. Lexicon intents 100% en/hi/kn, paraphrases 10/12.
-- Tests: 441 passing + 31 PostgreSQL tests (466 with `TEST_DATABASE_URL`; CI runs them on a
+- Tests: 502 passing + 48 PostgreSQL tests (550 with `TEST_DATABASE_URL`) (466 with `TEST_DATABASE_URL`; CI runs them on a
   `postgres:15` service and fails if they skip). `docker compose --profile postgres` for local PG. `tzdata` is a runtime dependency (Windows/slim images). Local Ollama in Docker: `cd backend && docker compose -f docker-compose.yml
   -f docker-compose.gpu.yml --profile ollama up -d ollama` (models persist in the `ollama-models` volume).
 
 ## Next up
 
+0. Backend audit 2026-11-18 (`backend/docs/shared/AUDIT_2026-11-18.md`): B1-B3 and, at Amulya's
+   request, Track A's A1-A7 fixed by Track B (one-off exception to the ownership split). Jayanth
+   to review, especially A5 (schedule deviation = late arrival / early departure only).
 1. Jayanth adopted 0.2.0 (8ad2e15) and added PostgreSQL, import/detection, bulk decisions and
    adjust_punch (c85111c). Track B answers to his A-05/A-06 questions are in
    TRACK_A_CONTRACT_RESPONSE.md (adjust_punch gate done; proposals for acknowledge, add_break
    [`new_end_ts`], void_shift [`target_punch_ids`], flag_premium, swap = advisory; one-sided
    rounding of stated times). On agreement: draft contract 0.3.0, make swap proposals ESCALATED,
    then freeze SHARED-01 (drop -draft, `as_of` required, frontend `contracts.ts`).
-1b. Extend AI proposals beyond MISSING_PUNCH: eval cases + prompt for SCHEDULE_DEVIATION
-   (adjust_punch to a stated time), OVERLAPPING_SHIFT, SPREAD_OVER_BREACH; teach the mock; live run.
+1b. Step 2 done (uncommitted until Amulya approves): after committing, generate the committed
+   live report (prompt v3, 57 cases) from a clean tree and add it to MODEL_CARD.md.
 2. SHARED-02 with Jayanth: first end-to-end missing-punch flow through his routes; wire
    `ExceptionQuery` filters into his exception list.
 3. Ask native Hindi/Kannada speakers to review the lexicons and reply templates.

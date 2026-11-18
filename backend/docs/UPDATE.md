@@ -496,3 +496,45 @@ Never include credentials, private employee data, or invented test results.
 - Validation: report run above (clean tree); live smoke check above; `live_check.py --provider mock` 6/6; ruff clean; pytest and CI eval unchanged.
 - Next step: extend proposals beyond MISSING_PUNCH (SCHEDULE_DEVIATION adjust_punch, OVERLAPPING_SHIFT, SPREAD_OVER_BREACH).
 - Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan — B-02 / B-05 — AI proposals beyond missing punches (step 2)
+
+- Branch: `backend`.
+- Status: REVIEW.
+- Changed:
+  - `app/ai/evidence.py`: pre-model gate for SCHEDULE_DEVIATION, SPREAD_OVER_BREACH and OVERLAPPING_SHIFT (escalate when no note states a time, or every stated time is more than `missing_punch_window_min` from all recorded work punches); stated (note) and habitual (history) times round one way only, so no paid time is added; schedule stays two-sided.
+  - `app/ai/pipeline.py`: per-code `<facts>` (stated times as claims, deviation minutes, spread vs limit, overlapping sessions paired FIFO like Track A's engine, an "Allowed fix" rule); citation-id normalisation for mangled ids that unambiguously name a retrieved active clause, recorded as `citation_ids_normalised`.
+  - `prompts/propose_v3.md` (new default; v2 and v1 kept); config, `.env.example` and eval CLI updated.
+  - Mock provider drafts stated-time adjustments (overlaps move the earlier session's clock-out).
+  - Evals: `evals/cases/adjustment.json` (12 cases, `rules_only`), expected `punch_id` checked, category `adjustment`, `detection_details` = `{"reason": ...}` for non-missing-punch codes as Track A writes it.
+  - Tests: `tests/unit/test_adjustments.py` (gate, rounding, facts, prompt, end to end, citation normalisation).
+- Found and fixed during the work: FIFO pairing in the overlap facts (first version dropped the second session); the mock first moved the wrong punch in an overlap, which the real validator blocked and the expected `punch_id` caught.
+- Results: mock/CI 9/9 gates; live Qwen2.5-7B, 57 cases, v2 and v3 both 100% proposal accuracy with every category 100%, all six live gates, 0 repair retries (p50 5.95 s / 6.12 s). Five repeats: spread-over fix v2 4/5 vs v3 5/5, so v3 is the default. KA-11's id was mangled in 9/10 live runs before normalisation.
+- Contracts: none (uses `adjust_punch` and `EvidenceRef` from 0.2.0). Answer on one-sided history rounding added to TRACK_A_CONTRACT_RESPONSE.md.
+- Validation: ruff check and format clean; pytest 474 passed (44 PostgreSQL tests skip locally without `TEST_DATABASE_URL`; CI runs them); `python -m evals.run` 9/9 gates; live runs and repeats above.
+- Next step: commit, then the committed live report from a clean tree.
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan — Backend audit (both tracks)
+
+- Branch: `backend`.
+- Status: REVIEW. Report: `backend/docs/shared/AUDIT_2026-11-18.md`.
+- Method: clean venv from the lock file (`pip check`, ruff, bandit rules); 518 tests on PostgreSQL 15 with none skipped; CI eval 9/9; a migrated and seeded PostgreSQL demo week (all six exception types detected through the real import path) driven over HTTP with 49 scripted checks, with the mock and with live Qwen2.5-7B; append-only triggers, audit hash chain and `db_maintenance verify` tested in the database; line-by-line review of auth, routers, SQL, store transactions, rule engine and totals.
+- Track A findings (reported, not changed): A1 High, a 1-minute clock-out/clock-in passes the meal-break rule; A2 High, `propose` holds the global write lock (advisory lock / BEGIN IMMEDIATE) during the LLM call, and three concurrent proposals took 8.9/15.8/22.3 s; A3 Medium, `llm_traces` is keyed by the client-suppliable trace id, so reusing `X-Trace-Id` gives 500; A4 Medium, unsupported fix types block instead of escalating; A5 Medium, early arrival and late departure are flagged as deviations, contrary to KA-9/US-6; A6 Low, `effective_to` is inclusive in the engine but exclusive in the registry; A7 Low, stale API docs.
+- Track B fixes: B1, the assistant requires a manager token when the attendance store is enabled; B2, HTTP providers and the Ollama embedder are shared per configuration (connection reuse, which also covers Track A's proposal route); B3, identical validator reasons are grouped. Tests: `tests/unit/test_audit_fixes.py`.
+- Validation after the fixes: ruff clean; pytest 481 passed (44 PostgreSQL tests skip locally without `TEST_DATABASE_URL`; 518 earlier with it); eval 9/9; HTTP walk-through 47/49, where the two failures are A3 and a harness typo (the import check passed with the correct column in a separate probe).
+- Publication: committed and pushed to `backend` (authorised by the owner).
+
+### 2026-11-18 — Amulya Mohan (Track B, at the owner's request) — Track A audit fixes A1-A7
+
+- Branch: `backend`.
+- Status: REVIEW (Track A to review; A5 to confirm intent).
+- Changed (Track A modules, edited at the repository owner's request; each change carries its audit id):
+  - `app/rules/engine.py`: A1, a gap between work sessions counts as rest only when it lasts `rest_minutes`; A5, only a late arrival or an early departure is a schedule deviation; A6, `effective_to` is exclusive.
+  - `app/rules/validator.py`: A4, unsupported fix types are `insufficient_evidence` (escalate).
+  - `app/resolution/store.py`: A2, `propose` reads, runs the pipeline with no transaction or lock held, then re-checks the evidence in a short write (409 if it changed); A3, trace rows are keyed `<trace id>:<proposal id>`.
+  - `docs/RESOLUTION_API.md`, `docs/ATTENDANCE_API.md`: A7.
+  - Tests: new `tests/unit/test_audit_track_a.py` and `tests/integration/test_audit_store.py` (the A2/A3 tests fail on the old code, confirmed); two Track A tests updated for A5.
+- Track B: prompt v3 rule 5 scoped to recorded punches (a live regression on c10 found during verification); eval cases d02 and d11 replaced and d13 added for the corrected rules.
+- Validation: pytest 550 passed on PostgreSQL 15 (none skipped); ruff clean; eval 9/9; Docker stack with live Qwen: HTTP walk-through 49/49, 0 server errors, audit chain valid; a decision during model calls took 0.57 s; full live eval 100% in every category, 0 unsafe.
+- Publication: committed and pushed to `backend` (authorised by the owner).
