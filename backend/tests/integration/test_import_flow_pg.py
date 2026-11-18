@@ -195,3 +195,32 @@ def test_import_scope_and_partial_rules(flow):
         client.post("/imports/preview", json={"format": "csv", "content": content}).status_code
         == 401
     )
+
+
+def test_display_fields_are_optional_and_never_affect_rules(flow):
+    """Migration 0003: organization, location and employee names are display data only."""
+    client, _, dsn = flow
+    assert post_import(client, shifts_csv(), "shifts").status_code == 200
+    first = post_import(client, punches_csv()).json()
+    assert first["detected_exception_ids"]  # detection works with no names at all
+    listing = client.get("/exceptions", headers=AUTH).json()["items"]
+    assert listing[0]["employee_name"] is None
+    sql(dsn, "INSERT INTO organizations (org_id, name) VALUES ('ORG-1', 'Demo Operations')")
+    sql(
+        dsn,
+        "INSERT INTO locations (location_id, org_id, name, city, country, timezone) "
+        "VALUES ('BLR-01', 'ORG-1', 'Bengaluru Centre', 'Bengaluru', 'India', 'Asia/Kolkata')",
+    )
+    sql(
+        dsn,
+        "UPDATE employees SET full_name = 'Aarav Sharma', job_title = 'Support Associate', "
+        "pay_type = 'hourly' WHERE employee_id = 'E-001'",
+    )
+    named = client.get("/exceptions", headers=AUTH).json()["items"]
+    assert named[0]["employee_name"] == "Aarav Sharma"
+    assert named[0]["exception_id"] == listing[0]["exception_id"]  # nothing else changed
+    # Reference data cannot be deleted out from under a site, and pay_type is constrained.
+    with pytest.raises(psycopg.errors.IntegrityError):
+        sql(dsn, "DELETE FROM organizations WHERE org_id = 'ORG-1'")
+    with pytest.raises(psycopg.errors.IntegrityError, match="pay_type"):
+        sql(dsn, "UPDATE employees SET pay_type = 'contractor' WHERE employee_id = 'E-001'")

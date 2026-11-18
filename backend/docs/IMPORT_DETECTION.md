@@ -29,6 +29,9 @@ Body: `{"kind": "punches"|"shifts", "format": "csv"|"json", "content": "...", "m
 
 - Work date = the local date of the clock-in that opens a session. A session stays open until its clock-ins are paired,
   so an overnight clock-out stays with its start date. A punch outside any session uses its own local date.
+- A clock-in on a later local date starts a new session, and nothing stays open beyond the following day.
+  An unpaired clock-in therefore stays on its own date instead of swallowing the days after it
+  (found by the demo seed: one missing clock-out used to absorb the rest of the week).
 - Runs the **same** `evaluate_rule_outcomes` as the validator. Only `violation` creates an exception.
   `insufficient_evidence` (for example a shift still running at `as_of`) does not.
 - The effective timecard = raw punches + approved `add_punch` corrections, so a resolved exception is not raised again.
@@ -46,8 +49,25 @@ Body: `{"kind": "punches"|"shifts", "format": "csv"|"json", "content": "...", "m
 Each item is authorized, validated and committed on its own. One failure never affects another.
 The response lists `{exception_id, ok, status_code (200/404/409/422), result | error, checks}` in request order.
 
+## Demo data
+
+```bash
+.venv/bin/python backend/scripts/seed_demo_week.py "postgresql://user@host:5432/resolva"
+```
+
+It writes three synthetic employees and last week's shifts and punches, imports them through the
+real preview and commit path, and lets detection raise all six exception types (plus one clean day).
+It also writes synthetic day totals from the quarter start, because one week of punches cannot
+establish a weekly or quarterly limit; without them OVERTIME_RISK is correctly undecidable.
+A manager credential is written to the ignored `backend/local/` unless one is already there.
+
+Note: an unpairable day (a missing punch, an overlap) makes that employee's week unknown, so other
+cases in the same week escalate on overtime until it is resolved. The seed puts the overlap case on
+its own employee for that reason. Resolving the missing punch makes its week decidable again.
+
 ## Not done
 
-- Attendance event updates (push) and escalation persistence.
+- Attendance event updates (pushing approved corrections to an external HCM system).
+- Structured `detection_details` keys per exception code (agreed with Track B; next Track A change).
 - Shift deletion or amendment through import (append-only for now).
 - A detection schedule or cron; detection runs after each import, or by calling `run_detection`.

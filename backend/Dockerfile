@@ -3,7 +3,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY pyproject.toml ./
 COPY app ./app
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[postgres]"
 COPY policies ./policies
 COPY prompts ./prompts
 ENV POLICIES_DIR=/app/policies PROMPTS_DIR=/app/prompts

@@ -33,6 +33,8 @@ Configuration is loaded on startup; restart after replacing credentials. This is
 ## HTTP contract
 
 - GET /exceptions: authorized summaries, total count, offset and limit.
+  Each summary carries `employee_name` (display only, null when the store keeps no personal data)
+  and `status` (open / escalated / resolved).
 - GET /exceptions/{exception_id}: authorized CaseContext with evidence_version.
 - Missing and unauthorized detail IDs both return 404 without revealing whether a case exists.
 - List responses omit employee notes and punch details; detail is restricted to the assigned manager.

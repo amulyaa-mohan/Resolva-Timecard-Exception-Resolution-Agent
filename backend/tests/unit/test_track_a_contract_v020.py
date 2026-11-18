@@ -132,7 +132,7 @@ def test_schedule_ref_tolerance(minute, ref, ok, policy):
         ("I left at 6:05 pm, forgot to punch out", 5, True),
         ("I left at 18:06", 2, True),  # 4 min from the stated time
         ("I left at 18:06", 0, False),  # 6 min from the note it cites (schedule ref would pass)
-        ("I left at 18:06", 12, False),  # 6 min from the stated time
+        ("I left at 18:06", 12, False),  # 6 min past the stated time, and it would add pay
         ("I left a bit late", 5, False),  # no stated time
     ],
 )
@@ -172,14 +172,15 @@ def test_history_ref(punch, ok, policy):
     assert validator(case, [out_at(18, 5, ref)], policy).passed is ok  # 3 min from 18:08
 
 
-def test_evidenced_late_clock_out_still_flags_schedule_deviation(policy):
-    # The note supports 18:10, but 10 min past the shift end exceeds late_tolerance_min (7):
-    # the fix would introduce a schedule deviation, so it is not eligible as-is.
+def test_evidenced_late_clock_out_is_referred_to_the_manager(policy):
+    # The note supports 18:10, which is 10 min past the shift end (tolerance 7). The fix is
+    # evidenced and its only remainder is a warning, so it escalates rather than blocking.
     case = case_with(notes=("I left at 18:10",))
     ref = EvidenceRef(kind=EvidenceKind.NOTE, id="N-0")
     result = validator(case, [out_at(18, 10, ref)], policy)
     failed = {c.code: c.outcome for c in result.checks if not c.passed}
-    assert failed == {ExceptionCode.SCHEDULE_DEVIATION: RuleOutcome.VIOLATION}
+    assert not result.passed
+    assert failed == {ExceptionCode.SCHEDULE_DEVIATION: RuleOutcome.INSUFFICIENT_EVIDENCE}
 
 
 def test_ref_still_bounded_by_inference_window(policy):
@@ -317,10 +318,10 @@ def test_adjust_backed_by_employee_note_resolves(policy):
     "action,needle",
     [
         (adjust("P-0", 9, 0, note=None), "note evidence_ref"),  # schedule alone is not proof
-        (adjust("P-0", 9, 12), "more than 5 min"),  # note says 9:05
+        (adjust("P-0", 9, 12), "adds no unclaimed paid time"),  # note says 9:05
         (adjust("P-9", 9, 5), "own punches"),  # not in this case
         (adjust("P-0", 9, 5, note="N-404"), "does not resolve"),
-        (adjust("P-0", 9, 15), "more than 5 min"),  # inside the window, 10 min from note
+        (adjust("P-0", 9, 15), "adds no unclaimed paid time"),  # 10 min from the note
     ],
 )
 def test_adjust_rejections(action, needle, policy):
@@ -338,13 +339,26 @@ def test_adjust_window_and_type_and_duplicates(policy):
     assert "same punch" in validator(late_case(), twice, policy).checks[0].reason
 
 
-def test_adjust_that_leaves_a_violation_is_blocked(policy):
-    # Moving the clock-in still leaves the shift 25+ min short at the end: not resolved.
+def test_evidenced_fix_leaving_a_warning_goes_to_the_manager(policy):
+    # Moving the clock-in still leaves the shift 30 min short at the end. Agreed with Track B:
+    # an evidenced fix whose only remainder is a warning escalates instead of blocking.
     events = [("in", 9, 25), ("break_start", 13, 0), ("break_end", 14, 0), ("out", 17, 30)]
     case = complete_day(events, ExceptionCode.SCHEDULE_DEVIATION, notes=("arrived 9:05",))
     result = validator(case, [adjust("P-0", 9, 5)], policy)
-    failed = {c.code for c in result.checks if not c.passed}
-    assert failed == {ExceptionCode.SCHEDULE_DEVIATION}
+    failed = {c.code: c.outcome for c in result.checks if not c.passed}
+    assert not result.passed  # still never approvable on its own
+    assert failed == {ExceptionCode.SCHEDULE_DEVIATION: RuleOutcome.INSUFFICIENT_EVIDENCE}
+    assert "manager review" in next(
+        c.reason for c in result.checks if c.code == ExceptionCode.SCHEDULE_DEVIATION
+    )
+    # A problem-severity remainder still blocks, evidenced or not.
+    spread = complete_day(
+        [("in", 6, 0), ("break_start", 10, 0), ("break_end", 11, 0), ("out", 18, 30)],
+        ExceptionCode.SPREAD_OVER_BREACH,
+        notes=("I started at 6:05",),
+    )
+    blocked = validator(spread, [adjust("P-0", 6, 5)], policy)
+    assert blocked.checks[4].outcome == RuleOutcome.VIOLATION
 
 
 def test_two_adjustments_fix_spread(policy):
@@ -384,3 +398,54 @@ def test_actions_without_agreed_semantics_are_refused(code, action_type, policy)
 def test_action_not_allowed_for_code(policy):
     result = validator(late_case(), [out_at(18, 0)], policy)
     assert "not allowed for SCHEDULE_DEVIATION" in result.checks[0].reason
+
+
+# ---- pay integrity: a stated time may only be rounded away from extra pay
+
+
+@pytest.mark.parametrize(
+    "stated,punch_type,hour,minute,ok",
+    [
+        # Track B's example: the note says 09:05, so 09:00 would pay 5 minutes nobody claimed.
+        ("I was at the gate at 9:05", PunchType.IN, 9, 0, False),
+        ("I was at the gate at 9:05", PunchType.IN, 9, 5, True),
+        ("I was at the gate at 9:05", PunchType.IN, 9, 8, True),  # later start: no extra pay
+        ("I was at the gate at 9:05", PunchType.IN, 9, 11, False),  # beyond the tolerance
+        ("I left at 18:05", PunchType.OUT, 18, 8, False),  # later clock-out would add pay
+        ("I left at 18:05", PunchType.OUT, 18, 5, True),
+        ("I left at 18:05", PunchType.OUT, 18, 2, True),
+    ],
+)
+def test_stated_time_rounding_never_adds_paid_time(stated, punch_type, hour, minute, ok, policy):
+    case = case_with(notes=(stated,))
+    if punch_type == PunchType.IN:
+        # Build a case missing its clock-in instead of its clock-out.
+        data = case.model_dump()
+        data["punches"] = [p for p in data["punches"] if p["type"] != "in"]
+        data["punches"].append(
+            PunchRecord(
+                punch_id="P-out",
+                employee_id="E-001",
+                ts=datetime(2026, 11, 12, 18, 0, tzinfo=IST),
+                type=PunchType.OUT,
+                source=PunchSource.KIOSK,
+            ).model_dump()
+        )
+        case = CaseContext.model_validate(data)
+    action = ProposedAction(
+        type=ActionType.ADD_PUNCH,
+        punch_type=punch_type,
+        new_ts=datetime(2026, 11, 12, hour, minute, tzinfo=IST),
+        evidence_ref=EvidenceRef(kind=EvidenceKind.NOTE, id="N-0"),
+    )
+    result = validator(case, [action], policy)
+    missing = next(c for c in result.checks if c.code == ExceptionCode.MISSING_PUNCH)
+    assert missing.passed is ok, missing.reason
+
+
+def test_schedule_anchor_keeps_both_directions(policy):
+    """The schedule is the agreed time, not a claim, so either side stays acceptable."""
+    ref = EvidenceRef(kind=EvidenceKind.SCHEDULE_END, id="S-1")
+    for minute, ok in [(3, True), (57, True), (6, False)]:
+        hour = 18 if minute < 30 else 17
+        assert validator(case_with(), [out_at(hour, minute, ref)], policy).passed is ok

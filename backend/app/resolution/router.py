@@ -1,12 +1,15 @@
 """Decision and audit APIs (A-03). Identity comes only from the bearer credential."""
 
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.ai.providers import ProviderError, build_provider
 from app.attendance.access import ManagerCredential, authenticated_manager
 from app.attendance.repository import CaseAccessDenied
+from app.core.contracts import ProposalResult, PunchRecord
 from app.core.errors import problem
 from app.resolution.store import (
     DecisionConflict,
@@ -146,6 +149,65 @@ def bulk_decide(
                 )
             )
     return results
+
+
+class EffectiveTimecard(BaseModel):
+    exception_id: str
+    employee_id: str
+    work_date: date
+    raw_punches: list[PunchRecord]
+    corrections_applied: list[dict]
+    effective_punches: list[PunchRecord]
+    net_worked_hours: float | None = Field(
+        description="Null when the effective punches still cannot be paired."
+    )
+
+
+@router.post(
+    "/{exception_id}/proposal",
+    response_model=ProposalResult,
+    responses={
+        404: {"description": "Unknown or not assigned to this manager"},
+        409: {"description": "Already resolved"},
+    },
+)
+def propose(
+    exception_id: str,
+    request: Request,
+    manager: Annotated[ManagerCredential, Depends(authenticated_manager)],
+) -> ProposalResult:
+    """Draft a correction with Track B's pipeline and store it with its model trace.
+
+    Returns eligible / blocked / escalated. It never approves anything: approving is a
+    separate, authorized decision that re-validates against fresh evidence.
+    """
+    store = request.app.state.resolution_store
+    settings = request.app.state.settings
+    try:
+        provider = build_provider(settings)
+    except ProviderError as exc:
+        return problem(503, str(exc), title="Model provider unavailable")
+    try:
+        return store.propose(exception_id, manager.manager_id, provider=provider, settings=settings)
+    except CaseAccessDenied as exc:
+        raise HTTPException(404, "Exception not found.") from exc
+    except DecisionConflict as exc:
+        return problem(409, str(exc), title="Decision conflict", errors=[{"type": "conflict"}])
+
+
+@router.get("/{exception_id}/timecard", response_model=EffectiveTimecard)
+def timecard(
+    exception_id: str,
+    request: Request,
+    manager: Annotated[ManagerCredential, Depends(authenticated_manager)],
+):
+    """Raw punches, the approved corrections applied to them, and the resulting hours."""
+    try:
+        return request.app.state.resolution_store.effective_timecard(
+            exception_id, manager.manager_id
+        )
+    except CaseAccessDenied as exc:
+        raise HTTPException(404, "Exception not found.") from exc
 
 
 @router.get("/{exception_id}/audit", response_model=list[AuditEvent])

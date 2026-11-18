@@ -211,9 +211,19 @@ draft until we both agree; then SHARED-01 is marked DONE and the frontend types 
 
 ## 6. Evaluating with your validator
 
-`python -m evals.run` (from `backend/`) runs 36 labelled cases, 18 scripted unsafe outputs and the
-retrieval set. When `validate_correction` exists, swap it in for `stub_validator.window_validator`
-in `evals/run.py` and `scripts/live_check.py`; the CI gates must stay green. Report numbers only
+Done (2026-11-18). `python -m evals.run` (from `backend/`) now validates every proposal with your
+rules: `evals/aggregates.py` builds trusted `AggregateEvidence` per case (periods from the pack's
+`week_start` / `quarter_start_month`) and calls `make_validator(load)`. Cases carry complete
+evidence by default (an observed meal break, totals, `as_of` after the shift); `evals/cases/
+evidence.json` adds 9 cases where evidence is missing or exceeds a limit (and 2 controls).
+
+Each case calls the model once. The stand-in (`stub_validator.window_validator`) judges the same
+recorded outputs as a comparison column; it is not scored on `rules_only` cases. CI gates case
+accuracy on your validator (`--gate-validator real`, the default) and requires zero unsafe
+proposals under both. If you change rule behaviour, run `python -m evals.run` and keep the gates
+green. Since your 0.2.0 adoption (8ad2e15) the gap cases require exact outcomes: e01/e04/e06
+(totals missing, wrong week, work date not certified) ESCALATE with `insufficient_evidence`;
+e02/e03/e07 (no break, weekly overtime, short break) BLOCK with `violation`. Report numbers only
 from `backend/evals/reports/`.
 
 ## 7. Rules for both agents

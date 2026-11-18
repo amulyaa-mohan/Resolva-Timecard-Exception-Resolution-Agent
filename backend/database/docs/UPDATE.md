@@ -67,3 +67,76 @@ Append entries; preserve other developers' history. Use repository-relative path
   - the full decision API suite passes on both SQLite and PostgreSQL (417 passed with TEST_DATABASE_URL).
 - Rollback: forward-only; no destructive down migrations.
 - Not done: Docker/CI PostgreSQL service (Track B owns these files); proposals/llm_traces tables; production identity.
+
+### 2026-11-18 — C V Jayanth — DB-03 — Reference data, display fields and review of the database branch
+
+- Branch: backend; status REVIEW; local until committed.
+- Migration `0003_organization_and_display_fields.sql`: `organizations`, `locations`, and
+  `employees.full_name` / `job_title` / `pay_type`. Display only: no rule, validator or
+  authorization check reads them, and detection is verified to work with all of them null.
+  No foreign key from `employees.location_id` yet, because existing rows predate `locations`.
+- Reviewed `origin/database` 48b2a1a (Soumya). Not merged, and nothing imports it, so nothing is
+  broken today. Blocking issues: based on the pre-reorganisation layout, so its files land in a root
+  `database/` that duplicates `backend/database/`; SQLite-only DDL (AUTOINCREMENT, PRAGMA, DATETIME)
+  while the team chose PostgreSQL; requires `sqlmodel`/`sqlalchemy`, which the project does not
+  depend on; naive timestamps; zero immutability triggers despite the specification; cascade deletes
+  on exceptions, proposals and shifts. Contract mismatches: integer surrogate keys with no business
+  id, wrong severity and punch-source values, no `source_event_id` for import dedupe, no
+  `evidence_version`, no decisions table, no day totals, no manager assignment validity.
+- Taken from that branch: this migration's reference tables and the documentation set, which is
+  better than ours and should be adapted into `backend/database/docs/`.
+- Validation: 491 passed with TEST_DATABASE_URL on PostgreSQL 15; fresh migrate 0001-0003 and the
+  demo seed verified; the exception list now shows employee names.
+- Next step: agree the reconciliation with Soumya, then give her DB-04 (integrity checks) and
+  retention for `llm_traces.raw_outputs` against this schema.
+
+### 2026-11-18 — C V Jayanth — DB-06 — Database branch brought onto the PostgreSQL schema
+
+- Branch: `database`, merged from `backend`. Soumya's 48b2a1a stays in history; Git recognised the
+  repository reorganisation and relocated her files from the old root `database/` into
+  `backend/database/`, so the branch now has one database area instead of two.
+- Kept from her work: the documentation structure and the reference-data idea. `README.md`,
+  `docs/architecture.md`, `docs/erd.md`, `docs/data_dictionary.md`,
+  `docs/immutability_and_audit.md` and `docs/seed_data_guide.md` keep her sections and were
+  rewritten to describe the schema that actually runs. `organizations` and `locations` were already
+  adopted in migration 0003.
+- Replaced: `001_initial_schema.sql` and `apply_migrations.py` (SQLite) by `0001`-`0003` and
+  `backend/scripts/migrate_postgres.py`; the thirteen SQLModel modules in `schema/` by the Pydantic
+  contracts, which are now the only model definition; `seeds/*.py` and `seeds/policies/*.yaml` by
+  `backend/scripts/seed_demo_week.py` and Track B's YAML packs.
+- Reasons, in short: the project runs PostgreSQL and CI enforces it; `sqlmodel` and `sqlalchemy` are
+  not dependencies; her timestamps were naive; the immutability specification had no triggers behind
+  it; evidence cascade-deleted; and ids, severities, punch sources and the missing `evidence_version`
+  did not match the agreed contracts. The full review is in `work/DB_BRANCH_REVIEW.md` (local).
+- `docs/AGENTS.md` now records the PostgreSQL and no-ORM decision instead of the old SQLite plan.
+- Validation on this branch: fresh migrate 0001-0003 on an empty database (19 tables); demo seed
+  raises all six exception types; 491 passed with TEST_DATABASE_URL, 454 passed / 37 skipped
+  without PostgreSQL; Ruff lint and format pass; `evals.run --gates ci` 9/9 PASS.
+- Next step for whoever owns the database area: DB-04 integrity checks, a retention policy for
+  `llm_traces.raw_outputs`, indexes for the exception list, and the `employees.location_id` foreign
+  key once sites are backfilled.
+
+### 2026-11-18 — C V Jayanth — DB-04/DB-05 — Query performance, retention, integrity checks and runbook
+
+- Branch: backend (database fast-forwarded to match). Status REVIEW.
+- The exception list filtered in Python after rebuilding every case. It now filters, counts,
+  orders and paginates in SQL, and loads evidence only for the page (`app/attendance/queries.py`
+  holds the one definition of the filter, order and derived status, so both stores agree).
+- Migration 0004: indexes for the list (`exceptions_employee_work_date`, `exceptions_list_order`),
+  the assignment lookup (`manager_assignments_employee`) and the effective timecard
+  (`corrections_employee`); and `llm_raw_outputs`, which carries the model's raw text out of the
+  append-only `llm_traces` so a retention job can purge it while the trace stays immutable.
+- `backend/scripts/db_maintenance.py`: `verify` reports what constraints cannot (audit chain,
+  status mirror drift, corrections without an approval, cross-employee evidence, resolved without a
+  correction, unknown sites, incomplete days) and exits 1 on a problem; `purge-traces` reports
+  before it deletes unless given `--apply`.
+- `employees.location_id` is now documented as deliberately not a foreign key: site codes arrive
+  with the employee, and the integrity check reports missing `locations` rows as a notice instead.
+- Docs: `docs/operations.md` (install, upgrade, backup and restore, verify, retention, never-do
+  list, routine cadence); data dictionary gains the index list and the "deliberately absent"
+  section; immutability spec gains the retention boundary.
+- Validation: 498 passed with TEST_DATABASE_URL on PostgreSQL 15, 454 passed / 44 skipped without
+  it; Ruff lint and format pass; fresh migrate 0001-0004 and both maintenance commands run against
+  a seeded database.
+- Next step: agree the retention window with Track B (30 days is a placeholder), and schedule
+  `verify` daily.

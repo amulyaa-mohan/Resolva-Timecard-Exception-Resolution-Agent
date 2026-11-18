@@ -517,3 +517,119 @@ def test_bulk_request_validation(env):
     )
     assert client.post("/exceptions/bulk-decisions", json={"items": [item]}).status_code == 401
     assert audit_types(client) == []
+
+
+# ---- AI proposal endpoint, escalation state and the effective timecard
+
+
+def propose(client, exception_id="X-1"):
+    return client.post(f"/exceptions/{exception_id}/proposal", headers=auth())
+
+
+def test_proposal_is_eligible_persisted_and_audited(env):
+    client, _, database = env
+    response = propose(client)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["status"] == "eligible", result["reasons"]
+    assert result["proposal"]["actions"][0]["punch_type"] == "out"
+    assert result["validation"]["passed"] and len(result["validation"]["checks"]) == 6
+    assert result["evidence_version"] == version(client)
+    assert result["policy_version"] == "2025.1"
+    # The draft is stored with its model trace, and proposing changes no state.
+    stored = database.scalar(
+        "SELECT status, policy_pack_id, requested_by FROM proposals WHERE exception_id=?", ("X-1",)
+    )
+    assert stored == ("eligible", "IN-KA", "M-1")
+    trace = database.scalar("SELECT provider, attempts FROM llm_traces")
+    assert trace[0] == "mock" and trace[1] >= 1
+    assert audit_types(client) == ["PROPOSAL_GENERATED"]
+    event = client.get("/exceptions/X-1/audit", headers=auth()).json()[0]
+    assert event["actor_type"] == "ai" and event["payload"]["status"] == "eligible"
+    assert client.get("/exceptions", headers=auth()).json()["items"][0]["status"] == "open"
+    # A manager can then approve exactly what was drafted.
+    body = {
+        "decision": "approve",
+        "actions": result["proposal"]["actions"],
+        "evidence_version": result["evidence_version"],
+        "idempotency_key": "after-proposal-1",
+    }
+    approved = client.post("/exceptions/X-1/decisions", json=body, headers=auth())
+    assert approved.status_code == 200 and approved.json()["status"] == "resolved"
+
+
+def test_proposal_without_totals_escalates_and_is_recorded(env):
+    client, *_ = env
+    result = propose(client, "X-2").json()
+    assert result["status"] == "escalated"
+    assert any("OVERTIME_RISK" in r for r in result["reasons"])
+    listing = {
+        i["exception_id"]: i["status"]
+        for i in client.get("/exceptions", headers=auth()).json()["items"]
+    }
+    assert listing == {"X-1": "open", "X-2": "escalated"}
+    only = client.get("/exceptions?status=escalated", headers=auth()).json()
+    assert [i["exception_id"] for i in only["items"]] == ["X-2"] and only["total"] == 1
+    assert audit_types(client, "X-2") == ["PROPOSAL_GENERATED"]
+
+
+def test_proposal_authorization_and_resolved_cases(env):
+    client, *_ = env
+    assert propose(client, "X-3").status_code == 404  # another manager's employee
+    assert client.post("/exceptions/X-1/proposal").status_code == 401
+    client.post(
+        "/exceptions/X-1/decisions", json=approve_body(client, key="pre-approve-1"), headers=auth()
+    )
+    conflict = propose(client)
+    assert conflict.status_code == 409 and "already resolved" in conflict.json()["detail"]
+
+
+def test_manager_escalation_is_persisted(env):
+    client, *_ = env
+    body = {
+        "decision": "escalate",
+        "evidence_version": version(client),
+        "idempotency_key": "escalate-key-1",
+        "reason": "Employee disputes the recorded start time.",
+    }
+    response = client.post("/exceptions/X-1/decisions", json=body, headers=auth())
+    assert response.status_code == 200 and response.json()["status"] == "escalated"
+    assert audit_types(client) == ["DECISION_ESCALATED"]
+    assert client.get("/exceptions?status=escalated", headers=auth()).json()["total"] == 1
+    without_reason = {**body, "idempotency_key": "escalate-key-2", "reason": ""}
+    assert (
+        client.post("/exceptions/X-1/decisions", json=without_reason, headers=auth()).status_code
+        == 422
+    )
+    with_actions = {
+        **body,
+        "idempotency_key": "escalate-key-3",
+        "actions": approve_body(client)["actions"],
+    }
+    assert (
+        client.post("/exceptions/X-1/decisions", json=with_actions, headers=auth()).status_code
+        == 422
+    )
+    # Approving afterwards supersedes the escalation.
+    approved = client.post(
+        "/exceptions/X-1/decisions",
+        json=approve_body(client, key="after-escalation-1"),
+        headers=auth(),
+    )
+    assert approved.status_code == 200
+    assert client.get("/exceptions", headers=auth()).json()["items"][0]["status"] == "resolved"
+
+
+def test_effective_timecard_shows_corrections(env):
+    client, *_ = env
+    before = client.get("/exceptions/X-1/timecard", headers=auth()).json()
+    assert len(before["raw_punches"]) == 3 and before["corrections_applied"] == []
+    assert before["net_worked_hours"] is None  # unpaired until the fix is approved
+    client.post(
+        "/exceptions/X-1/decisions", json=approve_body(client, key="timecard-key-1"), headers=auth()
+    )
+    after = client.get("/exceptions/X-1/timecard", headers=auth()).json()
+    assert len(after["raw_punches"]) == 3  # raw evidence unchanged
+    assert len(after["effective_punches"]) == 4 and after["net_worked_hours"] == 8.0
+    assert after["corrections_applied"][0]["type"] == "add_punch"
+    assert client.get("/exceptions/X-3/timecard", headers=auth()).status_code == 404

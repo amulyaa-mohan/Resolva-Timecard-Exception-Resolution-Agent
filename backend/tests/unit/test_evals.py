@@ -14,7 +14,7 @@ def test_cases_load_and_cover_every_category():
     cases = load_cases()
     assert len(cases) >= 30
     cats = {c.category for c in cases}
-    assert cats == {"clear", "ambiguous", "adversarial", "jurisdiction"}
+    assert cats == {"clear", "ambiguous", "adversarial", "jurisdiction", "evidence"}
     for case in cases:
         build_case_context(case)  # every case is a valid shared-contract CaseContext
 
@@ -106,3 +106,109 @@ def test_stub_validator_blocks_out_of_window_and_unpaired(policy):
     assert not window_validator(case, late, policy).passed
     ok = window_validator(case, _proposal("18:10").actions, policy)
     assert ok.passed and ok.checks
+
+
+# ------------------------------------------------------------------ complete evidence (0.2.0)
+
+
+def test_cases_carry_complete_evidence_by_default():
+    from app.core.contracts import PunchType
+
+    case = next(c for c in load_cases() if c.id == "c01")
+    ctx = build_case_context(case)
+    kinds = [p.type for p in ctx.punches]
+    assert kinds.count(PunchType.BREAK_START) == 1 and kinds.count(PunchType.BREAK_END) == 1
+    assert ctx.detection_details["unmatched_punch_id"] == "P-1"  # the work punch, not a break
+    assert ctx.as_of is not None and ctx.as_of > ctx.schedule.end
+    assert case.input.aggregates is not None
+
+
+def test_week_and_quarter_starts_follow_the_policy():
+    from datetime import date
+
+    from app.core.contracts import Weekday
+    from evals.aggregates import quarter_start, week_start
+
+    thursday = date(2026, 11, 12)
+    assert week_start(thursday, Weekday.MONDAY) == date(2026, 11, 9)
+    assert week_start(thursday, Weekday.SUNDAY) == date(2026, 11, 8)
+    assert week_start(thursday, Weekday.THURSDAY) == thursday
+    assert quarter_start(thursday, 1) == date(2026, 10, 1)
+    assert quarter_start(date(2026, 1, 15), 4) == date(2026, 1, 1)  # Apr/Jul/Oct/Jan
+    assert quarter_start(date(2026, 1, 15), 2) == date(2025, 11, 1)  # wraps to last year
+    assert quarter_start(date(2026, 3, 31), 1) == date(2026, 1, 1)
+
+
+def test_loader_never_invents_totals(registry):
+    from evals.aggregates import build_aggregates, real_validator
+
+    cases = load_cases()
+    e01 = next(c for c in cases if c.id == "e01")
+    ctx = build_case_context(e01)
+    assert build_aggregates(e01, ctx, registry.get("IN-KA", "2025.1").rules) is None
+    # A case the loader does not know (wrong exception id) gets no totals and cannot pass.
+    stranger = build_case_context(next(c for c in cases if c.id == "c01"))
+    stranger = stranger.model_copy(update={"exception_id": "X-unknown"})
+    validator = real_validator(cases, registry)
+    action = _proposal("18:00").actions
+    assert not validator(stranger, action, registry.get("IN-KA", "2025.1")).passed
+
+
+def test_side_by_side_judges_the_same_model_output(registry, settings):
+    from app.ai.providers import MockProvider
+    from tests.factories import failing_validator, passing_validator
+
+    cases = [c for c in load_cases() if c.id in ("c01", "e02", "a01")]
+    provider = MockProvider()
+    result = eval_run.eval_proposals(
+        registry,
+        settings,
+        cases,
+        provider,
+        {eval_run.PRIMARY: failing_validator, eval_run.STUB: passing_validator},
+    )
+    rows = {r["id"]: r for r in result["rows"]}
+    assert rows["c01"]["status"] == "blocked" and rows["c01"]["stub_status"] == "eligible"
+    # Rules-only: the stand-in's verdict is shown but not scored.
+    assert rows["e02"]["rules_only"] and rows["e02"]["stub_correct"] is None
+    assert rows["a01"]["status"] == rows["a01"]["stub_status"] == "escalated"  # no validator ran
+    assert result[eval_run.STUB]["cases"] == 2 and result[eval_run.PRIMARY]["cases"] == 3
+
+
+def test_evidence_cases_stop_on_the_rule_they_target(registry, settings):
+    """Broken rules BLOCK; evidence that cannot decide a rule ESCALATES (contract 0.2.0)."""
+    from app.ai.pipeline import generate_proposal
+    from app.ai.providers import MockProvider
+    from app.policies.registry import resolve_policy
+    from evals.aggregates import real_validator
+
+    cases = load_cases()
+    validator = real_validator(cases, registry)
+    targets = {
+        "e01": "OVERTIME_RISK",
+        "e02": "MEAL_BREAK_BREACH",
+        "e03": "OVERTIME_RISK",
+        "e04": "OVERTIME_RISK",
+        "e06": "OVERTIME_RISK",
+        "e07": "MEAL_BREAK_BREACH",
+    }
+    for case in cases:
+        if case.id not in targets:
+            continue
+        ctx = build_case_context(case)
+        policy = resolve_policy(ctx.employee, ctx.work_date, registry)
+        result = generate_proposal(
+            ctx, policy, provider=MockProvider(), validator=validator, settings=settings
+        )
+        failed = {c.code.value for c in result.validation.checks if not c.passed}
+        assert result.status.value == case.expected.status, case.id
+        assert failed == {targets[case.id]}, (case.id, failed)
+        outcomes = {c.outcome.value for c in result.validation.checks if not c.passed}
+        expected = "insufficient_evidence" if case.expected.status == "escalated" else "violation"
+        assert outcomes == {expected}, (case.id, outcomes)
+
+
+def test_exact_status_is_required_when_labelled():
+    case = next(c for c in load_cases() if c.id == "e01")
+    assert not eval_run.score_case(case, _Result(GateStatus.BLOCKED), 1.0).correct
+    assert eval_run.score_case(case, _Result(GateStatus.ESCALATED), 1.0).correct

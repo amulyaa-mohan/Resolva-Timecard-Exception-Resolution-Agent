@@ -2,6 +2,13 @@
 
 Cases are compact, human-reviewable JSON (local wall-clock times, day offsets) that build into the
 shared `CaseContext` contract. All data is synthetic.
+
+Evidence is complete by default, so Track A's real validator can judge every rule:
+- an observed meal break (break_start/break_end punches) 4 h into the scheduled shift;
+- trusted weekly and quarterly totals (`AggregateSpec`, served by `evals/aggregates.py`);
+- an evaluation time `as_of` after the shift (next day 12:00 local).
+A case opts out explicitly (`observed_break: false`, `aggregates: null`, `as_of`) to test what
+happens when evidence is missing.
 """
 
 from __future__ import annotations
@@ -45,6 +52,23 @@ class PunchSpec(_Spec):
     day: int = Field(default=0, description="Day offset from the work date (overnight shifts).")
 
 
+class TimeSpec(_Spec):
+    time: str = Field(pattern=r"^\d{2}:\d{2}$")
+    day: int = 0
+
+
+class AggregateSpec(_Spec):
+    """Trusted other-day totals for Track A's rules. Defaults: a light, in-limit week."""
+
+    work_date_complete: bool = True
+    week_other_worked_hours: float = 16.0
+    week_remaining_scheduled_hours: float = 8.0
+    quarter_other_overtime_hours: float = 4.0
+    week_offset_days: int = Field(
+        default=0, description="Shift the reported week start (non-zero = totals for another week)."
+    )
+
+
 class ShiftSpec(_Spec):
     start: str = Field(pattern=r"^\d{2}:\d{2}$")
     end: str = Field(pattern=r"^\d{2}:\d{2}$")
@@ -61,6 +85,16 @@ class InputSpec(_Spec):
     )
     schedule: ShiftSpec | None = None
     notes: list[str] = Field(default_factory=list)
+    observed_break: bool = Field(
+        default=True,
+        description="Add break_start/break_end punches 4 h into the schedule (break_min long).",
+    )
+    aggregates: AggregateSpec | None = Field(
+        default_factory=AggregateSpec, description="null = trusted totals unavailable."
+    )
+    as_of: TimeSpec | None = Field(
+        default=None, description="Evaluation time; default next day 12:00 local."
+    )
 
 
 class ExpectedAction(_Spec):
@@ -80,12 +114,24 @@ class Expected(_Spec):
     clause_ids: list[str] = Field(default_factory=list, description="Acceptable cited clauses.")
     forbidden_times: list[str] = Field(default_factory=list)
     forbidden_action_types: list[str] = Field(default_factory=list)
+    status: Literal["blocked", "escalated"] | None = Field(
+        default=None,
+        description="For not_eligible: the exact status required (blocked = a rule is broken; "
+        "escalated = not enough evidence to decide).",
+    )
 
 
 class EvalCase(_Spec):
     id: str
-    category: Literal["clear", "ambiguous", "adversarial", "jurisdiction"]
+    category: Literal["clear", "ambiguous", "adversarial", "jurisdiction", "evidence"]
     description: str
+    rules_only: bool = Field(
+        default=False,
+        description=(
+            "Only real attendance rules can judge this case (breaks, totals). The stand-in "
+            "validator is not scored on it."
+        ),
+    )
     input: InputSpec
     expected: Expected
 
@@ -111,6 +157,21 @@ def build_case_context(case: EvalCase) -> CaseContext:
         )
         for i, p in enumerate(spec.punches, start=1)
     ]
+    if spec.observed_break and spec.schedule is not None and spec.schedule.break_min > 0:
+        break_start = at(tz, spec.schedule.start) + timedelta(hours=4)
+        for suffix, ts, kind in (
+            ("bs", break_start, PunchType.BREAK_START),
+            ("be", break_start + timedelta(minutes=spec.schedule.break_min), PunchType.BREAK_END),
+        ):
+            punches.append(
+                PunchRecord(
+                    punch_id=f"P-{suffix}",
+                    employee_id=emp_id,
+                    ts=ts,
+                    type=kind,
+                    source=PunchSource.KIOSK,
+                )
+            )
     history = []
     for n in spec.history_days_ago:
         start, end = (
@@ -146,7 +207,9 @@ def build_case_context(case: EvalCase) -> CaseContext:
         if spec.schedule
         else None
     )
-    unmatched = punches[-1].punch_id if punches else None
+    work = [p for p in punches if p.type in (PunchType.IN, PunchType.OUT)]
+    unmatched = work[-1].punch_id if work else None
+    as_of = spec.as_of or TimeSpec(time="12:00", day=1)
     return CaseContext(
         exception_id=f"X-{case.id}",
         code=spec.code,
@@ -168,6 +231,7 @@ def build_case_context(case: EvalCase) -> CaseContext:
         ],
         detection_details={"unmatched_punch_id": unmatched},
         evidence_version=f"eval-{case.id}",
+        as_of=at(tz, as_of.time, as_of.day),
     )
 
 

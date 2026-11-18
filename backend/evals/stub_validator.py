@@ -1,4 +1,7 @@
-"""STAND-IN validator for evaluation until Track A's validate_correction (A-02) exists.
+"""STAND-IN validator, kept as a comparison column next to Track A's real rules.
+
+Since 2026-11-18 the evals validate with Track A's `make_validator` (see `evals/aggregates.py`);
+this stand-in judges the same recorded model outputs so reports show what the real rules add.
 
 It is deliberately narrow: an add_punch must fall inside the policy's missing-punch inference
 window around the scheduled start or end, and the resulting punches must pair up. It is NOT the

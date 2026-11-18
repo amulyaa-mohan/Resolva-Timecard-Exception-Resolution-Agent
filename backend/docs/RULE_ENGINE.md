@@ -124,3 +124,16 @@ Until 0.2.0 adds week_start and quarter_start_month to the policy, the period ch
   within `evidence_tolerance_min`. Schedule and history refs are refused for adjustments,
   so a late arrival cannot be silently moved to the scheduled start.
 - After simulation every rule is re-evaluated. Fixing the target rule while another rule still fails stays blocked.
+
+## Pay integrity and manager review (2026-11-18, agreed with Track B)
+
+- A time the employee stated (`evidence_ref.kind == note`) is a claim, so it is rounded one way only:
+  the direction that adds no paid time (clock-in at or after it, clock-out at or before it,
+  break start at or before it, break end at or after it), within `evidence_tolerance_min`.
+  A stated 09:05 can therefore not become the scheduled 09:00.
+- `schedule_start` / `schedule_end` refs keep the two-sided tolerance: the schedule is an agreed
+  time, not a claim. `history_punch` is still two-sided (open question with Track B).
+- When a correction is evidenced and its only remaining failure is SCHEDULE_DEVIATION (a warning),
+  that check becomes `insufficient_evidence` ("manager review") so the pipeline escalates rather
+  than blocking. Problem-severity remainders still block, and the correction is never approvable
+  on its own.

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from app.ai.evidence import note_times
 from app.core.contracts import (
     ALLOWED_ACTIONS,
+    DEFAULT_SEVERITY,
     ActionType,
     CaseContext,
     CorrectionValidator,
@@ -21,7 +22,9 @@ from app.core.contracts import (
     PunchRecord,
     PunchSource,
     PunchType,
+    RuleCheck,
     RuleOutcome,
+    Severity,
     ValidationResult,
 )
 from app.rules.engine import (
@@ -87,8 +90,36 @@ SUPPORTED = frozenset({ActionType.ADD_PUNCH, ActionType.ADJUST_PUNCH})
 MAX_ACTIONS = 2
 
 
-def _within(ts: datetime, anchors: list[datetime], seconds: float) -> bool:
-    return any(abs((instant(ts) - instant(a)).total_seconds()) <= seconds for a in anchors)
+# Paid time grows when a clock-in moves earlier, a clock-out later, a break start later or a
+# break end earlier. A time the employee stated is a claim, so rounding it may only move the
+# other way: never grant time nobody claimed (pay integrity, agreed with Track B 2026-11-18).
+_NO_EXTRA_PAY = {
+    PunchType.IN: 1,
+    PunchType.OUT: -1,
+    PunchType.BREAK_START: -1,
+    PunchType.BREAK_END: 1,
+}
+
+
+def _within(
+    ts: datetime,
+    anchors: list[datetime],
+    seconds: float,
+    *,
+    kind: EvidenceKind | None = None,
+    punch_type: PunchType | None = None,
+) -> bool:
+    """Is `ts` supported by one anchor? A stated time (a note) is one-sided."""
+    directional = kind == EvidenceKind.NOTE and punch_type in _NO_EXTRA_PAY
+    for anchor in anchors:
+        offset = (instant(ts) - instant(anchor)).total_seconds()
+        if directional:
+            allowed = _NO_EXTRA_PAY[punch_type] * offset
+            if 0 <= allowed <= seconds:
+                return True
+        elif abs(offset) <= seconds:
+            return True
+    return False
 
 
 def _check_add(case, action, policy) -> str | None:
@@ -115,12 +146,25 @@ def _check_add(case, action, policy) -> str | None:
     anchors = _evidence_anchors(case, action, action.punch_type)
     if anchors is None:
         return "evidence_ref does not resolve to supporting evidence."
-    if not _within(action.new_ts, anchors, policy.rules.evidence_tolerance_min * 60):
-        return (
-            f"Proposed time is more than {policy.rules.evidence_tolerance_min} min "
-            "from the evidence it cites."
-        )
+    if not _within(
+        action.new_ts,
+        anchors,
+        policy.rules.evidence_tolerance_min * 60,
+        kind=action.evidence_ref.kind,
+        punch_type=action.punch_type,
+    ):
+        return _tolerance_reason(action, policy)
     return None
+
+
+def _tolerance_reason(action: ProposedAction, policy: PolicySnapshot) -> str:
+    minutes = policy.rules.evidence_tolerance_min
+    if action.evidence_ref.kind == EvidenceKind.NOTE:
+        return (
+            f"Proposed time is not within {minutes} min of the stated time in the direction "
+            "that adds no unclaimed paid time."
+        )
+    return f"Proposed time is more than {minutes} min from the evidence it cites."
 
 
 def _check_adjust(case, action, target, policy) -> str | None:
@@ -146,11 +190,14 @@ def _check_adjust(case, action, target, policy) -> str | None:
     anchors = _evidence_anchors(case, action, target.type)
     if anchors is None:
         return "evidence_ref does not resolve to supporting evidence."
-    if not _within(action.new_ts, anchors, policy.rules.evidence_tolerance_min * 60):
-        return (
-            f"Proposed time is more than {policy.rules.evidence_tolerance_min} min "
-            "from the evidence it cites."
-        )
+    if not _within(
+        action.new_ts,
+        anchors,
+        policy.rules.evidence_tolerance_min * 60,
+        kind=ref.kind,
+        punch_type=target.type,
+    ):
+        return _tolerance_reason(action, policy)
     return None
 
 
@@ -232,11 +279,42 @@ def _validate(
         # Every applicable rule must pass afterwards, so a fix can neither leave nor create
         # another violation (e.g. completing a shift that then exceeds weekly hours).
         checks = evaluate_rules(simulated, policy, aggregates)
+        checks = _warning_needs_review(checks, parsed)
         return ValidationResult(
             passed=all(c.passed for c in checks), checks=checks, rule_version=RULE_VERSION
         )
     except (ValueError, AttributeError, KeyError) as exc:
         return _reject(f"Invalid correction evidence: {exc}", RuleOutcome.INSUFFICIENT_EVIDENCE)
+
+
+def _warning_needs_review(
+    checks: list[RuleCheck], actions: list[ProposedAction]
+) -> list[RuleCheck]:
+    """An evidenced fix whose only remaining failure is a warning goes to the manager.
+
+    Agreed with Track B (2026-11-18): the pipeline then ESCALATES instead of BLOCKING, so a
+    manager can approve or acknowledge it. Problem-severity rules keep blocking, and nothing
+    here makes a correction approvable on its own.
+    """
+    failed = [c for c in checks if not c.passed]
+    reviewable = {
+        code for code, severity in DEFAULT_SEVERITY.items() if severity == Severity.WARNING
+    } & {ExceptionCode.SCHEDULE_DEVIATION}
+    if not all(a.evidence_ref is not None for a in actions) or len(failed) != 1:
+        return checks
+    if failed[0].code not in reviewable or failed[0].outcome != RuleOutcome.VIOLATION:
+        return checks
+    return [
+        RuleCheck(
+            code=c.code,
+            passed=False,
+            reason=f"Fix is evidenced but leaves a warning: manager review. {c.reason}",
+            outcome=RuleOutcome.INSUFFICIENT_EVIDENCE,
+        )
+        if c is failed[0]
+        else c
+        for c in checks
+    ]
 
 
 def validate_correction(

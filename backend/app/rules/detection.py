@@ -8,7 +8,7 @@ an exception, because it is not yet known to be a problem (e.g. a shift still ru
 """
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.core.contracts import (
@@ -33,20 +33,32 @@ class Finding:
 
 
 def group_by_work_date(punches: list[PunchRecord], timezone: str) -> dict[date, list[PunchRecord]]:
+    """Group punches into work dates by session.
+
+    A session opens on its clock-in's local date and keeps later punches (an overnight
+    clock-out included) until its clock-ins are paired. An unpaired clock-in must not
+    swallow the following days: a clock-in on a later local date starts a new session and
+    leaves the stale one unpaired on its own date, which is exactly a missing punch.
+    """
     zone = ZoneInfo(timezone)
     groups: dict[date, list[PunchRecord]] = {}
     session: date | None = None
     open_ins = 0
     for punch in sorted(punches, key=lambda p: instant(p.ts)):
         local = punch.ts.astimezone(zone).date()
+        if session is not None and local > session + timedelta(days=1):
+            session, open_ins = None, 0  # nothing stays open beyond the following day
         if punch.type == PunchType.IN:
-            if open_ins == 0:
-                session = local
-            open_ins += 1
-        key = session if open_ins > 0 else local
-        if punch.type == PunchType.OUT and open_ins > 0:
+            if open_ins == 0 or local > session:
+                session, open_ins = local, 1
+            else:
+                open_ins += 1
+            key = session
+        elif punch.type == PunchType.OUT and open_ins > 0:
             open_ins -= 1
             key = session
+        else:
+            key = session if open_ins > 0 else local
         groups.setdefault(key, []).append(punch)
     return groups
 

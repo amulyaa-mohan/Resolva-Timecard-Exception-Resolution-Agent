@@ -12,6 +12,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from app.attendance.context import build_verified_case
+from app.attendance.queries import ExceptionFilter, status_expression, where_clauses
 from app.attendance.repository import CaseAccessDenied
 from app.core.config import BACKEND_DIR
 from app.core.contracts import CaseContext
@@ -166,6 +167,12 @@ class PostgresBackend:
         )
         return case, revision
 
+    def mark_escalated(self, connection, exception_id: str) -> None:
+        connection.execute(
+            "UPDATE exceptions SET status = 'escalated' WHERE exception_id = ? AND status = 'open'",
+            (exception_id,),
+        )
+
     def mark_resolved(self, connection, exception_id: str, old: int, new: int) -> None:
         updated = connection.execute(
             "UPDATE exceptions SET correction_revision = ?, status = 'resolved' "
@@ -208,6 +215,56 @@ class PostgresCaseRepository:
                 cases.append(build_verified_case(case, correction_revision=revision))
             return cases
 
+    def search_exceptions(
+        self, manager_id: str, filters: ExceptionFilter
+    ) -> tuple[list[tuple[CaseContext, str]], int]:
+        """Filtered, ordered page plus the total, with the work done in SQL.
+
+        Only the page's evidence is then loaded, so a manager with thousands of exceptions
+        costs one count, one id query and at most `limit` case loads.
+        """
+        assigned = (
+            "EXISTS (SELECT 1 FROM manager_assignments a WHERE a.employee_id = e.employee_id "
+            "AND a.manager_id = ? AND a.valid_from <= now() "
+            "AND (a.valid_to IS NULL OR a.valid_to > now()))"
+        )
+        view = (
+            "SELECT e.exception_id, e.employee_id, e.code, e.severity, e.work_date, "
+            f"{status_expression('e')} AS status FROM exceptions e WHERE {assigned}"
+        )
+        conditions, params = where_clauses(filters)
+        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        with self.backend.transaction(immediate=False) as c:
+            total = c.execute(
+                f"SELECT count(*) FROM ({view}) q{where}", (manager_id, *params)
+            ).fetchone()[0]
+            rows = c.execute(
+                f"SELECT q.exception_id, q.status FROM ({view}) q{where} "
+                "ORDER BY (q.severity <> 'problem'), q.work_date, q.exception_id "
+                "LIMIT ? OFFSET ?",
+                (manager_id, *params, filters.limit, filters.offset),
+            ).fetchall()
+            page = []
+            for exception_id, status in rows:
+                case, revision = self.backend.load_case(c, exception_id, manager_id, lock=False)
+                page.append((build_verified_case(case, correction_revision=revision), status))
+        return page, total
+
+    def display_names(self, employee_ids: list[str]) -> dict[str, str]:
+        """Employee id -> full name, for display only. Missing names are simply absent."""
+        if not employee_ids:
+            return {}
+        with self.backend.transaction(immediate=False) as c:
+            marks = ",".join("?" * len(employee_ids))
+            return {
+                row[0]: row[1]
+                for row in c.execute(
+                    f"SELECT employee_id, full_name FROM employees "
+                    f"WHERE employee_id IN ({marks}) AND full_name IS NOT NULL",
+                    employee_ids,
+                )
+            }
+
     def seed_case(self, case: CaseContext, *, manager_id: str, manager_timezone: str = "UTC"):
         """Trusted provisioning of synthetic data. Idempotent; refuses to change evidence."""
         if not manager_id.strip():
@@ -220,7 +277,8 @@ class PostgresCaseRepository:
                 (manager_id, manager_timezone),
             )
             c.execute(
-                "INSERT INTO employees VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                "INSERT INTO employees (employee_id, location_id, jurisdiction, timezone, "
+                "worker_category) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
                 (e.employee_id, e.location_id, e.jurisdiction, e.timezone, e.worker_category),
             )
             owner = c.execute(

@@ -77,3 +77,85 @@ SCHEDULE_DEVIATION violation (BLOCKED). Should a warning-severity deviation inst
    - `suggest_schedule_swap`: advisory only, never approvable?
 3. Detected exceptions now come from imports (ids `EX-<employee>-<date>-<code>`, `detection_details.reason`).
    Is that enough for your retrieval queries, or do you need structured detail keys per code?
+
+### Track B answers (2026-11-18, Amulya)
+
+1. **`adjust_punch`: yes, done.** The time-evidence gate (`anchor_times` in `app/ai/evidence.py`) now
+   handles `adjust_punch` for every exception code. The target must be one of `case.punches` (by
+   `punch_id`), and its type is read from that punch. Only `note` refs are attached; schedule and
+   history refs are refused (including model-supplied ones); no time after `as_of`. The validator
+   receives the adjustment with the note ref. Tests: `tests/unit/test_contract_v020.py`.
+
+   **New point for both of us (pay integrity):** a tolerance applied in both directions can grant time
+   nobody claimed. Example, verified end to end with your validator: the note says "at the gate at
+   09:05" and an adjustment to 09:00 (the scheduled start) is ELIGIBLE, because 09:00 is within 5 min
+   of 09:05. Proposal: round a stated time only in the direction that does not add paid time, so a
+   clock-in may be at or after the stated time, and a clock-out at or before it, by up to
+   `evidence_tolerance_min`. Schedule-anchored `add_punch` keeps the two-sided tolerance, because
+   the schedule is the agreed time. If you agree, we each enforce it (gate and validator) and add
+   one shared test.
+
+2. **Semantics.** These are proposals. Fields marked *new* need contract `0.3.0-draft`, and I will
+   draft that once you agree.
+   - **`acknowledge`:** closes a *warning* exception (OVERTIME_RISK, SCHEDULE_DEVIATION) with no
+     timecard change. It needs a non-empty manager reason, which is audited. It is never valid for a
+     *problem* severity, and it never deletes or hides the finding; the breach stays in evidence. The
+     AI may propose it with a citation, but it is never bulk-approvable.
+   - **`add_break`:** one action with `new_ts` (break start) and *new* `new_end_ts` (break end). It is
+     atomic: two separate actions could be half-validated or half-applied. Both times need `note`
+     evidence, because `planned_break_min` never proves a break. Without stated times the right
+     action is `flag_premium` or escalation, never an invented break.
+   - **`void_shift`:** targets the attendance session, not the schedule. *New* field
+     `target_punch_ids: list[str]` names the duplicate session's punches. All of them must belong to
+     this case. Every remaining punch must still pair. It can never void the only session for the
+     work date. Raw punches stay immutable: voiding is a correction record that excludes them.
+   - **`flag_premium`:** a pay flag (meal-break premium owed), no timecard change. It resolves
+     MEAL_BREAK_BREACH as "breach confirmed, premium flagged". The validator must confirm the breach
+     is real (a premium for a non-breach is unearned pay), and the breach stays recorded in audit.
+   - **`suggest_schedule_swap`:** advisory only. It is never approvable and never resolves an
+     exception. I will make the pipeline return such a proposal as ESCALATED with the suggestion
+     attached, so it can never show as ELIGIBLE.
+
+3. **`detection_details`:** `reason` is enough for retrieval today. Queries use the exception code's
+   own terms plus the detail *key names*, never values. Structured keys per code would help the
+   model's `<facts>` and the manager's explanation, so please add them when convenient:
+   MISSING_PUNCH `unmatched_punch_id`, `missing_type`; OVERLAPPING_SHIFT `overlapping_punch_ids`;
+   MEAL_BREAK_BREACH `worked_min_before_break`, `break_min`; OVERTIME_RISK `day_hours`,
+   `projected_week_hours`, `limit_hours`; SPREAD_OVER_BREACH `spread_hours`; SCHEDULE_DEVIATION
+   `boundary` (start or end), `minutes_off`.
+
+4. **Earlier question, evidence-backed late clock-out:** escalate. A warning-severity
+   SCHEDULE_DEVIATION created by a correct, evidenced fix should return `insufficient_evidence` with
+   a reason ("fix is evidenced but leaves a warning: manager review"), not `violation`. A manager can
+   then approve or acknowledge it. Problem-severity rules keep blocking.
+
+5. **CI:** a `postgres:15` service now runs in CI with `TEST_DATABASE_URL`, and `.[dev,postgres]` is
+   installed (`psycopg[binary]` 3.3.9 pinned). A guard step fails the build if any PostgreSQL test is
+   skipped. Docker has a `postgres` profile (127.0.0.1 only), and the API image installs the
+   `postgres` extra. Verified locally on PostgreSQL 15.20: all 466 tests pass, including your 31.
+
+### Track A reply (2026-11-18, Jayanth): agreed and implemented
+
+1. **Pay integrity: agreed, and your example now fails.** A time the employee *stated* (a `note`
+   ref) may only be rounded in the direction that adds no paid time: a clock-in at or after it, a
+   clock-out at or before it, a break start at or before it, a break end at or after it, each by up
+   to `evidence_tolerance_min`. Your 09:05 -> 09:00 adjustment is refused with
+   "not within 5 min of the stated time in the direction that adds no unclaimed paid time".
+   Schedule-anchored `add_punch` keeps the two-sided tolerance, as you proposed.
+   Tests: `test_stated_time_rounding_never_adds_paid_time`, `test_schedule_anchor_keeps_both_directions`.
+   **One open question:** `history_punch` refs are still two-sided. A habit is not a claim, so the
+   same one-sided rule arguably belongs there too, but your gate attaches those refs, and a
+   one-sided validator would block proposals your gate accepted. Shall we make both sides one-sided
+   for history in 0.3.0?
+2. **Semantics: your five proposals all work for Track A.** Please draft 0.3.0 with
+   `new_end_ts` (add_break) and `target_punch_ids` (void_shift). Two notes:
+   `flag_premium` needs the validator to confirm the breach is real, which it can already do
+   (the simulated timecard still shows MEAL_BREAK_BREACH), and `acknowledge` must stay out of bulk
+   decisions, so Track A will refuse it there rather than relying on the prompt.
+3. **`detection_details`: agreed, not done yet.** Detection currently writes `{"reason": ...}`.
+   The structured keys you listed are the next Track A change; nothing in the contract blocks it.
+4. **Evidenced fix leaving a warning: agreed and implemented.** When a correction carries evidence
+   and the only remaining failure is SCHEDULE_DEVIATION, the validator now returns
+   `insufficient_evidence` with "Fix is evidenced but leaves a warning: manager review", so the
+   pipeline escalates instead of blocking. Problem-severity remainders still block.
+5. **CI: thank you.** Track A's PostgreSQL tests now run on every build.
