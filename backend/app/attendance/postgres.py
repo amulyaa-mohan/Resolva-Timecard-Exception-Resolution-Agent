@@ -32,6 +32,17 @@ def _psycopg():
     return psycopg
 
 
+def _local(value, zone: ZoneInfo):
+    """Express an instant as wall-clock time in the employee's zone.
+
+    PostgreSQL returns every timestamptz in the SESSION's timezone, so the same punch reads
+    03:30Z from a UTC server (a Docker default) and 09:00+05:30 from a Kolkata one. Clients draw
+    timelines from the wall-clock text, so the offset must not depend on how the database is
+    configured. The instant is unchanged, and evidence_version hashes instants, so it is too.
+    """
+    return value.astimezone(zone) if value is not None else None
+
+
 class PgConnection:
     """Accepts the `?` placeholders shared with the SQLite code."""
 
@@ -84,10 +95,12 @@ class PostgresBackend:
                 raw.execute("SELECT pg_advisory_xact_lock(%s)", (_WRITE_LOCK,))
             yield PgConnection(raw)
 
-    def load_case(self, connection, exception_id: str, manager_id: str, *, lock: bool):
+    def load_case(
+        self, connection, exception_id: str, manager_id: str, *, lock: bool, raw: bool = False
+    ):
         row = connection.execute(
             "SELECT e.exception_id, e.code, e.severity, e.work_date, e.rule_version, "
-            "e.detection_details, e.correction_revision, e.shift_id, emp.employee_id, "
+            "e.detection_details, e.correction_revision, e.shift_id, e.status, emp.employee_id, "
             "emp.location_id, emp.jurisdiction, emp.timezone, emp.worker_category "
             "FROM exceptions e JOIN employees emp ON emp.employee_id = e.employee_id "
             "WHERE e.exception_id = ? AND EXISTS (SELECT 1 FROM manager_assignments a "
@@ -98,19 +111,24 @@ class PostgresBackend:
         ).fetchone()
         if row is None:
             raise CaseAccessDenied("case unavailable for this manager")
-        (exc_id, code, severity, work_date, rule_version, details, revision, shift_id) = row[:8]
+        (exc_id, code, severity, work_date, rule_version, details, revision, shift_id, status) = (
+            row[:9]
+        )
         employee = dict(
             zip(
                 ("employee_id", "location_id", "jurisdiction", "timezone", "worker_category"),
-                row[8:],
+                row[9:],
                 strict=True,
             )
         )
         punch_cols = "p.punch_id, p.employee_id, p.ts, p.type, p.source, p.device_id"
+        zone = ZoneInfo(employee["timezone"])
 
         def punch(r):
             keys = ("punch_id", "employee_id", "ts", "type", "source", "device_id")
-            return dict(zip(keys, r, strict=True))
+            record = dict(zip(keys, r, strict=True))
+            record["ts"] = _local(record["ts"], zone)
+            return record
 
         punches = [
             punch(r)
@@ -120,7 +138,6 @@ class PostgresBackend:
                 (exc_id,),
             )
         ]
-        zone = ZoneInfo(employee["timezone"])
         day_start = datetime.combine(work_date, time(0), tzinfo=zone)
         history = [
             punch(r)
@@ -132,7 +149,10 @@ class PostgresBackend:
             )
         ]
         notes = [
-            dict(zip(("note_id", "text", "submitted_at"), r, strict=True))
+            {
+                **dict(zip(("note_id", "text", "submitted_at"), r, strict=True)),
+                "submitted_at": _local(r[2], zone),
+            }
             for r in connection.execute(
                 "SELECT n.note_id, n.text, n.submitted_at FROM exception_notes en "
                 "JOIN employee_notes n ON n.note_id = en.note_id WHERE en.exception_id = ? "
@@ -149,6 +169,10 @@ class PostgresBackend:
             ).fetchone()
             keys = ("shift_id", "employee_id", "start", "end", "planned_break_min")
             schedule = dict(zip(keys, shift, strict=True))
+            schedule["start"], schedule["end"] = (
+                _local(schedule["start"], zone),
+                _local(schedule["end"], zone),
+            )
         case = CaseContext.model_validate(
             {
                 "exception_id": exc_id,
@@ -165,7 +189,41 @@ class PostgresBackend:
                 "evidence_version": "computed-by-build_verified_case",
             }
         )
+        if not raw and status in ("open", "escalated"):
+            effective = self.effective_workday(connection, case)
+            effective_ids = {p.punch_id for p in effective}
+            case = case.model_copy(
+                update={
+                    "punches": effective,
+                    "punch_history": [
+                        p for p in case.punch_history if p.punch_id not in effective_ids
+                    ],
+                }
+            )
         return case, revision
+
+    def effective_workday(self, connection, case: CaseContext):
+        from app.attendance.ingest import _effective_punches
+        from app.rules.detection import group_by_work_date
+
+        zone = ZoneInfo(case.employee.timezone)
+        start = datetime.combine(case.work_date, time.min, tzinfo=zone)
+        punches = _effective_punches(
+            connection,
+            case.employee.employee_id,
+            start - timedelta(days=1),
+            start + timedelta(days=2),
+        )
+        day = group_by_work_date(punches, case.employee.timezone).get(case.work_date, [])
+        return [p.model_copy(update={"ts": p.ts.astimezone(zone)}) for p in day]
+
+    def still_open(self, connection, exception_id: str) -> bool:
+        """Open or escalated. A dismissed exception (its rule passes now) takes no new proposal
+        and no approval, even one drafted earlier (finding 1)."""
+        row = connection.execute(
+            "SELECT status FROM exceptions WHERE exception_id = ?", (exception_id,)
+        ).fetchone()
+        return row is not None and row[0] in ("open", "escalated")
 
     def mark_escalated(self, connection, exception_id: str) -> None:
         connection.execute(
@@ -298,7 +356,7 @@ class PostgresCaseRepository:
                 "SELECT 1 FROM exceptions WHERE exception_id = ?", (case.exception_id,)
             ).fetchone():
                 existing, revision = self.backend.load_case(
-                    c, case.exception_id, manager_id, lock=False
+                    c, case.exception_id, manager_id, lock=False, raw=True
                 )
                 current = build_verified_case(existing, correction_revision=0)
                 if revision != 0 or current.evidence_version != case.evidence_version:

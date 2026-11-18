@@ -334,3 +334,45 @@ def test_note_text_is_data_not_instructions():
     rows = [{"employee_id": "E-001", "submitted_at": "2026-11-12 19:10", "text": hostile}]
     preview = preview_notes(rows, employee_timezones=TZ)
     assert preview.valid == 1 and preview.rows[0].note.text == hostile  # stored verbatim, inert
+
+
+# ---- audit: hostile input must be a clean rejection, never an unhandled exception (HTTP 500)
+
+
+@pytest.mark.parametrize(
+    "content,fmt,needle",
+    [
+        ("a,b\n" + "x" * 200_000 + ",1\n", "csv", "field larger than field limit"),
+        ("a,b\n1\x00,2\n", "csv", "NUL byte"),
+        ("[" * 100_000 + "]" * 100_000, "json", "nested too deeply"),
+        ('[{"a": ' + "9" * 5000 + "}]", "json", "number that is too large"),
+        ("a\n" + "x" * 5000 + "\n", "csv", "cell is longer"),
+        ('[{"a": "x\\u0000y"}]', "json", "NUL byte"),
+    ],
+)
+def test_hostile_files_are_rejected_cleanly(content, fmt, needle):
+    with pytest.raises(ImportFileError, match=needle):
+        read_rows(content, fmt)
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    ["0001-01-01 00:00", "9999-12-31 23:59", "0001-01-01T00:00:00+14:00", "1999-12-31 23:59"],
+)
+def test_implausible_years_are_invalid_rows_not_overflow_errors(stamp):
+    row = [{"employee_id": "E-001", "timestamp": stamp, "type": "in"}]
+    preview = preview_punches(row, employee_timezones=TZ)
+    assert preview.invalid == 1 and "year must be between" in preview.rows[0].error
+
+
+@pytest.mark.parametrize("minutes", ["9" * 30, "1441", "-1", "abc"])
+def test_planned_break_is_bounded(minutes):
+    row = {
+        "employee_id": "E-001",
+        "start": "2026-11-12 09:00",
+        "end": "2026-11-12 18:00",
+        "planned_break_min": minutes,
+    }
+    assert preview_shifts([row], employee_timezones=TZ).invalid == 1
+    ok = {**row, "planned_break_min": "1440"}
+    assert preview_shifts([ok], employee_timezones=TZ).valid == 1  # the limit itself is allowed

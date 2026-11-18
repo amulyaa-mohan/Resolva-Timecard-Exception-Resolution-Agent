@@ -49,6 +49,24 @@ Body: `{"kind": "punches"|"shifts", "format": "csv"|"json", "content": "...", "m
 Each item is authorized, validated and committed on its own. One failure never affects another.
 The response lists `{exception_id, ok, status_code (200/404/409/422), result | error, checks}` in request order.
 
+## Lifecycle of an exception
+
+Detection re-runs for every date an import touches, including rows already on file, so a retry after a failure heals.
+
+- **Raised** when a rule is violated: `EXCEPTION_DETECTED`.
+- **Cleared** (`status = dismissed`, audited `EXCEPTION_CLEARED`) when its rule now *passes* after new evidence.
+  A rule that is merely undecided is left alone: not knowing is not the same as fixed. Dismissed exceptions are hidden from
+  the default list and returned by `?status=dismissed`.
+- **Reopened** (`EXCEPTION_REOPENED`) if the problem returns, keeping its id.
+- New punches joining a live exception are linked as evidence and audited, which changes its `evidence_version`.
+- Detection commits **one transaction per employee**, so the global write lock is held for milliseconds, not for the
+  whole import.
+
+## Input limits
+
+Every violation is a 422 with a problem document, never a 500: body and file 2 MB, 5,000 rows, cells 4,000 characters,
+notes 1,000, timestamps years 2000-2100, `planned_break_min` 0-1440, no NUL bytes (including the JSON escape).
+
 ## Employee notes
 
 `POST /imports` with `kind: "notes"` (fields `employee_id`, `submitted_at`, `text`, optional `note_id`).

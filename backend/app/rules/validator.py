@@ -110,7 +110,11 @@ def _within(
     punch_type: PunchType | None = None,
 ) -> bool:
     """Is `ts` supported by one anchor? A stated time (a note) is one-sided."""
-    directional = kind == EvidenceKind.NOTE and punch_type in _NO_EXTRA_PAY
+    # Stated times (notes) and habits (same-weekday history) are one-sided: a habit of 18:00
+    # must not support 18:05, which would add paid time nobody claimed (Codex finding 2).
+    directional = kind in (EvidenceKind.NOTE, EvidenceKind.HISTORY_PUNCH) and (
+        punch_type in _NO_EXTRA_PAY
+    )
     for anchor in anchors:
         offset = (instant(ts) - instant(anchor)).total_seconds()
         if directional:
@@ -159,9 +163,9 @@ def _check_add(case, action, policy) -> str | None:
 
 def _tolerance_reason(action: ProposedAction, policy: PolicySnapshot) -> str:
     minutes = policy.rules.evidence_tolerance_min
-    if action.evidence_ref.kind == EvidenceKind.NOTE:
+    if action.evidence_ref.kind in (EvidenceKind.NOTE, EvidenceKind.HISTORY_PUNCH):
         return (
-            f"Proposed time is not within {minutes} min of the stated time in the direction "
+            f"Proposed time is not within {minutes} min of the stated or habitual time in the direction "
             "that adds no unclaimed paid time."
         )
     return f"Proposed time is more than {minutes} min from the evidence it cites."

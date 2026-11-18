@@ -98,7 +98,9 @@ or any finished day of the quarter is missing or incomplete. Days from local tod
 ## Limits
 
 - Static demo tokens, not an identity provider. PostgreSQL runs in CI (`postgres:15` service) and in Docker (`--profile postgres`).
-- Only `add_punch` corrections can pass validation today.
+- Only `add_punch` and `adjust_punch` corrections can pass validation today. Both are applied by one shared function
+  (`app/resolution/apply.py`) in the timecard view, the approval and detection; an adjustment moves the targeted punch
+  and never adds one.
 - Approval does not require a stored proposal; the server re-validates whatever actions are submitted.
 - The corrected punch is stored as a correction row; detail reads still show raw punches plus the resolved status.
 - Attendance event updates (pushing corrections to an external HCM) are not built.
